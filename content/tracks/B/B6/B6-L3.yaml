@@ -1,0 +1,230 @@
+id: B6-L3
+title: Pinned dependencies and lock files
+
+concept: |
+  `pyproject.toml` states what your project **accepts**: `pandas>=3.0,<4`. A **lock file** records what was **installed**: `pandas 3.0.6`, `numpy 2.4.6`, and every indirect dependency, each with a file hash. You need both.
+
+  - The ranges in `pyproject.toml` say which versions your code supports. Keep them honest: a lower bound you have tested, an upper bound at the next major version when the library breaks things across majors.
+  - The lock file makes every install identical: your laptop, a colleague's, CI and the scheduled job. Commit it.
+
+  With **uv** (examples use uv 0.8):
+
+  ```bash
+  uv lock                  # resolve pyproject.toml ranges, write uv.lock
+  uv sync --locked         # install exactly uv.lock; fail if it is out of date
+  uv lock --upgrade-package pandas   # move one package on purpose
+  ```
+
+  `uv sync --locked` exits with an error when `pyproject.toml` has changed since the lock was written: "The lockfile at `uv.lock` needs to be updated, but `--locked` was provided." Use it in CI, so a dependency change without a new lock fails the build instead of resolving something new on the runner.
+
+  Without uv, `pip-compile --generate-hashes` (pip-tools) writes a fully pinned `requirements.txt` with hashes, and `pip install --require-hashes -r requirements.txt` refuses any file whose hash differs.
+
+  `pip freeze > requirements.txt` is a weaker substitute. It lists what happens to be in your environment, including packages you installed by hand for a one-off test, with no hashes and no record of why each is there.
+
+  Upgrade on purpose: one dependency at a time, on a branch, with tests. Record the reason in the commit message. Never let a fresh install pick up new versions silently.
+
+why_it_matters: |
+  A forecasting job ran on a fresh container every night. `requirements.txt` said `pandas>=2.0`. The night pandas 3.0 was released, the container installed it. The job's text columns switched to the new `str` dtype, a `.str.contains` call behaved differently on missing values, and the job filtered out 6% of rows. Nobody had changed a line of code.
+
+  A committed lock file, installed with `uv sync --locked`, keeps the old pandas until someone upgrades it deliberately, with tests.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      # requirements.txt
+      pandas
+      scikit-learn>=1.0
+      numpy
+      jupyter
+    annotations:
+      - find: "pandas"
+        note: "No bounds: any future major version installs on the next fresh build."
+      - find: "scikit-learn>=1.0"
+        note: "A lower bound only. Every build resolves whatever is newest that day."
+      - find: "jupyter"
+        note: "A development tool mixed into the runtime requirements."
+  strong:
+    code: |
+      # pyproject.toml
+      [project]
+      requires-python = ">=3.12"
+      dependencies = ["pandas>=3.0,<4", "scikit-learn>=1.8,<2", "numpy>=2.4,<3"]
+
+      [dependency-groups]
+      dev = ["pytest>=9", "ruff>=0.13", "jupyterlab>=4"]
+
+      # CI
+      uv sync --locked --group dev
+    annotations:
+      - find: 'dependencies = ["pandas>=3.0,<4", "scikit-learn>=1.8,<2", "numpy>=2.4,<3"]'
+        note: "Honest ranges: tested lower bounds, next major excluded."
+      - find: 'dev = ["pytest>=9", "ruff>=0.13", "jupyterlab>=4"]'
+        note: "Development tools in their own group, not in the runtime install."
+      - find: "uv sync --locked --group dev"
+        note: "Installs exactly uv.lock. A stale lock fails the build."
+  takeaway: |
+    Ranges in pyproject.toml, exact versions and hashes in a committed lock file, and --locked in CI.
+
+exercises:
+  - id: B6-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      What does a lock file add that `pandas>=3.0,<4` in pyproject.toml does not?
+    options:
+      - {id: a, text: "The exact version of every direct and indirect dependency, with file hashes."}
+      - {id: b, text: "A list of packages your code imports."}
+      - {id: c, text: "Faster imports at runtime."}
+      - {id: d, text: "Nothing. They hold the same information."}
+    answer: a
+    reasons:
+      - {id: r1, text: "Every install then gets identical packages, on every machine."}
+      - {id: r2, text: "It lets pip skip dependency resolution entirely on first install."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Neither file is generated from imports. The lock records what the resolver chose."
+      - answer: c
+        feedback: "Locks affect installation, not import speed."
+      - answer: d
+        feedback: "A range accepts many versions. The lock records exactly one of each, including indirect dependencies."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. The benefit is identical installs, not skipped work."
+    hints:
+      - "How many versions does a range accept?"
+      - "What about packages you did not list, such as numpy under pandas?"
+      - "Exact versions plus hashes."
+    explanation: |
+      Ranges declare what you support. The lock pins what you run, down to every indirect dependency.
+
+  - id: B6-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: text
+    prompt: |
+      You add `polars>=1.30` to `dependencies` in pyproject.toml and push without running `uv lock`. CI runs `uv sync --locked`. What happens?
+    code: |
+      $ uv sync --locked
+    answer: "The lockfile at `uv.lock` needs to be updated, but `--locked` was provided. To update the lockfile, run `uv lock`."
+    wrong_answers:
+      - answer: "Installed polars"
+        feedback: "--locked forbids changing the lock. The build fails instead of resolving on the runner."
+    hints:
+      - "Does uv.lock include polars?"
+      - "What does --locked assert?"
+      - "That the lock would stay unchanged."
+    explanation: |
+      `--locked` asserts the lock matches pyproject.toml. It does not, so the command exits with an error and tells you to run `uv lock`.
+
+  - id: B6-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Write a pinned requirements file with hashes using pip-tools, then install it so any mismatched file is refused.
+    template: |
+      pip-compile --[[g1]] requirements.in
+      python -m pip install --[[g2]] -r requirements.txt
+    gaps:
+      g1: {accepted: [generate-hashes]}
+      g2: {accepted: [require-hashes]}
+    wrong_answers:
+      - answer: {g1: upgrade}
+        feedback: "--upgrade moves pins to newer versions. The task asks for hashes."
+    hints:
+      - "pip-compile has a flag that adds sha256 lines."
+      - "pip install has a flag that enforces them."
+      - "`generate-hashes` and `require-hashes`."
+    explanation: |
+      Hashes turn a pin into a guarantee: a different file with the same version number is rejected.
+
+  - id: B6-L3-E4
+    type: order
+    difficulty: 3
+    prompt: |
+      Order the steps to upgrade scikit-learn in a locked project.
+    items:
+      - {id: branch, text: "Create a branch"}
+      - {id: bump, text: "Raise the bound in pyproject.toml if the new version is outside the range"}
+      - {id: lock, text: "uv lock --upgrade-package scikit-learn"}
+      - {id: test, text: "Run the test suite and compare key outputs with the last release"}
+      - {id: commit, text: "Commit pyproject.toml and uv.lock with the reason"}
+    answer: [branch, bump, lock, test, commit]
+    wrong_answers:
+      - answer: [branch, lock, bump, test, commit]
+        feedback: "Locking before raising the bound resolves within the old range, so the upgrade you want is not allowed yet."
+      - answer: [branch, bump, lock, commit, test]
+        feedback: "Test before you commit, so a broken upgrade never lands."
+    hints:
+      - "The lock respects the range in pyproject.toml."
+      - "Tests come before the commit."
+      - "Branch, bound, lock, test, commit."
+    explanation: |
+      Widen the range, re-lock one package, prove it with tests, then commit both files together.
+
+  - id: B6-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Set up dependency management for a nightly scoring job.
+    slots:
+      - id: declare
+        label: "Declared dependencies"
+        options:
+          - {id: ranges, text: "Tested lower bounds, next major excluded, in pyproject.toml"}
+          - {id: none, text: "Package names only, no versions"}
+          - {id: exact, text: "Exact == pins in pyproject.toml, no lock"}
+        answer: ranges
+      - id: lock
+        label: "Exact versions"
+        options:
+          - {id: lockfile, text: "A committed lock file with hashes"}
+          - {id: freeze, text: "pip freeze from a developer's laptop"}
+        answer: lockfile
+      - id: install
+        label: "Install in CI and the job"
+        options:
+          - {id: locked, text: "uv sync --locked"}
+          - {id: fresh, text: "Resolve fresh on each run"}
+        answer: locked
+    model_answer: |
+      - Ranges in pyproject.toml say what the code supports.
+      - The committed lock pins every package with hashes.
+      - uv sync --locked installs exactly that, and fails on a stale lock.
+    wrong_answers:
+      - answer: {declare: none}
+        feedback: "No bounds means any future major version is acceptable, which is rarely true."
+      - answer: {declare: exact}
+        feedback: "Exact pins in pyproject.toml miss indirect dependencies and block security fixes. Pin exactly in the lock."
+      - answer: {lock: freeze}
+        feedback: "freeze captures whatever is on one laptop, one-off installs included, with no hashes."
+      - answer: {install: fresh}
+        feedback: "Fresh resolution picks up new releases silently. That is how a job breaks with no code change."
+    hints:
+      - "Which file says what you support, and which says what you run?"
+      - "Where do indirect dependencies get pinned?"
+      - "What makes CI fail on a stale lock?"
+    explanation: |
+      Ranges for intent, a lock for fact, and a locked install everywhere the code runs.
+
+recap:
+  - front: "pyproject.toml vs lock file"
+    back: "pyproject.toml: ranges you support. Lock: exact versions and hashes of everything installed."
+  - front: "uv sync --locked"
+    back: "Installs exactly uv.lock and fails if pyproject.toml changed without a new lock."
+  - front: "Hashes without uv"
+    back: "pip-compile --generate-hashes, then pip install --require-hashes -r requirements.txt."
+  - front: "Why not pip freeze?"
+    back: "It captures one environment's accidents, with no hashes and no reasons."
+
+claims:
+  - claim: "uv sync --locked fails when uv.lock needs updating, with the message quoted in this lesson."
+    status: verified
+    source: "Run with uv 0.8.17 in this repository's scratch directory."
+  - claim: "pip-compile --generate-hashes and pip install --require-hashes."
+    status: search-only
+    source: "pip-tools and pip documentation (not run here)."
+  - claim: "Series.str.contains returns None for a missing value on pandas 2.3 (object dtype) and False on pandas 3.0 (str dtype)."
+    status: verified
+    source: "Run on pandas 2.3.3 and 3.0.6 in this repository."

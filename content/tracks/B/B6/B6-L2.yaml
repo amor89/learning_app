@@ -1,0 +1,363 @@
+id: B6-L2
+title: Record the data, config and code behind every result
+
+concept: |
+  To rerun a result you need three things exactly as they were: the **data**, the **config** and the **code**. Record all three with every run, in a small **run manifest**.
+
+  ```python
+  manifest = {
+      "run_id": run_id,
+      "started_utc": datetime.now(timezone.utc).isoformat(),
+      "input_sha256": file_sha256(input_path),
+      "config_sha256": config_sha256(config),
+      "git_commit": git_commit,
+      "seed": seed,
+      "packages": {"pandas": version("pandas"), "numpy": version("numpy")},
+  }
+  ```
+
+  **Data.** A file name and a date do not identify content. Suppliers resend files under the same name. A **content hash** does: `hashlib.sha256` over the file bytes changes if any byte changes. `hashlib.file_digest(f, "sha256")` (Python 3.11 and later) reads the file in chunks, so large files do not load into memory. Keep raw inputs immutable: write each delivery to a new path and never overwrite it. For lakehouse tables, record the Delta table version instead (lesson A3-L3).
+
+  **Config.** Hash the config you loaded, not the file on disk, so defaults count. Serialise with `json.dumps(config, sort_keys=True)` first. Without `sort_keys`, the same settings in a different key order give a different hash.
+
+  **Code.** Record the Git commit. Refuse to produce client output from a working tree with uncommitted changes, or record that it was dirty.
+
+  **Environment.** `importlib.metadata.version("pandas")` returns the installed version. The lock file (lesson B6-L3) covers the rest.
+
+  Store the manifest next to the output, or as a row in a run log table. When someone asks "why did this number change?", compare two manifests. The field that differs is where to look.
+
+why_it_matters: |
+  A client queried a brand share that moved 3 points between two versions of the same wave's report. The analysis folder held `wave12.csv`, the config and the notebook, all edited since. Nobody knew whether the supplier had resent the file, a setting had changed, or the code had. Reconstructing the answer took four days.
+
+  With manifests, the two runs differed in one field: `input_sha256`. The supplier had resent the file with 212 late completes.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      df = pd.read_csv("data/wave12.csv")
+      results = analyse(df, CONFIG)
+      results.to_csv(f"out/wave12_{date.today()}.csv")
+    annotations:
+      - find: 'df = pd.read_csv("data/wave12.csv")'
+        note: "The name says nothing about the content. A resent file has the same name."
+      - find: 'results.to_csv(f"out/wave12_{date.today()}.csv")'
+        note: "A date, but no record of the input, config, code or seed behind it."
+  strong:
+    code: |
+      import hashlib
+      import json
+      from pathlib import Path
+
+
+      def file_sha256(path: Path) -> str:
+          """SHA-256 of a file's bytes, read in chunks."""
+          with path.open("rb") as f:
+              return hashlib.file_digest(f, "sha256").hexdigest()
+
+
+      def config_sha256(config: dict[str, object]) -> str:
+          """SHA-256 of a config, independent of key order."""
+          text = json.dumps(config, sort_keys=True)
+          return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    annotations:
+      - find: 'return hashlib.file_digest(f, "sha256").hexdigest()'
+        note: "Content identity: any changed byte changes the hash."
+      - find: "text = json.dumps(config, sort_keys=True)"
+        note: "Stable serialisation: key order does not change the hash."
+  takeaway: |
+    Hash the input and the loaded config, record the commit and the seed, and store the manifest with the output.
+
+exercises:
+  - id: B6-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which value best identifies the exact input file a result came from?
+    options:
+      - {id: a, text: "The file name"}
+      - {id: b, text: "The file's modified time"}
+      - {id: c, text: "The SHA-256 of the file's bytes"}
+      - {id: d, text: "The row count"}
+    answer: c
+    reasons:
+      - {id: r1, text: "Any change to the content changes the hash, and identical content gives the same hash everywhere."}
+      - {id: r2, text: "Hashes are shorter than file names."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Suppliers resend changed files under the same name."
+      - answer: b
+        feedback: "Copying a file changes its modified time without changing content, and edits can keep it."
+      - answer: d
+        feedback: "A file with changed values and the same number of rows has the same count."
+      - answer: c|r2
+        feedback: "Right answer, wrong reason. Length does not matter. Content identity does."
+    hints:
+      - "Which option changes when one value in the file changes?"
+      - "Which stays the same when the file is copied?"
+      - "A content hash."
+    explanation: |
+      A content hash is tied to the bytes, not to the name or the file system.
+
+  - id: B6-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      import json
+
+      print(json.dumps({"min_base": 50, "cap": 5.0}, sort_keys=True))
+    answer: '{"cap": 5.0, "min_base": 50}'
+    wrong_answers:
+      - answer: '{"min_base": 50, "cap": 5.0}'
+        feedback: "sort_keys=True orders keys alphabetically: cap before min_base."
+    hints:
+      - "What does sort_keys do?"
+      - "Which comes first alphabetically?"
+      - "c before m."
+    explanation: |
+      Sorted keys make the text, and so the hash, independent of the order you wrote the config in.
+
+  - id: B6-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Hash a large file without loading it into memory.
+    template: |
+      with path.open("[[g1]]") as f:
+          digest = hashlib.[[g2]](f, "sha256").hexdigest()
+    gaps:
+      g1: {accepted: [rb]}
+      g2: {accepted: [file_digest]}
+    wrong_answers:
+      - answer: {g1: r}
+        feedback: "Text mode decodes and may change line endings. Hash the raw bytes with rb."
+    hints:
+      - "Hashes work on bytes."
+      - "Python 3.11 added a hashlib helper for file objects."
+      - "`rb` and `file_digest`."
+    explanation: |
+      Binary mode gives the exact bytes. `hashlib.file_digest` reads them in chunks.
+
+  - id: B6-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write two functions.
+
+      - `file_sha256(path: Path) -> str` returns the hex SHA-256 of the file's bytes.
+      - `config_sha256(config: dict[str, object]) -> str` returns the hex SHA-256 of `json.dumps(config, sort_keys=True)` encoded as UTF-8, so key order does not matter.
+    starter: |
+      import hashlib
+      import json
+      from pathlib import Path
+
+
+      def file_sha256(path):
+          ...
+
+
+      def config_sha256(config):
+          return hashlib.sha256(str(config).encode()).hexdigest()
+    checker:
+      kind: python
+      setup: |
+        import tempfile
+        from pathlib import Path
+        TMP = Path(tempfile.mkdtemp()) / "a.csv"
+        TMP.write_bytes(b"id,w\n1,2\n")
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: file_sha256
+          typed: true
+          docstring: true
+          message: "Give `file_sha256` type hints and a docstring."
+        - id: config_typed
+          kind: requires_function
+          name: config_sha256
+          typed: true
+          docstring: true
+          message: "Give `config_sha256` type hints and a docstring."
+      tests:
+        - id: file_hash
+          code: |
+            assert file_sha256(TMP) == "306e21a17c61c96dc9f16360ac438c62b539bd9cf74eae30feedbc19917fa347"
+          message: "file_sha256 must hash the file's raw bytes with SHA-256."
+        - id: key_order
+          code: |
+            assert config_sha256({"min_base": 50, "cap": 5.0}) == config_sha256({"cap": 5.0, "min_base": 50})
+          message: "Key order must not change the config hash. Use json.dumps(..., sort_keys=True)."
+        - id: config_value
+          code: |
+            import hashlib, json
+            expected = hashlib.sha256(json.dumps({"cap": 5.0}, sort_keys=True).encode("utf-8")).hexdigest()
+            assert config_sha256({"cap": 5.0}) == expected
+          message: "Hash json.dumps(config, sort_keys=True) encoded as UTF-8."
+    solution: |
+      import hashlib
+      import json
+      from pathlib import Path
+
+
+      def file_sha256(path: Path) -> str:
+          """SHA-256 of a file's bytes, read in chunks.
+
+          Args:
+              path: File to hash.
+
+          Returns:
+              The hex digest.
+          """
+          with path.open("rb") as f:
+              return hashlib.file_digest(f, "sha256").hexdigest()
+
+
+      def config_sha256(config: dict[str, object]) -> str:
+          """SHA-256 of a config, independent of key order.
+
+          Args:
+              config: A JSON-serialisable mapping.
+
+          Returns:
+              The hex digest of the sorted JSON text.
+          """
+          text = json.dumps(config, sort_keys=True)
+          return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    seeded_bugs:
+      - |
+        import hashlib
+        import json
+        from pathlib import Path
+
+
+        def file_sha256(path: Path) -> str:
+            """Hashes the name, not the content."""
+            return hashlib.sha256(str(path).encode("utf-8")).hexdigest()
+
+
+        def config_sha256(config: dict[str, object]) -> str:
+            """Sorted."""
+            return hashlib.sha256(json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest()
+      - |
+        import hashlib
+        import json
+        from pathlib import Path
+
+
+        def file_sha256(path: Path) -> str:
+            """Content."""
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+        def config_sha256(config: dict[str, object]) -> str:
+            """Unsorted."""
+            return hashlib.sha256(json.dumps(config).encode("utf-8")).hexdigest()
+    wrong_answers:
+      - answer: |
+          import hashlib
+          import json
+          from pathlib import Path
+
+
+          def file_sha256(path: Path) -> str:
+              """Content."""
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+          def config_sha256(config: dict[str, object]) -> str:
+              """Unsorted."""
+              return hashlib.sha256(json.dumps(config).encode("utf-8")).hexdigest()
+        triggers: key_order
+      - answer: |
+          import hashlib
+          import json
+          from pathlib import Path
+
+
+          def file_sha256(path: Path) -> str:
+              """Hashes the name, not the content."""
+              return hashlib.sha256(str(path).encode("utf-8")).hexdigest()
+
+
+          def config_sha256(config: dict[str, object]) -> str:
+              """Sorted."""
+              return hashlib.sha256(json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest()
+        triggers: file_hash
+    hints:
+      - "Open the file in binary mode."
+      - "`hashlib.file_digest(f, \"sha256\")` or `hashlib.sha256(path.read_bytes())`."
+      - "For the config, `json.dumps(config, sort_keys=True).encode(\"utf-8\")`."
+    explanation: |
+      Hash content, not names, and serialise configs in a fixed key order before hashing.
+
+  - id: B6-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Choose what the run manifest records for a monthly client report built from a supplier CSV.
+    slots:
+      - id: data
+        label: "Input data"
+        options:
+          - {id: hash, text: "SHA-256 of the input file, with the raw file kept unchanged"}
+          - {id: name, text: "The input file name"}
+        answer: hash
+      - id: config
+        label: "Settings"
+        options:
+          - {id: loaded_hash, text: "Hash of the loaded config, defaults included, sorted keys"}
+          - {id: file_path, text: "Path to the config file"}
+        answer: loaded_hash
+      - id: code
+        label: "Code"
+        options:
+          - {id: commit, text: "Git commit, and whether the tree was dirty"}
+          - {id: notebook, text: "Name of the notebook"}
+        answer: commit
+      - id: store
+        label: "Where the manifest lives"
+        options:
+          - {id: with_output, text: "Next to the output, and as a row in the run log"}
+          - {id: chat, text: "Posted in the team channel"}
+        answer: with_output
+    model_answer: |
+      - Content hash of an immutable input.
+      - Hash of the loaded config, so defaults and key order are handled.
+      - Git commit plus a dirty flag.
+      - Stored with the output and in the run log, where comparisons are easy.
+    wrong_answers:
+      - answer: {data: name}
+        feedback: "A resent file keeps its name. Only a content hash shows the data changed."
+      - answer: {config: file_path}
+        feedback: "The file at that path changes later, and defaults are not in it."
+      - answer: {code: notebook}
+        feedback: "The notebook changes under the same name. The commit pins the code."
+      - answer: {store: chat}
+        feedback: "Chat is hard to search and compare. Keep manifests with the output."
+    hints:
+      - "What changes without changing its name?"
+      - "What would you compare between two runs?"
+      - "Store it where the next analyst will look."
+    explanation: |
+      Record identities, not names: content hashes and commits. Keep them where a diff between runs is one query away.
+
+recap:
+  - front: "Three things to record for a rerun"
+    back: "Data (content hash or table version), config (hash of the loaded config), code (Git commit)."
+  - front: "Hash a large file"
+    back: "with path.open(\"rb\") as f: hashlib.file_digest(f, \"sha256\") (Python 3.11+)."
+  - front: "Stable config hash"
+    back: "sha256 of json.dumps(config, sort_keys=True).encode(\"utf-8\")."
+  - front: "Raw inputs"
+    back: "Immutable: each delivery at a new path, never overwritten."
+
+claims:
+  - claim: "hashlib.file_digest was added in Python 3.11."
+    status: verified
+    source: "Python hashlib documentation; run on Python 3.11 in this repository."

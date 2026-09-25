@@ -1,0 +1,330 @@
+id: B4-L2
+title: DuckDB, SQL over files and DataFrames
+
+concept: |
+  **DuckDB** is an analytical SQL database that runs inside your Python process. There is no server to install. It reads Parquet, CSV and JSON files directly, and it queries pandas and Polars DataFrames that are in scope.
+
+  ```python
+  import duckdb
+
+  con = duckdb.connect()   # in-memory database
+  rel = con.sql("""
+      SELECT wave, brand, sum(weight) AS total
+      FROM read_parquet('extracts/*.parquet')
+      GROUP BY wave, brand
+  """)
+  df = rel.df()    # pandas; .pl() for Polars, .fetchall() for tuples
+  ```
+
+  - A glob such as `'extracts/*.parquet'` reads many files as one table. Filters and column lists are pushed down to the reader, as in Polars lazy mode.
+  - `FROM responses` finds a DataFrame variable named `responses` in the calling scope. `con.register("responses", df)` names it explicitly, which is clearer inside functions.
+  - Results come back as a relation. Nothing is materialised until you call `.df()`, `.pl()`, `.fetchall()` or `.fetchone()`.
+
+  **Pass values as parameters, never with f-strings.**
+
+  ```python
+  con.execute("SELECT count(*) FROM responses WHERE wave = ?", [wave])
+  ```
+
+  With `f"... WHERE wave = '{wave}'"`, a value that holds a quote changes the query. In this course's own test, the input `w1' or '1'='1` turned a filter for one wave into a count of every row. A `?` placeholder (or `$name` with a dict) sends the value as data, so quotes cannot change the SQL. File paths and table names cannot be parameters. Check those against a list of allowed values.
+
+  Create the connection at the edge of your program and pass `con` to functions. The module-level `duckdb.sql()` uses one shared default connection, a global that tests cannot replace.
+
+why_it_matters: |
+  A dashboard helper built its filter with `f"WHERE region = '{region}'"`. The region list came from a client file. One entry was `Hawke's Bay`. The apostrophe broke the SQL, and the job failed at 06:00 before the client's morning meeting. A second entry with a crafted value could have read other clients' rows.
+
+  `con.execute("... WHERE region = ?", [region])` handles `Hawke's Bay` as a plain string.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import duckdb
+
+
+      def wave_total(wave):
+          q = f"SELECT sum(weight) FROM read_parquet('data/*.parquet') WHERE wave = '{wave}'"
+          return duckdb.sql(q).fetchone()[0]
+    annotations:
+      - find: "q = f\"SELECT sum(weight) FROM read_parquet('data/*.parquet') WHERE wave = '{wave}'\""
+        note: "Value pasted into SQL: a quote in wave breaks or rewrites the query."
+      - find: "return duckdb.sql(q).fetchone()[0]"
+        note: "Shared default connection, and None when no rows match."
+  strong:
+    code: |
+      import duckdb
+
+      TOTAL_SQL = "SELECT sum(weight) FROM responses WHERE wave = ?"
+
+
+      def wave_total(con: duckdb.DuckDBPyConnection, wave: str) -> float:
+          """Total weight for one wave, 0.0 when the wave has no rows."""
+          row = con.execute(TOTAL_SQL, [wave]).fetchone()
+          if row is None or row[0] is None:
+              return 0.0
+          return float(row[0])
+    annotations:
+      - find: 'TOTAL_SQL = "SELECT sum(weight) FROM responses WHERE wave = ?"'
+        note: "The value goes in as a parameter. The SQL text never changes."
+      - find: "def wave_total(con: duckdb.DuckDBPyConnection, wave: str) -> float:"
+        note: "The connection is passed in, so a test gives it a small in-memory table."
+      - find: "if row is None or row[0] is None:"
+        note: "SQL sum over no rows is NULL. Test with `is None`."
+  takeaway: |
+    One connection passed in, parameters for values, and a None check on aggregates.
+
+exercises:
+  - id: B4-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which call safely filters by a `region` value read from a client file?
+    options:
+      - {id: a, text: "`con.execute(f\"... WHERE region = '{region}'\")`"}
+      - {id: b, text: "`con.execute(\"... WHERE region = ?\", [region])`"}
+      - {id: c, text: "`con.execute(\"... WHERE region = '\" + region + \"'\")`"}
+      - {id: d, text: "`con.execute(\"... WHERE region = '%s'\" % region)`"}
+    answer: b
+    reasons:
+      - {id: r1, text: "The value is sent as data, separate from the SQL text."}
+      - {id: r2, text: "It is shorter."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "An f-string pastes the value into the SQL. A quote in the value changes the query."
+      - answer: c
+        feedback: "Concatenation pastes the value into the SQL, the same risk as an f-string."
+      - answer: d
+        feedback: "% formatting is string pasting too, not a parameter."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Safety comes from sending the value separately."
+    hints:
+      - "Which options build a new SQL string from the value?"
+      - "Which one keeps the SQL fixed?"
+      - "The placeholder."
+    explanation: |
+      A `?` placeholder keeps the SQL text fixed and passes the value as data.
+
+  - id: B4-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (DuckDB 1.5)
+    code: |
+      import duckdb
+
+      con = duckdb.connect()
+      con.execute("CREATE TABLE t AS SELECT * FROM (VALUES ('w1', 1.0), ('w2', 2.0)) v(wave, weight)")
+      print(con.execute("SELECT sum(weight) FROM t WHERE wave = 'w9'").fetchone())
+    answer: "(None,)"
+    wrong_answers:
+      - answer: "(0.0,)"
+        feedback: "SQL sum over zero rows is NULL, which DuckDB returns as None."
+      - answer: "None"
+        feedback: "An aggregate without GROUP BY always returns one row. fetchone() gives a tuple holding None."
+    hints:
+      - "How many rows does an aggregate without GROUP BY return?"
+      - "What is SQL sum over no rows?"
+      - "NULL, returned as None inside a tuple."
+    explanation: |
+      One row, holding NULL. Check `row[0] is None` before using the value.
+
+  - id: B4-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Count rows for one wave from all Parquet files in `extracts/`, with the wave as a parameter.
+    template: |
+      con.execute(
+          "SELECT count(*) FROM [[g1]]('extracts/*.parquet') WHERE wave = [[g2]]",
+          [wave],
+      ).fetchone()
+    gaps:
+      g1: {accepted: [read_parquet]}
+      g2: {accepted: ["?", "$1"]}
+    wrong_answers:
+      - answer: {g2: "'{wave}'"}
+        feedback: "That is f-string pasting, and the string is not even an f-string here. Use a ? placeholder."
+      - answer: {g1: read_csv}
+        feedback: "The files are Parquet. read_csv would fail to parse them."
+    hints:
+      - "The DuckDB table function for Parquet files."
+      - "The positional placeholder."
+      - "`read_parquet` and `?`."
+    explanation: |
+      `read_parquet` with a glob reads all files as one table. `?` binds the first value in the list.
+
+  - id: B4-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [duckdb]
+    prompt: |
+      Write `region_total(con, region)`. It returns the sum of `weight` in table `responses` for the given `region`, as a `float`. Return `0.0` when no rows match. Pass `region` as a parameter. The checker runs it with regions such as `Hawke's Bay`.
+    starter: |
+      import duckdb
+
+
+      def region_total(con, region):
+          return con.execute(f"SELECT sum(weight) FROM responses WHERE region = '{region}'").fetchone()[0]
+    checker:
+      kind: python
+      setup: |
+        import duckdb
+        CON = duckdb.connect()
+        CON.execute(
+            "CREATE TABLE responses AS SELECT * FROM (VALUES "
+            "('Hawke''s Bay', 1.5), ('Otago', 2.0), ('Otago', 0.5)) v(region, weight)"
+        )
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: region_total
+          typed: true
+          docstring: true
+          message: "Give `region_total` type hints and a docstring."
+        - id: no_fstring_sql
+          kind: forbids_pattern
+          pattern: "f[\"'][^\"']*(SELECT|WHERE)|\\.format\\(|%\\s*\\(?region"
+          message: "Do not paste values into SQL. Use a ? placeholder."
+      tests:
+        - id: plain
+          code: |
+            assert region_total(CON, "Otago") == 2.5
+          message: "Sum the weights for the region."
+        - id: quote
+          code: |
+            assert region_total(CON, "Hawke's Bay") == 1.5
+          message: "A region with an apostrophe must work. Pass it as a parameter."
+        - id: none_match
+          code: |
+            result = region_total(CON, "Nowhere")
+            assert result == 0.0 and isinstance(result, float)
+          message: "No matching rows must give 0.0, not None."
+        - id: injection
+          code: |
+            assert region_total(CON, "x' OR '1'='1") == 0.0
+          message: "A crafted value must match nothing. Pass it as a parameter."
+    solution: |
+      import duckdb
+
+      REGION_TOTAL_SQL = "SELECT sum(weight) FROM responses WHERE region = ?"
+
+
+      def region_total(con: duckdb.DuckDBPyConnection, region: str) -> float:
+          """Total weight for one region.
+
+          Args:
+              con: Connection holding a responses table.
+              region: Region name, passed as a query parameter.
+
+          Returns:
+              The weight total, or 0.0 when no rows match.
+          """
+          row = con.execute(REGION_TOTAL_SQL, [region]).fetchone()
+          if row is None or row[0] is None:
+              return 0.0
+          return float(row[0])
+    seeded_bugs:
+      - |
+        import duckdb
+
+
+        def region_total(con: duckdb.DuckDBPyConnection, region: str) -> float:
+            """Pasted value."""
+            row = con.execute("SELECT sum(weight) FROM responses WHERE region = '" + region + "'").fetchone()
+            if row is None or row[0] is None:
+                return 0.0
+            return float(row[0])
+      - |
+        import duckdb
+
+
+        def region_total(con: duckdb.DuckDBPyConnection, region: str) -> float:
+            """No None check."""
+            row = con.execute("SELECT sum(weight) FROM responses WHERE region = ?", [region]).fetchone()
+            return row[0]
+    wrong_answers:
+      - answer: |
+          import duckdb
+
+
+          def region_total(con: duckdb.DuckDBPyConnection, region: str) -> float:
+              """No None check."""
+              row = con.execute("SELECT sum(weight) FROM responses WHERE region = ?", [region]).fetchone()
+              return row[0]
+        triggers: none_match
+    hints:
+      - "Replace the f-string with a ? placeholder and a list of values."
+      - "What does sum return when no rows match?"
+      - "Return 0.0 when `row[0] is None`, else `float(row[0])`."
+    explanation: |
+      The placeholder keeps the SQL fixed, so quotes in the value are just characters. The None check turns SQL's NULL into the 0.0 the caller expects.
+
+  - id: B4-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A reporting script lets users pick a table to summarise and a wave to filter on. Choose how each input reaches DuckDB.
+    slots:
+      - id: wave
+        label: "The wave value"
+        options:
+          - {id: param, text: "A ? parameter"}
+          - {id: fstring, text: "An f-string inside the SQL"}
+        answer: param
+      - id: table
+        label: "The table name"
+        options:
+          - {id: allowlist, text: "Checked against a fixed set of allowed names, then inserted"}
+          - {id: param, text: "A ? parameter"}
+          - {id: raw, text: "Inserted as typed by the user"}
+        answer: allowlist
+      - id: con
+        label: "The connection"
+        options:
+          - {id: passed, text: "Created at the edge and passed to each function"}
+          - {id: default, text: "The module-level duckdb.sql() default connection"}
+        answer: passed
+    model_answer: |
+      - Values such as the wave go in as parameters.
+      - Identifiers such as table names cannot be parameters. Check them against an allowlist before building the SQL.
+      - Pass one connection in, so tests supply an in-memory database.
+    wrong_answers:
+      - answer: {wave: fstring}
+        feedback: "A quote in the wave changes the SQL. Use a parameter."
+      - answer: {table: param}
+        feedback: "Placeholders bind values, not identifiers. `FROM ?` is not valid SQL for a table name."
+      - answer: {table: raw}
+        feedback: "Any text the user types becomes SQL. Check it against the allowed tables first."
+      - answer: {con: default}
+        feedback: "The default connection is a shared global. Tests cannot swap in their own."
+    hints:
+      - "Can a placeholder stand for a table name?"
+      - "What stops arbitrary text becoming SQL?"
+      - "Globals make testing hard (lesson B2-L1)."
+    explanation: |
+      Parameters for values, an allowlist for identifiers, and a connection passed in.
+
+recap:
+  - front: "Query many Parquet files in DuckDB"
+    back: "FROM read_parquet('dir/*.parquet')."
+  - front: "Pass a value into DuckDB SQL"
+    back: "con.execute(\"... WHERE x = ?\", [value]). Never an f-string."
+  - front: "Table names from user input"
+    back: "Placeholders cannot bind identifiers. Check the name against an allowlist."
+  - front: "SQL sum over no rows"
+    back: "NULL, returned as None. Check with is None."
+
+claims:
+  - claim: "DuckDB binds ? and $name parameters with con.execute(sql, params)."
+    status: verified
+    source: "DuckDB Python API documentation; run on DuckDB 1.5.1 and 1.5.5 in this repository."
+  - claim: "DuckDB queries pandas DataFrames in the calling scope by variable name and reads Parquet globs with read_parquet."
+    status: verified
+    source: "DuckDB Python API documentation; run on DuckDB 1.5.1 and 1.5.5 in this repository."
+  - claim: "Pasting w1' or '1'='1 into an f-string filter returned every row; the same value as a parameter matched none."
+    status: verified
+    source: "Run on DuckDB 1.5.1 in this repository."

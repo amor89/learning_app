@@ -1,0 +1,527 @@
+id: B5-L3
+title: Validate at the boundaries, with severity
+
+concept: |
+  Validation belongs at **boundaries**, where data crosses from one owner to another:
+
+  - **On the way in.** After reading a file, API response or config. Check schema, keys and value ranges (lessons B5-L1 and B5-L2).
+  - **On the way out.** Before writing a table or sending a report. Check the promises you make to the next consumer: grain, row counts, totals, shares that sum to 1.
+
+  Checks in the middle of a pure transformation add noise. A function that receives validated input and is unit tested does not need to re-check it.
+
+  Not every failed check should stop a run. Give each check a **severity**:
+
+  - **CRITICAL** stops the run. Wrong grain, missing required column, empty input, weights that do not sum to the sample size.
+  - **WARN** records the problem and continues. Missing share above its usual level, a subgroup below its reporting base.
+
+  Record results as **structured data**, not prose, so a dashboard or alert filters them:
+
+  ```python
+  Severity = Literal["CRITICAL", "WARN"]
+
+
+  @dataclass(frozen=True)
+  class QaResult:
+      check: str
+      severity: Severity
+      passed: bool
+      observed: float | None
+  ```
+
+  Run all checks, collect the results, log them, **then** raise if any CRITICAL check failed. The log keeps every result, even on the run that stops.
+
+  Two coding rules make checks trustworthy:
+
+  - **Guard every division.** An empty input has no missing share. Return `None`, not a `ZeroDivisionError`.
+  - **Test `None` with `is None`.** `if share:` treats a real share of `0.0` like a missing one, and the check silently never runs.
+
+why_it_matters: |
+  A tracker QA step printed "WARNING: low base in 3 cells" to the notebook output and carried on. Nobody reads notebook output for scheduled jobs. The same step never checked for an empty input. The week a supplier delivered an empty file, the job computed shares from zero rows, divided by zero, and wrote `NaN` to every cell of the client dashboard.
+
+  Structured results in a table get alerts. A CRITICAL `min_rows` check stops the run before the empty file reaches the dashboard.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def qa(df):
+          share = df["weight"].isna().sum() / len(df)
+          if share:
+              if share > 0.1:
+                  print("WARNING: many missing weights")
+          if len(df) == 0:
+              print("empty file")
+    annotations:
+      - find: 'share = df["weight"].isna().sum() / len(df)'
+        note: "Divides by zero on an empty file, before the emptiness check runs."
+      - find: "if share:"
+        note: "Truthiness: a share of 0.0 skips the check."
+      - find: 'print("WARNING: many missing weights")'
+        note: "Prose on stdout. Nothing stores or alerts on it."
+      - find: 'print("empty file")'
+        note: "An empty file is critical, but the run carries on."
+  strong:
+    code: |
+      from dataclasses import dataclass
+      from typing import Literal
+
+      import pandas as pd
+
+      Severity = Literal["CRITICAL", "WARN"]
+
+
+      @dataclass(frozen=True)
+      class QaResult:
+          """One check outcome, stored in the run log."""
+
+          check: str
+          severity: Severity
+          passed: bool
+          observed: float | None
+
+
+      def run_checks(df: pd.DataFrame, min_rows: int, max_missing: float) -> list[QaResult]:
+          """Evaluate every input check. Never raises."""
+          n = len(df)
+          share = None if n == 0 else float(df["weight"].isna().sum()) / n
+          return [
+              QaResult("min_rows", "CRITICAL", n >= min_rows, float(n)),
+              QaResult("missing_weight", "WARN", share is not None and share <= max_missing, share),
+          ]
+
+
+      def enforce(results: list[QaResult]) -> None:
+          """Raise when any CRITICAL check failed."""
+          failed = [r.check for r in results if r.severity == "CRITICAL" and not r.passed]
+          if failed:
+              raise RuntimeError(f"critical checks failed: {failed}")
+    annotations:
+      - find: "Severity = Literal[\"CRITICAL\", \"WARN\"]"
+        note: "A closed set of severities, checked by mypy."
+      - find: 'share = None if n == 0 else float(df["weight"].isna().sum()) / n'
+        note: "Guarded division: no share on an empty frame."
+      - find: 'QaResult("missing_weight", "WARN", share is not None and share <= max_missing, share),'
+        note: "is None, so a real 0.0 passes the check instead of skipping it."
+      - find: 'raise RuntimeError(f"critical checks failed: {failed}")'
+        note: "Raised after all checks ran, so the log has the full picture."
+  takeaway: |
+    Check at boundaries. Collect structured results. Log them all, then stop on CRITICAL.
+
+exercises:
+  - id: B5-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A pipeline reads a supplier file, runs five pure transforms, then writes a client table. Where do validation checks belong?
+    options:
+      - {id: a, text: "After every transform."}
+      - {id: b, text: "After reading, and before writing."}
+      - {id: c, text: "Only before writing."}
+      - {id: d, text: "Nowhere, if the transforms have unit tests."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Those are the boundaries where data changes owner. Tests cover the pure middle."}
+      - {id: r2, text: "Fewer checks run faster."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Checks inside a tested pure core add noise. The core's inputs are already validated."
+      - answer: c
+        feedback: "A bad input would pass through every transform first, and the error would name the wrong step."
+      - answer: d
+        feedback: "Unit tests check your code on test data. They say nothing about this week's supplier file."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The point is ownership boundaries, not speed."
+    hints:
+      - "Where does data you do not control arrive?"
+      - "Where do you make promises to someone else?"
+      - "In and out."
+    explanation: |
+      Validate what you receive and what you deliver. Test the logic in between.
+
+  - id: B5-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      No weights are missing this week. What does this print?
+    code: |
+      def missing_check(share: float | None, limit: float) -> str:
+          if share:
+              return "pass" if share <= limit else "fail"
+          return "no data"
+
+
+      print(missing_check(0.0, 0.1))
+    answer: "no data"
+    wrong_answers:
+      - answer: "pass"
+        feedback: "0.0 is falsy, so `if share:` skips the comparison. Use `if share is not None:`."
+    hints:
+      - "Is 0.0 truthy?"
+      - "Which branch runs?"
+      - "The fallback."
+    explanation: |
+      `0.0` is falsy, so the best possible result is reported as missing data. Test with `is not None`.
+
+  - id: B5-L3-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the steps of one pipeline run.
+    items:
+      - {id: read, text: "Read the supplier file"}
+      - {id: in_checks, text: "Run input checks and collect results"}
+      - {id: enforce, text: "Log all results, then raise if any CRITICAL failed"}
+      - {id: transform, text: "Run the pure transforms"}
+      - {id: out_checks, text: "Run output checks on the result"}
+      - {id: write, text: "Write the client table"}
+    answer: [read, in_checks, enforce, transform, out_checks, write]
+    wrong_answers:
+      - answer: [read, transform, in_checks, enforce, out_checks, write]
+        feedback: "Input checks must run before the transforms, so bad input never reaches them."
+      - answer: [read, in_checks, enforce, transform, write, out_checks]
+        feedback: "Output checks after writing are too late. The client already has the table."
+    hints:
+      - "Check input before using it."
+      - "Check output before delivering it."
+      - "Log before raising."
+    explanation: |
+      Read, check, enforce, transform, check, write. Each boundary gets its checks before the data moves on.
+
+  - id: B5-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Write `run_checks(df, min_rows, max_missing) -> list[QaResult]` and `enforce(results) -> None`. `QaResult` and `Severity` are given.
+
+      - `min_rows`, CRITICAL: passes when the row count is at least `min_rows`. `observed` is the row count as a float.
+      - `missing_weight`, WARN: the share of null `weight` values. Passes when the share is at most `max_missing`. On an empty frame the share is `None` and the check fails. `observed` is the share.
+      - `run_checks` never raises. `enforce` raises `RuntimeError` naming each failed CRITICAL check, and ignores WARN failures.
+    starter: |
+      from dataclasses import dataclass
+      from typing import Literal
+
+      import pandas as pd
+
+      Severity = Literal["CRITICAL", "WARN"]
+
+
+      @dataclass(frozen=True)
+      class QaResult:
+          """One check outcome."""
+
+          check: str
+          severity: Severity
+          passed: bool
+          observed: float | None
+
+
+      def run_checks(df, min_rows, max_missing):
+          ...
+
+
+      def enforce(results):
+          ...
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: run_checks
+          typed: true
+          docstring: true
+          message: "Give `run_checks` type hints and a docstring."
+        - id: enforce_typed
+          kind: requires_function
+          name: enforce
+          typed: true
+          docstring: true
+          message: "Give `enforce` type hints and a docstring."
+        - id: no_truthiness
+          kind: forbids_bare_truthiness
+          names: [share, n]
+          message: "Do not test a number for truthiness. 0.0 is a real value. Use `is None`."
+      tests:
+        - id: values
+          code: |
+            res = {r.check: r for r in run_checks(pd.DataFrame({"weight": [1.0, None, 2.0, 3.0]}), 2, 0.3)}
+            assert res["min_rows"].passed and res["min_rows"].observed == 4.0
+            assert res["missing_weight"].passed and res["missing_weight"].observed == 0.25
+            assert res["min_rows"].severity == "CRITICAL" and res["missing_weight"].severity == "WARN"
+          message: "Check names, severities, observed values and pass flags must match the brief."
+        - id: zero_share
+          code: |
+            res = {r.check: r for r in run_checks(pd.DataFrame({"weight": [1.0, 2.0]}), 1, 0.1)}
+            assert res["missing_weight"].passed and res["missing_weight"].observed == 0.0
+          message: "A missing share of 0.0 must pass, with observed 0.0."
+        - id: empty
+          code: |
+            res = {r.check: r for r in run_checks(pd.DataFrame({"weight": pd.Series([], dtype=float)}), 1, 0.1)}
+            assert not res["min_rows"].passed
+            assert res["missing_weight"].observed is None and not res["missing_weight"].passed
+          message: "An empty frame must fail min_rows, and give a None share without ZeroDivisionError."
+        - id: enforce_critical
+          code: |
+            try:
+                enforce(run_checks(pd.DataFrame({"weight": pd.Series([], dtype=float)}), 1, 0.1))
+            except RuntimeError as err:
+                assert "min_rows" in str(err)
+            else:
+                raise AssertionError("no RuntimeError")
+          message: "enforce must raise RuntimeError naming the failed CRITICAL check."
+        - id: enforce_warn
+          code: |
+            enforce(run_checks(pd.DataFrame({"weight": [None, None, 1.0]}), 1, 0.1))
+          message: "A WARN failure alone must not raise."
+    solution: |
+      from dataclasses import dataclass
+      from typing import Literal
+
+      import pandas as pd
+
+      Severity = Literal["CRITICAL", "WARN"]
+
+
+      @dataclass(frozen=True)
+      class QaResult:
+          """One check outcome."""
+
+          check: str
+          severity: Severity
+          passed: bool
+          observed: float | None
+
+
+      def run_checks(df: pd.DataFrame, min_rows: int, max_missing: float) -> list[QaResult]:
+          """Evaluate input checks. Never raises.
+
+          Args:
+              df: Input with a weight column.
+              min_rows: Minimum acceptable row count.
+              max_missing: Largest acceptable share of null weights.
+
+          Returns:
+              One QaResult per check.
+          """
+          n = len(df)
+          share = None if n == 0 else float(df["weight"].isna().sum()) / n
+          return [
+              QaResult("min_rows", "CRITICAL", n >= min_rows, float(n)),
+              QaResult("missing_weight", "WARN", share is not None and share <= max_missing, share),
+          ]
+
+
+      def enforce(results: list[QaResult]) -> None:
+          """Stop the run when any CRITICAL check failed.
+
+          Raises:
+              RuntimeError: Naming each failed CRITICAL check.
+          """
+          failed = [r.check for r in results if r.severity == "CRITICAL" and not r.passed]
+          if failed:
+              raise RuntimeError(f"critical checks failed: {failed}")
+    seeded_bugs:
+      - |
+        from dataclasses import dataclass
+        from typing import Literal
+
+        import pandas as pd
+
+        Severity = Literal["CRITICAL", "WARN"]
+
+
+        @dataclass(frozen=True)
+        class QaResult:
+            """One check outcome."""
+
+            check: str
+            severity: Severity
+            passed: bool
+            observed: float | None
+
+
+        def run_checks(df: pd.DataFrame, min_rows: int, max_missing: float) -> list[QaResult]:
+            """Unguarded division."""
+            n = len(df)
+            share = float(df["weight"].isna().sum()) / n
+            return [
+                QaResult("min_rows", "CRITICAL", n >= min_rows, float(n)),
+                QaResult("missing_weight", "WARN", share <= max_missing, share),
+            ]
+
+
+        def enforce(results: list[QaResult]) -> None:
+            """Stop on critical."""
+            failed = [r.check for r in results if r.severity == "CRITICAL" and not r.passed]
+            if failed:
+                raise RuntimeError(f"critical checks failed: {failed}")
+      - |
+        from dataclasses import dataclass
+        from typing import Literal
+
+        import pandas as pd
+
+        Severity = Literal["CRITICAL", "WARN"]
+
+
+        @dataclass(frozen=True)
+        class QaResult:
+            """One check outcome."""
+
+            check: str
+            severity: Severity
+            passed: bool
+            observed: float | None
+
+
+        def run_checks(df: pd.DataFrame, min_rows: int, max_missing: float) -> list[QaResult]:
+            """Guarded."""
+            n = len(df)
+            share = None if n == 0 else float(df["weight"].isna().sum()) / n
+            return [
+                QaResult("min_rows", "CRITICAL", n >= min_rows, float(n)),
+                QaResult("missing_weight", "WARN", share is not None and share <= max_missing, share),
+            ]
+
+
+        def enforce(results: list[QaResult]) -> None:
+            """Raises on any failure, WARN included."""
+            failed = [r.check for r in results if not r.passed]
+            if failed:
+                raise RuntimeError(f"checks failed: {failed}")
+    wrong_answers:
+      - answer: |
+          from dataclasses import dataclass
+          from typing import Literal
+
+          import pandas as pd
+
+          Severity = Literal["CRITICAL", "WARN"]
+
+
+          @dataclass(frozen=True)
+          class QaResult:
+              """One check outcome."""
+
+              check: str
+              severity: Severity
+              passed: bool
+              observed: float | None
+
+
+          def run_checks(df: pd.DataFrame, min_rows: int, max_missing: float) -> list[QaResult]:
+              """Unguarded division."""
+              n = len(df)
+              share = float(df["weight"].isna().sum()) / n
+              return [
+                  QaResult("min_rows", "CRITICAL", n >= min_rows, float(n)),
+                  QaResult("missing_weight", "WARN", share <= max_missing, share),
+              ]
+
+
+          def enforce(results: list[QaResult]) -> None:
+              """Stop on critical."""
+              failed = [r.check for r in results if r.severity == "CRITICAL" and not r.passed]
+              if failed:
+                  raise RuntimeError(f"critical checks failed: {failed}")
+        triggers: empty
+      - answer: |
+          from dataclasses import dataclass
+          from typing import Literal
+
+          import pandas as pd
+
+          Severity = Literal["CRITICAL", "WARN"]
+
+
+          @dataclass(frozen=True)
+          class QaResult:
+              """One check outcome."""
+
+              check: str
+              severity: Severity
+              passed: bool
+              observed: float | None
+
+
+          def run_checks(df: pd.DataFrame, min_rows: int, max_missing: float) -> list[QaResult]:
+              """Guarded."""
+              n = len(df)
+              share = None if n == 0 else float(df["weight"].isna().sum()) / n
+              return [
+                  QaResult("min_rows", "CRITICAL", n >= min_rows, float(n)),
+                  QaResult("missing_weight", "WARN", share is not None and share <= max_missing, share),
+              ]
+
+
+          def enforce(results: list[QaResult]) -> None:
+              """Raises on any failure, WARN included."""
+              failed = [r.check for r in results if not r.passed]
+              if failed:
+                  raise RuntimeError(f"checks failed: {failed}")
+        triggers: enforce_warn
+    hints:
+      - "Compute n once. The share is None when n is 0."
+      - "Build one QaResult per check. Use `share is not None and share <= max_missing`."
+      - "enforce filters on severity == \"CRITICAL\" and not passed."
+    explanation: |
+      `run_checks` measures and never raises, so every result reaches the log. `enforce` decides, and only CRITICAL failures stop the run.
+
+  - id: B5-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Assign a severity to each check on a weekly brand-tracking run.
+    slots:
+      - id: grain
+        label: "respondent_id is unique in the input"
+        options: &sev
+          - {id: critical, text: "CRITICAL"}
+          - {id: warn, text: "WARN"}
+        answer: critical
+      - id: base
+        label: "A brand's subgroup base is below 50"
+        options: *sev
+        answer: warn
+      - id: weights_sum
+        label: "Weights sum to the sample size within 0.1%"
+        options: *sev
+        answer: critical
+      - id: missing
+        label: "Share of missing age is above last month's level"
+        options: *sev
+        answer: warn
+    model_answer: |
+      - Duplicate respondents and broken weights make every figure wrong: CRITICAL.
+      - A small base is a reporting flag, handled by suppression: WARN.
+      - A rise in missing age is worth a look but does not invalidate the run: WARN.
+    wrong_answers:
+      - answer: {grain: warn}
+        feedback: "Duplicates double-count respondents in every total. Nothing downstream is correct."
+      - answer: {weights_sum: warn}
+        feedback: "If weights do not sum to the sample, every weighted figure is off. Stop the run."
+      - answer: {base: critical}
+        feedback: "Small bases are expected in some cells. Flag and suppress them. Do not stop the whole run."
+    hints:
+      - "Does the failure make every output wrong?"
+      - "Or does it affect one cell, handled by a known rule?"
+      - "Grain and weights are foundations."
+    explanation: |
+      CRITICAL for failures that invalidate the whole output. WARN for local issues with a known handling rule.
+
+recap:
+  - front: "Where to validate"
+    back: "At boundaries: after reading input, before writing output."
+  - front: "CRITICAL vs WARN"
+    back: "CRITICAL stops the run (raise). WARN records and continues."
+  - front: "Order of QA operations"
+    back: "Run every check, log all results, then raise if any CRITICAL failed."
+  - front: "Two coding rules for checks"
+    back: "Guard every division. Test for None with is None, never truthiness."
+
+claims: []

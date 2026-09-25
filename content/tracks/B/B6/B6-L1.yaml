@@ -1,0 +1,321 @@
+id: B6-L1
+title: Seeds and random generators
+
+concept: |
+  A result you cannot rerun is a result you cannot defend. Randomness enters analysis through sampling, train/test splits, bootstrap intervals, model initialisation and synthetic data. Control each source.
+
+  **Create a generator and pass it in.** NumPy 1.17 introduced `numpy.random.Generator`. Examples use NumPy 2.4.
+
+  ```python
+  rng = np.random.default_rng(20260925)      # at the edge, once
+  sample = draw_sample(ids, k=500, rng=rng)  # the function receives rng
+  ```
+
+  - `np.random.default_rng(seed)` gives the same stream of numbers for the same seed, on every run and machine with the same NumPy version.
+  - Functions take `rng: np.random.Generator` as a parameter. They never call `np.random.seed()` or the legacy `np.random.rand()`, which share one hidden global state across your whole program and every library you import.
+  - One generator, used twice, gives two **different** draws. That is correct: two samples should differ. Rerunning the whole script gives the same pair.
+  - Need independent streams for parallel workers? `rng.spawn(n)` returns `n` child generators.
+
+  Libraries take the seed or generator as a parameter too: `train_test_split(..., random_state=42)` in scikit-learn, `df.sample(n, random_state=rng)` in pandas.
+
+  Two hidden sources of non-determinism:
+
+  - **`hash()` on strings changes between Python processes** (hash randomisation, `PYTHONHASHSEED`). `hash(respondent_id) % 10` puts the same respondent in a different bucket on each run. Use `hashlib.sha256` for stable buckets.
+  - **Set iteration order** for strings also changes between runs. Sort before you rely on order.
+
+  Record the seed in the run log with the results, so anyone reruns the exact analysis.
+
+why_it_matters: |
+  A holdout set was defined as `hash(respondent_id) % 10 == 0`. The model scored AUC 0.81 in the notebook. The scheduled retraining job, a new Python process, put a different 10% in the holdout. Some of the old test respondents were now in training, and the reported AUC rose to 0.84 with no change to the model. The team spent a week chasing an improvement that did not exist.
+
+  A bucket from `hashlib.sha256` of the ID is the same in every process.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import numpy as np
+
+      np.random.seed(1)
+
+
+      def draw_sample(ids, k):
+          return list(np.random.choice(ids, size=k, replace=False))
+
+
+      def holdout(ids):
+          return [i for i in ids if hash(i) % 10 == 0]
+    annotations:
+      - find: "np.random.seed(1)"
+        note: "Global state, set at import: any other call to np.random changes what draw_sample returns."
+      - find: "return list(np.random.choice(ids, size=k, replace=False))"
+        note: "Reads the hidden global generator."
+      - find: "return [i for i in ids if hash(i) % 10 == 0]"
+        note: "String hash() is randomised per process: a different holdout every run."
+  strong:
+    code: |
+      import hashlib
+
+      import numpy as np
+
+
+      def draw_sample(ids: list[str], k: int, rng: np.random.Generator) -> list[str]:
+          """Draw k distinct IDs using the generator passed in."""
+          return [str(x) for x in rng.choice(ids, size=k, replace=False)]
+
+
+      def bucket(respondent_id: str, n_buckets: int) -> int:
+          """Stable bucket for an ID, the same in every process."""
+          digest = hashlib.sha256(respondent_id.encode("utf-8")).hexdigest()
+          return int(digest, 16) % n_buckets
+
+
+      def main(seed: int) -> None:
+          """The edge: create the generator once and log the seed."""
+          rng = np.random.default_rng(seed)
+          ...
+    annotations:
+      - find: "def draw_sample(ids: list[str], k: int, rng: np.random.Generator) -> list[str]:"
+        note: "The randomness is a parameter: tests pass a seeded generator."
+      - find: 'digest = hashlib.sha256(respondent_id.encode("utf-8")).hexdigest()'
+        note: "A cryptographic hash is stable across processes and machines."
+      - find: "rng = np.random.default_rng(seed)"
+        note: "One generator, created at the edge from a logged seed."
+  takeaway: |
+    Seed once at the edge, pass the generator in, and never use hash() for anything that must be stable.
+
+exercises:
+  - id: B6-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which is the recommended way to get reproducible random numbers in NumPy 2?
+    options:
+      - {id: a, text: "`np.random.seed(42)` at the top of the script"}
+      - {id: b, text: "`rng = np.random.default_rng(42)`, passed to the functions that need it"}
+      - {id: c, text: "`random.seed(42)` from the standard library"}
+      - {id: d, text: "No seed. Results average out."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Each Generator owns its state, so no other code can change the stream it gives your function."}
+      - {id: r2, text: "np.random.seed was removed in NumPy 2."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "This seeds a global generator that every library shares. Any extra call anywhere shifts your numbers."
+      - answer: c
+        feedback: "The standard library seed does not affect NumPy's generators."
+      - answer: d
+        feedback: "Unseeded runs cannot be reproduced or debugged."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. np.random.seed still exists as legacy API. Its global state is the problem."
+    hints:
+      - "Which option has no shared global state?"
+      - "Which one can a test control?"
+      - "default_rng."
+    explanation: |
+      `default_rng(seed)` gives an independent, seeded generator. Pass it in so each function's randomness is explicit.
+
+  - id: B6-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (NumPy 2.4)
+    code: |
+      import numpy as np
+
+      rng = np.random.default_rng(1)
+      first = rng.choice(10, size=3, replace=False).tolist()
+      second = rng.choice(10, size=3, replace=False).tolist()
+      print(first == second)
+    answer: "False"
+    wrong_answers:
+      - answer: "True"
+        feedback: "One generator moves on after each draw. Only a fresh generator with the same seed repeats the first draw."
+    hints:
+      - "Does the generator's state change after a draw?"
+      - "Is the second draw from the same position?"
+      - "It continues the stream."
+    explanation: |
+      The generator advances. Two draws differ, and rerunning the script repeats both.
+
+  - id: B6-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Create a seeded generator and give four parallel workers independent streams.
+    template: |
+      rng = np.random.[[g1]](20260925)
+      worker_rngs = rng.[[g2]](4)
+    gaps:
+      g1: {accepted: [default_rng]}
+      g2: {accepted: [spawn]}
+    wrong_answers:
+      - answer: {g1: seed}
+        feedback: "np.random.seed sets the global generator and returns None."
+    hints:
+      - "The function that returns a Generator."
+      - "The Generator method that makes child generators."
+      - "`default_rng` and `spawn`."
+    explanation: |
+      `default_rng` builds the parent. `spawn(4)` returns four independent children.
+
+  - id: B6-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `bucket(respondent_id: str, n_buckets: int) -> int`. It returns a number from 0 to `n_buckets - 1` that is the same for the same ID in every Python process. Use `hashlib.sha256` on the UTF-8 bytes of the ID, read the hex digest as an integer, and take it modulo `n_buckets`. Do not use `hash()`.
+    starter: |
+      def bucket(respondent_id, n_buckets):
+          return hash(respondent_id) % n_buckets
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: bucket
+          typed: true
+          docstring: true
+          message: "Give `bucket` type hints and a docstring."
+        - id: no_builtin_hash
+          kind: forbids_call
+          name: hash
+          message: "hash() on strings changes between processes. Use hashlib.sha256."
+        - id: uses_sha256
+          kind: requires_pattern
+          pattern: "sha256"
+          message: "Use hashlib.sha256."
+      tests:
+        - id: stable
+          code: |
+            assert bucket("R001", 10) == 2
+            assert bucket("R002", 10) == 1
+          message: "Buckets must come from int(sha256(id.encode('utf-8')).hexdigest(), 16) % n_buckets."
+        - id: range
+          code: |
+            assert all(0 <= bucket(f"R{i}", 7) < 7 for i in range(200))
+          message: "Every bucket must be between 0 and n_buckets - 1."
+    solution: |
+      import hashlib
+
+
+      def bucket(respondent_id: str, n_buckets: int) -> int:
+          """Stable bucket for an ID, the same in every process.
+
+          Args:
+              respondent_id: The ID to bucket.
+              n_buckets: Number of buckets.
+
+          Returns:
+              An integer from 0 to n_buckets - 1.
+          """
+          digest = hashlib.sha256(respondent_id.encode("utf-8")).hexdigest()
+          return int(digest, 16) % n_buckets
+    seeded_bugs:
+      - |
+        def bucket(respondent_id: str, n_buckets: int) -> int:
+            """Uses the process-randomised hash."""
+            return hash(respondent_id) % n_buckets
+      - |
+        import hashlib
+
+
+        def bucket(respondent_id: str, n_buckets: int) -> int:
+            """Uses md5, a different digest."""
+            return int(hashlib.md5(respondent_id.encode("utf-8")).hexdigest(), 16) % n_buckets
+    wrong_answers:
+      - answer: |
+          import hashlib
+
+
+          def bucket(respondent_id: str, n_buckets: int) -> int:
+              """sha256 of the wrong text."""
+              digest = hashlib.sha256(str(n_buckets).encode("utf-8")).hexdigest()
+              return int(digest, 16) % n_buckets
+        triggers: stable
+    hints:
+      - "`hashlib.sha256(data)` needs bytes: `respondent_id.encode(\"utf-8\")`."
+      - "`.hexdigest()` returns hex text. `int(text, 16)` reads it."
+      - "Finish with `% n_buckets`."
+    explanation: |
+      SHA-256 of the ID's bytes is the same everywhere, so the bucket is too. `hash()` is salted per process for strings.
+
+  - id: B6-L1-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [numpy]
+    prompt: |
+      Two analysts run the same bootstrap with seed 7 and get different confidence intervals. One of them imports a plotting helper that draws random jitter with `np.random`. Tap the line that makes the result depend on other code, and fix the function.
+    code: |
+      import numpy as np
+
+
+      def bootstrap_means(values: list[float], n_boot: int, seed: int) -> list[float]:
+          """Bootstrap means of values."""
+          np.random.seed(seed)
+          out = []
+          for _ in range(n_boot):
+              draw = np.random.choice(values, size=len(values), replace=True)
+              out.append(float(draw.mean()))
+          return out
+    bug_lines: [6, 9]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_global
+          kind: forbids_pattern
+          pattern: "np\\.random\\.(seed|choice|rand|randint|random)\\("
+          message: "Do not use the global np.random functions. Create a Generator with default_rng."
+        - id: uses_rng
+          kind: requires_pattern
+          pattern: "default_rng\\("
+          message: "Create a generator with np.random.default_rng."
+      tests:
+        - id: reproducible
+          code: |
+            import numpy as np
+            a = bootstrap_means([1.0, 2.0, 3.0, 4.0], 5, 7)
+            np.random.random(10)
+            b = bootstrap_means([1.0, 2.0, 3.0, 4.0], 5, 7)
+            assert a == b
+          message: "The same seed must give the same means, whatever other code draws in between."
+    fix_solution: |
+      import numpy as np
+
+
+      def bootstrap_means(values: list[float], n_boot: int, seed: int) -> list[float]:
+          """Bootstrap means of values, reproducible from seed."""
+          rng = np.random.default_rng(seed)
+          data = np.asarray(values)
+          return [float(rng.choice(data, size=len(data), replace=True).mean()) for _ in range(n_boot)]
+    wrong_answers:
+      - lines: [10]
+        feedback: "Taking the mean is fine. The draws come from a shared global generator."
+    hints:
+      - "Which generator does np.random.choice use?"
+      - "Who else can move that generator?"
+      - "Use a local default_rng(seed)."
+    explanation: |
+      `np.random.seed` and `np.random.choice` use one global generator that any imported code advances. A local `default_rng(seed)` belongs to this function alone.
+
+recap:
+  - front: "Reproducible randomness in NumPy 2"
+    back: "rng = np.random.default_rng(seed), created once at the edge and passed in."
+  - front: "Why not np.random.seed?"
+    back: "It seeds one global generator that every library shares and advances."
+  - front: "Stable bucket for an ID"
+    back: "int(hashlib.sha256(id.encode()).hexdigest(), 16) % n. Never hash(), which is randomised per process."
+  - front: "Independent streams for workers"
+    back: "rng.spawn(n)."
+
+claims:
+  - claim: "np.random.default_rng(seed) returns a Generator; Generator.spawn(n) returns n independent child generators."
+    status: verified
+    source: "NumPy random documentation; run on NumPy 2.4.6 in this repository."
+  - claim: "Python's hash() of a str differs between processes unless PYTHONHASHSEED is fixed."
+    status: verified
+    source: "Python data model documentation (object.__hash__); observed across two processes in this repository."

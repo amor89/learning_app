@@ -1,0 +1,400 @@
+id: B5-L1
+title: DataFrame schemas with pandera
+
+concept: |
+  A **schema** states what a DataFrame must look like: which columns exist, their dtypes, and rules on their values. **pandera** checks a pandas DataFrame against a schema and raises when it does not match. Examples here use pandera 0.33 with pandas 3.
+
+  ```python
+  import pandera.pandas as pa
+
+  RESPONSES = pa.DataFrameSchema(
+      {
+          "respondent_id": pa.Column(str, unique=True),
+          "age": pa.Column(int, pa.Check.in_range(16, 99)),
+          "weight": pa.Column(float, pa.Check.gt(0)),
+      },
+      strict=True,
+      coerce=True,
+  )
+  clean = RESPONSES.validate(raw, lazy=True)
+  ```
+
+  - `pa.Column(dtype, checks, nullable=False)` is the default: nulls fail unless you set `nullable=True`.
+  - `unique=True` rejects duplicate keys.
+  - `strict=True` rejects columns the schema does not name. `coerce=True` converts dtypes before checking.
+  - `lazy=True` collects **every** failure into one `SchemaErrors` exception. Its `failure_cases` attribute is a DataFrame with the column, check and failing value. Without `lazy`, validation stops at the first `SchemaError`.
+
+  `SchemaErrors` is not a subclass of `SchemaError`. Catch both when you handle failures. A `strict=True` violation raises `SchemaErrors` even without `lazy=True`.
+
+  The class syntax, `pa.DataFrameModel`, does the same with type hints. Add `@pa.check_types` to a function whose parameters are annotated `DataFrame[Model]`, and pandera validates inputs and outputs on every call.
+
+  Import from `pandera.pandas`. The plain `import pandera` still works in 0.33, but the pandas-specific module is the documented path.
+
+  pandera does not run in this app's browser runtime. The exercises check your code's structure. Run `pytest` locally with the `dev` group to execute schemas for real.
+
+why_it_matters: |
+  A supplier changes a weight export so that non-responders get weight `0` instead of being left out. The weighting script divides by the sum of weights per cell. Three cells now contain only zeros. The script writes `NaN` shares to the client dashboard, and nobody sees an error.
+
+  `pa.Column(float, pa.Check.gt(0))` on the input fails the run on day one, with the failing rows listed in `failure_cases`.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def load_weights(path):
+          df = pd.read_csv(path)
+          assert "weight" in df.columns
+          df = df.dropna()
+          return df
+    annotations:
+      - find: 'assert "weight" in df.columns'
+        note: "Checks one column exists. Not its type, its values or other columns. And python -O strips asserts."
+      - find: "df = df.dropna()"
+        note: "Silently drops rows with any null, in any column. The count of dropped rows is never reported."
+  strong:
+    code: |
+      import pandas as pd
+      import pandera.pandas as pa
+
+      WEIGHTS = pa.DataFrameSchema(
+          {
+              "respondent_id": pa.Column(str, unique=True),
+              "cell": pa.Column(str),
+              "weight": pa.Column(float, pa.Check.gt(0)),
+          },
+          strict=True,
+          coerce=True,
+      )
+
+
+      def load_weights(path: str) -> pd.DataFrame:
+          """Read and validate a weights file. Grain: one row per respondent.
+
+          Raises:
+              pa.errors.SchemaErrors: Listing every failing row and check.
+          """
+          return WEIGHTS.validate(pd.read_csv(path, dtype={"respondent_id": "str"}), lazy=True)
+    annotations:
+      - find: '"respondent_id": pa.Column(str, unique=True),'
+        note: "The grain, enforced: one row per respondent."
+      - find: '"weight": pa.Column(float, pa.Check.gt(0)),'
+        note: "Not null (the default) and positive: zero weights fail loudly."
+      - find: "strict=True,"
+        note: "A new or renamed column in the supplier file fails the run."
+      - find: 'return WEIGHTS.validate(pd.read_csv(path, dtype={"respondent_id": "str"}), lazy=True)'
+        note: "lazy=True reports every failure at once, not just the first."
+  takeaway: |
+    A schema at the point of entry turns a silent bad input into one loud, detailed failure.
+
+exercises:
+  - id: B5-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      In pandera 0.33, what does `lazy=True` change in `schema.validate(df, lazy=True)`?
+    options:
+      - {id: a, text: "Validation runs later, when the DataFrame is first used."}
+      - {id: b, text: "Every failure is collected and raised together as SchemaErrors."}
+      - {id: c, text: "Failing rows are dropped instead of raising."}
+      - {id: d, text: "Only dtypes are checked, not values."}
+    answer: b
+    reasons:
+      - {id: r1, text: "You see all problems in one run, with failure_cases listing each one."}
+      - {id: r2, text: "It is faster because it skips checks."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Validation runs at once. lazy refers to collecting errors, not delaying them."
+      - answer: c
+        feedback: "pandera raises. Dropping rows needs an explicit choice, not a flag on validate."
+      - answer: d
+        feedback: "All checks run. lazy changes how failures are reported."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. lazy runs every check, so it is not faster."
+    hints:
+      - "Without lazy, when does validation stop?"
+      - "What does the exception hold with lazy?"
+      - "failure_cases, one row per failure."
+    explanation: |
+      Without `lazy`, the first failing check raises `SchemaError`. With it, pandera runs every check and raises `SchemaErrors` with all failures.
+
+  - id: B5-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (pandera 0.33)
+    code: |
+      import pandas as pd
+      import pandera.pandas as pa
+
+      schema = pa.DataFrameSchema({"w": pa.Column(float, pa.Check.gt(0))})
+      try:
+          schema.validate(pd.DataFrame({"w": [1.0, -2.0, -3.0]}), lazy=True)
+      except pa.errors.SchemaErrors as err:
+          print(err.failure_cases["failure_case"].tolist())
+    answer: "[-2.0, -3.0]"
+    wrong_answers:
+      - answer: "[-2.0]"
+        feedback: "With lazy=True pandera reports every failing value, not only the first."
+      - answer: "[1, 2]"
+        feedback: "failure_case holds the failing values. The row positions are in the index column."
+    hints:
+      - "Which values fail gt(0)?"
+      - "Does lazy stop at the first?"
+      - "All failing values are listed."
+    explanation: |
+      Both negative weights fail. `lazy=True` lists both in `failure_cases`.
+
+  - id: B5-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Reject duplicate IDs, and reject any column the schema does not name.
+    template: |
+      schema = pa.DataFrameSchema(
+          {"respondent_id": pa.Column(str, [[g1]]=True), "score": pa.Column(int)},
+          [[g2]]=True,
+      )
+    gaps:
+      g1: {accepted: [unique]}
+      g2: {accepted: [strict]}
+    wrong_answers:
+      - answer: {g2: coerce}
+        feedback: "coerce converts dtypes. strict rejects unknown columns."
+      - answer: {g1: nullable}
+        feedback: "nullable allows nulls. unique rejects duplicates."
+    hints:
+      - "A Column argument about repeated values."
+      - "A schema argument about extra columns."
+      - "`unique` and `strict`."
+    explanation: |
+      `unique=True` enforces the grain. `strict=True` fails on any unexpected column.
+
+  - id: B5-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Define a module constant `SCORES` as a pandera `DataFrameSchema` with:
+
+      - `respondent_id`: str, unique.
+      - `nps`: int, between 0 and 10 inclusive.
+      - `comment`: str, nulls allowed.
+      - Unknown columns rejected, dtypes coerced.
+
+      Then write `validate_scores(df: pd.DataFrame) -> pd.DataFrame` that returns `SCORES.validate(df, lazy=True)`.
+
+      pandera does not run in the browser, so the checker reads your code. Run it locally with `pytest` to see it validate.
+    starter: |
+      import pandas as pd
+      import pandera.pandas as pa
+
+
+      def validate_scores(df):
+          return df
+    checker:
+      kind: python
+      ast_rules:
+        - id: import_path
+          kind: requires_pattern
+          pattern: "import pandera\\.pandas as pa"
+          message: "Import pandera with `import pandera.pandas as pa`."
+        - id: typed_documented
+          kind: requires_function
+          name: validate_scores
+          typed: true
+          docstring: true
+          message: "Give `validate_scores` type hints and a docstring."
+        - id: unique_id
+          kind: requires_pattern
+          pattern: "\"respondent_id\"\\s*:\\s*pa\\.Column\\(\\s*str\\s*,[^)]*unique\\s*=\\s*True"
+          message: "respondent_id must be a str Column with unique=True."
+        - id: nps_range
+          kind: requires_pattern
+          pattern: "\"nps\"\\s*:\\s*pa\\.Column\\(\\s*int\\s*,\\s*pa\\.Check\\.in_range\\(\\s*0\\s*,\\s*10\\s*\\)"
+          message: "nps must be an int Column with pa.Check.in_range(0, 10)."
+        - id: comment_nullable
+          kind: requires_pattern
+          pattern: "\"comment\"\\s*:\\s*pa\\.Column\\(\\s*str\\s*,[^)]*nullable\\s*=\\s*True"
+          message: "comment must allow nulls with nullable=True. Columns reject nulls by default."
+        - id: strict
+          kind: requires_pattern
+          pattern: "strict\\s*=\\s*True"
+          message: "Reject unknown columns with strict=True."
+        - id: coerce
+          kind: requires_pattern
+          pattern: "coerce\\s*=\\s*True"
+          message: "Convert dtypes with coerce=True."
+        - id: lazy
+          kind: requires_pattern
+          pattern: "\\.validate\\([^)]*lazy\\s*=\\s*True"
+          message: "Validate with lazy=True so every failure is reported."
+    solution: |
+      import pandas as pd
+      import pandera.pandas as pa
+
+      SCORES = pa.DataFrameSchema(
+          {
+              "respondent_id": pa.Column(str, unique=True),
+              "nps": pa.Column(int, pa.Check.in_range(0, 10)),
+              "comment": pa.Column(str, nullable=True),
+          },
+          strict=True,
+          coerce=True,
+      )
+
+
+      def validate_scores(df: pd.DataFrame) -> pd.DataFrame:
+          """Validate an NPS extract. Grain: one row per respondent.
+
+          Raises:
+              pa.errors.SchemaErrors: With every failing check.
+          """
+          return SCORES.validate(df, lazy=True)
+    seeded_bugs:
+      - |
+        import pandas as pd
+        import pandera.pandas as pa
+
+        SCORES = pa.DataFrameSchema(
+            {
+                "respondent_id": pa.Column(str, unique=True),
+                "nps": pa.Column(int, pa.Check.in_range(0, 10)),
+                "comment": pa.Column(str),
+            },
+            strict=True,
+            coerce=True,
+        )
+
+
+        def validate_scores(df: pd.DataFrame) -> pd.DataFrame:
+            """Comment not nullable."""
+            return SCORES.validate(df, lazy=True)
+      - |
+        import pandas as pd
+        import pandera.pandas as pa
+
+        SCORES = pa.DataFrameSchema(
+            {
+                "respondent_id": pa.Column(str),
+                "nps": pa.Column(int, pa.Check.in_range(0, 10)),
+                "comment": pa.Column(str, nullable=True),
+            },
+            strict=True,
+            coerce=True,
+        )
+
+
+        def validate_scores(df: pd.DataFrame) -> pd.DataFrame:
+            """IDs not unique."""
+            return SCORES.validate(df, lazy=True)
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+          import pandera.pandas as pa
+
+          SCORES = pa.DataFrameSchema(
+              {
+                  "respondent_id": pa.Column(str, unique=True),
+                  "nps": pa.Column(int, pa.Check.in_range(0, 10)),
+                  "comment": pa.Column(str),
+              },
+              strict=True,
+              coerce=True,
+          )
+
+
+          def validate_scores(df: pd.DataFrame) -> pd.DataFrame:
+              """Comment not nullable."""
+              return SCORES.validate(df, lazy=True)
+        triggers: comment_nullable
+    hints:
+      - "Each column is `pa.Column(dtype, checks..., options)`."
+      - "Columns reject nulls unless nullable=True."
+      - "strict and coerce go on the DataFrameSchema, lazy on validate."
+    explanation: |
+      The schema names every column, enforces the grain with `unique`, bounds the score, and allows nulls only where they are expected.
+
+  - id: B5-L1-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      A bad weights file passed through this loader and broke the dashboard. Tap the line that let it through.
+    code: |
+      import pandas as pd
+      import pandera.pandas as pa
+
+      WEIGHTS = pa.DataFrameSchema({"weight": pa.Column(float, pa.Check.gt(0))}, strict=True)
+
+
+      def load_weights(path: str) -> pd.DataFrame:
+          """Read and validate weights."""
+          df = pd.read_csv(path)
+          try:
+              return WEIGHTS.validate(df, lazy=True)
+          except pa.errors.SchemaError:
+              return df
+    bug_lines: [12, 13]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_swallow
+          kind: forbids_pattern
+          pattern: "except[^:]*Schema"
+          message: "Do not catch schema errors only to return unvalidated data. Let them raise."
+        - id: validates
+          kind: requires_pattern
+          pattern: "WEIGHTS\\.validate\\("
+          message: "Keep the validation call."
+    fix_solution: |
+      import pandas as pd
+      import pandera.pandas as pa
+
+      WEIGHTS = pa.DataFrameSchema({"weight": pa.Column(float, pa.Check.gt(0))}, strict=True)
+
+
+      def load_weights(path: str) -> pd.DataFrame:
+          """Read and validate weights.
+
+          Raises:
+              pa.errors.SchemaErrors: When any check fails.
+          """
+          return WEIGHTS.validate(pd.read_csv(path), lazy=True)
+    wrong_answers:
+      - lines: [4]
+        feedback: "The schema is sound: positive, non-null weights, no extra columns."
+      - lines: [11]
+        feedback: "Validating with lazy=True is right. What happens when it fails?"
+    hints:
+      - "What does lazy=True raise?"
+      - "Is SchemaErrors a subclass of SchemaError?"
+      - "Even if it were, what does the except branch return?"
+    explanation: |
+      Two faults. `lazy=True` raises `SchemaErrors`, which `except SchemaError` does not catch, so the handler is dead code for value failures. And when it does catch, it returns the unvalidated frame. Let the error raise, so the run stops.
+
+recap:
+  - front: "pandera Column defaults"
+    back: "nullable=False. Set nullable=True where nulls are expected."
+  - front: "strict=True and coerce=True"
+    back: "strict rejects unknown columns. coerce converts dtypes before checks."
+  - front: "validate(df, lazy=True)"
+    back: "Runs every check and raises SchemaErrors with failure_cases."
+  - front: "SchemaError vs SchemaErrors"
+    back: "Separate classes. SchemaErrors is not a subclass. Catch both, or better, let them raise."
+
+claims:
+  - claim: "pandera 0.33: lazy=True raises SchemaErrors with a failure_cases DataFrame."
+    status: verified
+    source: "pandera documentation; run on pandera 0.33.1 with pandas 3.0.6 in this repository."
+  - claim: "SchemaErrors is not a subclass of SchemaError in pandera 0.33."
+    status: verified
+    source: "issubclass check on pandera 0.33.1 in this repository."
+  - claim: "A strict=True violation raises SchemaErrors even without lazy=True."
+    status: verified
+    source: "Run on pandera 0.33.1 in this repository."
+  - claim: "import pandera.pandas as pa is the documented import for pandas schemas."
+    status: search-only
+    source: "pandera documentation (docs site not reachable from this environment)."

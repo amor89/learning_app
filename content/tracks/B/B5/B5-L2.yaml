@@ -1,0 +1,444 @@
+id: B5-L2
+title: pydantic models for config and input records
+
+concept: |
+  A dataclass (lesson B2-L2) does not check types. **pydantic** does. A `BaseModel` validates and converts data when you build it, and raises one `ValidationError` that lists every problem. Examples use pydantic 2.12.
+
+  ```python
+  from pydantic import BaseModel, ConfigDict, Field
+
+
+  class WeightingConfig(BaseModel):
+      model_config = ConfigDict(extra="forbid", frozen=True)
+
+      weight_col: str
+      min_base: int = Field(default=50, gt=0)
+      cap: float = Field(default=5.0, gt=1.0)
+
+
+  cfg = WeightingConfig.model_validate(yaml.safe_load(text))
+  ```
+
+  - `Field(gt=0, le=10)` adds bounds. `@field_validator("name")` adds your own rule.
+  - `extra="forbid"` rejects unknown keys, so `minbase: 30` in a YAML file fails instead of being ignored. The default, `"ignore"`, drops them silently.
+  - `frozen=True` rejects assignment after construction.
+  - `e.errors()` returns a list of dicts with `loc`, `type` and `msg`. Log it as structured data.
+
+  pydantic runs in **lax mode** by default. It converts `"30"` to `30` and `30.0` to `30`, but rejects `"thirty"` and `30.5`. It also converts `True` to `1` for an `int` field. Set `ConfigDict(strict=True)` when inputs must already have the right type.
+
+  One gap: `model_copy(update={...})` does **not** validate. `cfg.model_copy(update={"min_base": -1})` returns a config with `min_base = -1`. To change a validated model, build a new one: `WeightingConfig.model_validate({**cfg.model_dump(), "min_base": 30})`.
+
+  Use pydantic for records and settings that arrive from outside: YAML, JSON, API payloads. Use pandera (lesson B5-L1) for whole DataFrames. For a list of records, `TypeAdapter(list[Model]).validate_python(rows)` validates them in one call.
+
+why_it_matters: |
+  A weighting config file had `cap: 0.5` typed where `5` was meant, and `minbase` spelt without the underscore. The loader used a plain dict. The cap shrank every weight above 0.5 down to 0.5, which flattened the weighting, and `min_base` stayed at its default. The report went out with unweighted-looking results.
+
+  `WeightingConfig.model_validate` with `gt=1.0` and `extra="forbid"` rejects both mistakes in one error message, before any data is read.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def load_config(raw):
+          return {
+              "weight_col": raw.get("weight_col", "weight"),
+              "min_base": int(raw.get("min_base", 50)),
+              "cap": float(raw.get("cap", 5.0)),
+          }
+    annotations:
+      - find: '"weight_col": raw.get("weight_col", "weight"),'
+        note: "A missing key falls back to a guess."
+      - find: '"min_base": int(raw.get("min_base", 50)),'
+        note: "A typo such as minbase is ignored. int() accepts negatives."
+      - find: '"cap": float(raw.get("cap", 5.0)),'
+        note: "No bounds: 0.5 passes."
+  strong:
+    code: |
+      from pydantic import BaseModel, ConfigDict, Field
+
+
+      class WeightingConfig(BaseModel):
+          """Settings for one weighting run, loaded from YAML."""
+
+          model_config = ConfigDict(extra="forbid", frozen=True)
+
+          weight_col: str
+          min_base: int = Field(default=50, gt=0)
+          cap: float = Field(default=5.0, gt=1.0)
+
+
+      def load_config(raw: dict[str, object]) -> WeightingConfig:
+          """Validate a parsed YAML mapping.
+
+          Raises:
+              pydantic.ValidationError: Listing every invalid or unknown key.
+          """
+          return WeightingConfig.model_validate(raw)
+    annotations:
+      - find: 'model_config = ConfigDict(extra="forbid", frozen=True)'
+        note: "Unknown keys fail. No changes after loading."
+      - find: "weight_col: str"
+        note: "Required: no default, so a missing key fails."
+      - find: "cap: float = Field(default=5.0, gt=1.0)"
+        note: "A bound that encodes what a cap means."
+  takeaway: |
+    Validate external settings and records once, at the boundary, with every rule in the model.
+
+exercises:
+  - id: B5-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A pydantic 2 model has the default config. A YAML file adds an unknown key `minbase: 30`. What happens on `model_validate`?
+    options:
+      - {id: a, text: "ValidationError: extra_forbidden"}
+      - {id: b, text: "The key is ignored silently."}
+      - {id: c, text: "min_base is set to 30."}
+      - {id: d, text: "A warning is printed."}
+    answer: b
+    reasons:
+      - {id: r1, text: "The default extra setting is \"ignore\". Set extra=\"forbid\" to reject unknown keys."}
+      - {id: r2, text: "pydantic never checks keys."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Only with ConfigDict(extra=\"forbid\"). The default ignores extras."
+      - answer: c
+        feedback: "pydantic does not guess spellings. minbase is a different key."
+      - answer: d
+        feedback: "No warning. That is why extra=\"forbid\" matters for config files."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. It checks keys when you set extra=\"forbid\"."
+    hints:
+      - "What is the default value of the extra setting?"
+      - "Does ignore warn?"
+      - "Change it with model_config."
+    explanation: |
+      Default `extra="ignore"` drops unknown keys. Config models should use `extra="forbid"`.
+
+  - id: B5-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (pydantic 2.12)
+    code: |
+      from pydantic import BaseModel, Field
+
+
+      class Cfg(BaseModel):
+          min_base: int = Field(default=50, gt=0)
+
+
+      cfg = Cfg(min_base="30")
+      print(cfg.model_copy(update={"min_base": -1}).min_base)
+    answer: "-1"
+    wrong_answers:
+      - answer: "30"
+        feedback: "model_copy applies the update. It just does not validate it."
+      - answer: "ValidationError"
+        feedback: "model_copy(update=...) skips validation, so gt=0 is never checked."
+    hints:
+      - "Is \"30\" accepted in lax mode?"
+      - "Does model_copy run validators?"
+      - "It does not."
+    explanation: |
+      Lax mode converts `"30"` to `30`. `model_copy(update=...)` then sets `-1` without validation. Rebuild with `model_validate` instead.
+
+  - id: B5-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Reject unknown keys, stop changes after loading, and require `nps` between 0 and 10.
+    template: |
+      class Response(BaseModel):
+          model_config = ConfigDict(extra="[[g1]]", [[g2]]=True)
+
+          respondent_id: str
+          nps: int = Field(ge=0, [[g3]]=10)
+    gaps:
+      g1: {accepted: [forbid]}
+      g2: {accepted: [frozen]}
+      g3: {accepted: [le]}
+    wrong_answers:
+      - answer: {g1: ignore}
+        feedback: "ignore is the default and drops unknown keys silently."
+      - answer: {g3: lt}
+        feedback: "lt=10 excludes 10. NPS allows 10, so use le."
+    hints:
+      - "The extra setting that raises."
+      - "The config key that blocks assignment."
+      - "Less than or equal."
+    explanation: |
+      `extra="forbid"`, `frozen=True` and `le=10` encode the rules in the model.
+
+  - id: B5-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pydantic]
+    prompt: |
+      Write a pydantic model `WeightingConfig` and a function `load_config(raw)`.
+
+      - Fields: `weight_col: str` (required), `min_base: int` default 50 and greater than 0, `cap: float` default 5.0 and greater than 1.0.
+      - Reject unknown keys. Reject assignment after construction.
+      - `load_config(raw: dict[str, object]) -> WeightingConfig` validates the mapping.
+    starter: |
+      from pydantic import BaseModel, ConfigDict, Field
+
+
+      def load_config(raw):
+          return raw
+    checker:
+      kind: python
+      setup: |
+        from pydantic import ValidationError
+
+        def _fails(raw, err_type):
+            try:
+                load_config(raw)
+            except ValidationError as e:
+                return err_type in [x["type"] for x in e.errors()]
+            return False
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: load_config
+          typed: true
+          docstring: true
+          message: "Give `load_config` type hints and a docstring."
+      tests:
+        - id: builds
+          code: |
+            cfg = load_config({"weight_col": "w", "min_base": 30})
+            assert (cfg.weight_col, cfg.min_base, cfg.cap) == ("w", 30, 5.0)
+          message: "A valid mapping must build a config with defaults filled in."
+        - id: bounds
+          code: |
+            assert _fails({"weight_col": "w", "cap": 0.5}, "greater_than")
+            assert _fails({"weight_col": "w", "min_base": 0}, "greater_than")
+          message: "cap must be greater than 1.0 and min_base greater than 0."
+        - id: unknown_key
+          code: |
+            assert _fails({"weight_col": "w", "minbase": 30}, "extra_forbidden")
+          message: "Unknown keys such as minbase must fail. Set extra=\"forbid\"."
+        - id: required
+          code: |
+            assert _fails({}, "missing")
+          message: "weight_col is required. Give it no default."
+        - id: frozen
+          code: |
+            cfg = load_config({"weight_col": "w"})
+            try:
+                cfg.min_base = 1
+            except ValidationError:
+                pass
+            else:
+                raise AssertionError("assignment allowed")
+          message: "Assignment after construction must fail. Set frozen=True."
+    solution: |
+      from pydantic import BaseModel, ConfigDict, Field
+
+
+      class WeightingConfig(BaseModel):
+          """Settings for one weighting run."""
+
+          model_config = ConfigDict(extra="forbid", frozen=True)
+
+          weight_col: str
+          min_base: int = Field(default=50, gt=0)
+          cap: float = Field(default=5.0, gt=1.0)
+
+
+      def load_config(raw: dict[str, object]) -> WeightingConfig:
+          """Validate a parsed YAML or JSON mapping.
+
+          Raises:
+              pydantic.ValidationError: On any invalid, missing or unknown key.
+          """
+          return WeightingConfig.model_validate(raw)
+    seeded_bugs:
+      - |
+        from pydantic import BaseModel, ConfigDict, Field
+
+
+        class WeightingConfig(BaseModel):
+            """Extras ignored."""
+
+            model_config = ConfigDict(frozen=True)
+
+            weight_col: str
+            min_base: int = Field(default=50, gt=0)
+            cap: float = Field(default=5.0, gt=1.0)
+
+
+        def load_config(raw: dict[str, object]) -> WeightingConfig:
+            """Validate."""
+            return WeightingConfig.model_validate(raw)
+      - |
+        from pydantic import BaseModel, ConfigDict, Field
+
+
+        class WeightingConfig(BaseModel):
+            """No bounds on cap."""
+
+            model_config = ConfigDict(extra="forbid", frozen=True)
+
+            weight_col: str
+            min_base: int = Field(default=50, gt=0)
+            cap: float = 5.0
+
+
+        def load_config(raw: dict[str, object]) -> WeightingConfig:
+            """Validate."""
+            return WeightingConfig.model_validate(raw)
+      - |
+        from pydantic import BaseModel, ConfigDict, Field
+
+
+        class WeightingConfig(BaseModel):
+            """Not frozen."""
+
+            model_config = ConfigDict(extra="forbid")
+
+            weight_col: str
+            min_base: int = Field(default=50, gt=0)
+            cap: float = Field(default=5.0, gt=1.0)
+
+
+        def load_config(raw: dict[str, object]) -> WeightingConfig:
+            """Validate."""
+            return WeightingConfig.model_validate(raw)
+    wrong_answers:
+      - answer: |
+          from pydantic import BaseModel, ConfigDict, Field
+
+
+          class WeightingConfig(BaseModel):
+              """Extras ignored."""
+
+              model_config = ConfigDict(frozen=True)
+
+              weight_col: str
+              min_base: int = Field(default=50, gt=0)
+              cap: float = Field(default=5.0, gt=1.0)
+
+
+          def load_config(raw: dict[str, object]) -> WeightingConfig:
+              """Validate."""
+              return WeightingConfig.model_validate(raw)
+        triggers: unknown_key
+      - answer: |
+          from pydantic import BaseModel, ConfigDict, Field
+
+
+          class WeightingConfig(BaseModel):
+              """No bounds on cap."""
+
+              model_config = ConfigDict(extra="forbid", frozen=True)
+
+              weight_col: str
+              min_base: int = Field(default=50, gt=0)
+              cap: float = 5.0
+
+
+          def load_config(raw: dict[str, object]) -> WeightingConfig:
+              """Validate."""
+              return WeightingConfig.model_validate(raw)
+        triggers: bounds
+    hints:
+      - "Bounds go in Field(gt=...)."
+      - "Unknown keys and assignment are controlled in model_config."
+      - "`ConfigDict(extra=\"forbid\", frozen=True)` and `model_validate(raw)`."
+    explanation: |
+      Every rule lives in the model: required fields, bounds, no extras, no changes. `model_validate` reports all failures at once.
+
+  - id: B5-L2-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [pydantic]
+    prompt: |
+      A job lowers the minimum base for a small market. The run then reports subgroups of size 0 as valid. Tap the line with the bug and fix the function so the new value is validated.
+    code: |
+      from pydantic import BaseModel, ConfigDict, Field
+
+
+      class Cfg(BaseModel):
+          """Run settings."""
+
+          model_config = ConfigDict(extra="forbid", frozen=True)
+
+          min_base: int = Field(default=50, gt=0)
+
+
+      def with_min_base(cfg: Cfg, value: int) -> Cfg:
+          """Return a copy of cfg with a new min_base."""
+          return cfg.model_copy(update={"min_base": value})
+    bug_lines: [14]
+    fix_checker:
+      kind: python
+      setup: |
+        from pydantic import ValidationError
+      tests:
+        - id: validates
+          code: |
+            try:
+                with_min_base(Cfg(), 0)
+            except ValidationError:
+                pass
+            else:
+                raise AssertionError("min_base=0 accepted")
+          message: "The new value must be validated: min_base=0 must raise ValidationError."
+        - id: works
+          code: |
+            assert with_min_base(Cfg(), 30).min_base == 30
+          message: "A valid new value must be applied."
+    fix_solution: |
+      from pydantic import BaseModel, ConfigDict, Field
+
+
+      class Cfg(BaseModel):
+          """Run settings."""
+
+          model_config = ConfigDict(extra="forbid", frozen=True)
+
+          min_base: int = Field(default=50, gt=0)
+
+
+      def with_min_base(cfg: Cfg, value: int) -> Cfg:
+          """Return a validated copy of cfg with a new min_base."""
+          return Cfg.model_validate({**cfg.model_dump(), "min_base": value})
+    wrong_answers:
+      - lines: [9]
+        feedback: "The bound is right. It is never checked on the copy."
+      - lines: [7]
+        feedback: "frozen=True is right. model_copy builds a new object, so frozen does not stop it."
+    hints:
+      - "Which pydantic methods validate?"
+      - "Does model_copy?"
+      - "Rebuild with model_validate from model_dump()."
+    explanation: |
+      `model_copy(update=...)` skips validation. Dump, merge and `model_validate` so the bound applies to the new value.
+
+recap:
+  - front: "pydantic extra keys, default behaviour"
+    back: "Ignored silently. Use ConfigDict(extra=\"forbid\") for config."
+  - front: "pydantic lax mode"
+    back: "Converts \"30\" and 30.0 to 30, True to 1. Use strict=True to refuse conversions."
+  - front: "model_copy(update=...)"
+    back: "Does not validate. Rebuild with model_validate({**m.model_dump(), ...})."
+  - front: "pydantic or pandera"
+    back: "pydantic for records and settings from outside. pandera for whole DataFrames."
+
+claims:
+  - claim: "pydantic 2 default extra behaviour is ignore; extra=\"forbid\" raises extra_forbidden."
+    status: verified
+    source: "pydantic documentation; run on pydantic 2.12.5 and 2.13.5 in this repository."
+  - claim: "Lax mode converts \"30\" and 30.0 to int 30 and True to 1, and rejects 30.5 and \"thirty\"."
+    status: verified
+    source: "pydantic conversion table; run on pydantic 2.12.5 in this repository."
+  - claim: "model_copy(update=...) does not validate the update."
+    status: verified
+    source: "pydantic documentation for model_copy; run on pydantic 2.12.5 in this repository."

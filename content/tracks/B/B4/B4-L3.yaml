@@ -1,0 +1,280 @@
+id: B4-L3
+title: Choosing pandas, Polars, DuckDB or Spark
+
+concept: |
+  All four tools answer the same questions. Pick by where the data lives and how big it is next to your memory, not by fashion.
+
+  A measurement from this course's build: a group-by with sum and mean over 10 million rows and 1,000 groups, best of three runs on a 4-core machine. pandas 3.0.6 took 0.22 s, Polars 1.44 took 0.11 s, DuckDB 1.5 took 0.06 s. At this size every tool is fast enough. The choice matters when data outgrows memory.
+
+  | Situation | Good default |
+  |---|---|
+  | Data fits comfortably in memory, you need the scikit-learn, statsmodels or plotting ecosystem | pandas |
+  | Files larger than you want in memory, heavy transforms, one machine | Polars lazy (`scan_parquet`) |
+  | SQL is the clearest way to express it, or you join many files ad hoc | DuckDB |
+  | Data already in a lakehouse, or larger than one machine, or a scheduled production job | Spark (Track A) |
+
+  The tools share the **Apache Arrow** memory format, so you mix them at the boundaries:
+
+  ```python
+  lazy_result = pl.scan_parquet("extracts/*.parquet").filter(...).group_by(...).agg(...)
+  summary = lazy_result.collect().to_pandas()     # Polars to pandas for statsmodels
+  rel = con.sql("SELECT ... FROM read_parquet('extracts/*.parquet')")
+  top = rel.pl()                                   # DuckDB to Polars
+  ```
+
+  Rules for mixing:
+
+  - **Reduce first, convert last.** Filter and aggregate in the engine that reads the files. Convert the small result.
+  - **Watch the index.** Polars has no index. `pl.from_pandas(df)` drops a pandas index unless you pass `include_index=True`, or call `reset_index()` first.
+  - **Check dtypes after each hop.** Text becomes `str` in pandas 3 and `String` in Polars. Nullable integers need care in both directions.
+
+  One project, one primary engine. A second tool at a clear boundary is fine. Four tools in one function is not.
+
+why_it_matters: |
+  An analyst sets `respondent_id` as the pandas index to deduplicate, then hands the frame to a Polars function for a fast join. `pl.from_pandas` drops the index. The join key is gone, so the analyst joins on row position with `hstack`. Two waves sorted differently, and 11% of respondents got another person's scores.
+
+  `pl.from_pandas(df.reset_index())` keeps the ID as a column, and the join uses it.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      big = pl.read_parquet("extracts/*.parquet").to_pandas()
+      big = big[big["wave"] == WAVE].set_index("respondent_id")
+      stats = pl.from_pandas(big).group_by("brand").agg(pl.col("weight").sum())
+    annotations:
+      - find: 'big = pl.read_parquet("extracts/*.parquet").to_pandas()'
+        note: "Reads every wave eagerly, then copies all of it into pandas before filtering."
+      - find: 'big = big[big["wave"] == WAVE].set_index("respondent_id")'
+        note: "The ID moves into the index."
+      - find: 'stats = pl.from_pandas(big).group_by("brand").agg(pl.col("weight").sum())'
+        note: "Back to Polars: the index, and so the ID, is dropped. Two conversions of the full data."
+  strong:
+    code: |
+      import pandas as pd
+      import polars as pl
+
+
+      def brand_totals(path_glob: str, wave: str) -> pd.DataFrame:
+          """Weight per brand for one wave, as pandas for modelling. Grain: one row per brand."""
+          return (
+              pl.scan_parquet(path_glob)
+              .filter(pl.col("wave") == wave)
+              .group_by("brand")
+              .agg(total=pl.col("weight").sum())
+              .sort("brand")
+              .collect()
+              .to_pandas()
+          )
+    annotations:
+      - find: ".filter(pl.col(\"wave\") == wave)"
+        note: "Reduce in the engine that reads the files."
+      - find: ".to_pandas()"
+        note: "Convert once, at the end, when the result has one row per brand."
+  takeaway: |
+    One primary engine. Reduce where the data is read. Convert small results at a clear boundary.
+
+exercises:
+  - id: B4-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You have 40 GB of Parquet on a laptop with 16 GB of RAM. You need one table of weighted totals by wave and brand, once. Which is the best first choice?
+    options:
+      - {id: a, text: "pandas read_parquet, then groupby"}
+      - {id: b, text: "DuckDB or Polars lazy, aggregating while reading"}
+      - {id: c, text: "Set up a Spark cluster"}
+      - {id: d, text: "Split the files by hand and run pandas on each"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Both read Parquet in chunks and push filters and aggregation into the scan, so the full data never sits in memory."}
+      - {id: r2, text: "They are newer than pandas."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "pandas loads the whole selection into memory first. 40 GB does not fit in 16 GB."
+      - answer: c
+        feedback: "A cluster works, but a one-off aggregate on one machine does not need one."
+      - answer: d
+        feedback: "Manual chunking re-implements what DuckDB and Polars do for you, with more room for mistakes."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Age is not the point. Out-of-memory scanning is."
+    hints:
+      - "Can the whole dataset sit in RAM?"
+      - "Which tools aggregate while reading?"
+      - "Scan-based engines on one machine."
+    explanation: |
+      DuckDB and Polars lazy read in chunks and aggregate as they go. The result is small.
+
+  - id: B4-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (pandas 3.0, Polars 1.33)
+    code: |
+      import pandas as pd
+      import polars as pl
+
+      pdf = pd.DataFrame({"respondent_id": ["r1", "r2"], "score": [3, 4]}).set_index("respondent_id")
+      print(pl.from_pandas(pdf).columns)
+    answer: "['score']"
+    wrong_answers:
+      - answer: "['respondent_id', 'score']"
+        feedback: "Polars has no index. from_pandas drops it unless you pass include_index=True."
+    hints:
+      - "Where is respondent_id after set_index?"
+      - "Does Polars have an index?"
+      - "The default is include_index=False."
+    explanation: |
+      The ID lives in the pandas index, and `from_pandas` drops the index by default. Call `reset_index()` first.
+
+  - id: B4-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Hand a DuckDB result to Polars, then a Polars result to pandas.
+    template: |
+      top_brands = con.sql("SELECT brand, sum(weight) AS total FROM responses GROUP BY brand").[[g1]]()
+      for_model = top_brands.[[g2]]()
+    gaps:
+      g1: {accepted: [pl]}
+      g2: {accepted: [to_pandas]}
+    wrong_answers:
+      - answer: {g1: df}
+        feedback: ".df() returns pandas. The first step asks for Polars."
+      - answer: {g2: df}
+        feedback: "Polars DataFrames convert with to_pandas()."
+    hints:
+      - "DuckDB relations have .df(), .pl() and .fetchall()."
+      - "Polars converts to pandas with a to_ method."
+      - "`pl` and `to_pandas`."
+    explanation: |
+      `.pl()` returns a Polars DataFrame from DuckDB. `.to_pandas()` converts Polars to pandas through Arrow.
+
+  - id: B4-L3-E4
+    type: spot_bug
+    difficulty: 3
+    language: python
+    packages: [polars, pandas, pyarrow]
+    prompt: |
+      This function runs out of memory on the full extract. Tap the line that loads far more than the result needs, and fix the function.
+    code: |
+      import pandas as pd
+      import polars as pl
+
+
+      def wave_mean(path: str, wave: str) -> float:
+          """Mean weight for one wave."""
+          df = pl.read_parquet(path).to_pandas()
+          return float(df.loc[df["wave"] == wave, "weight"].mean())
+    bug_lines: [7]
+    fix_checker:
+      kind: python
+      setup: |
+        import os
+        import tempfile
+        import polars as pl
+        PATH = os.path.join(tempfile.mkdtemp(), "x.parquet")
+        pl.DataFrame({"wave": ["w1", "w1", "w2"], "weight": [1.0, 3.0, 9.0]}).write_parquet(PATH)
+      ast_rules:
+        - id: lazy
+          kind: requires_pattern
+          pattern: "scan_parquet"
+          message: "Scan lazily so the filter is pushed into the read."
+        - id: no_eager_read
+          kind: forbids_pattern
+          pattern: "read_parquet"
+          message: "read_parquet still loads every wave."
+      tests:
+        - id: value
+          code: |
+            assert wave_mean(PATH, "w1") == 2.0
+          message: "The mean for the wave must be correct."
+    fix_solution: |
+      import polars as pl
+
+
+      def wave_mean(path: str, wave: str) -> float:
+          """Mean weight for one wave."""
+          result = (
+              pl.scan_parquet(path)
+              .filter(pl.col("wave") == wave)
+              .select(pl.col("weight").mean())
+              .collect()
+              .item()
+          )
+          return float(result)
+    wrong_answers:
+      - lines: [8]
+        feedback: "The filter is correct, but by then every wave is already in memory twice."
+    hints:
+      - "How much data exists after line 7?"
+      - "Where should the filter run?"
+      - "Scan, filter, aggregate, collect."
+    explanation: |
+      Line 7 reads every wave eagerly, then copies it into pandas. A lazy scan pushes the wave filter into the reader and returns one number.
+
+  - id: B4-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Choose the primary engine for each job.
+    slots:
+      - id: model
+        label: "Fit a logistic regression with statsmodels on a 50,000-row survey file"
+        options: &engines
+          - {id: pandas, text: "pandas"}
+          - {id: polars, text: "Polars lazy"}
+          - {id: duckdb, text: "DuckDB"}
+          - {id: spark, text: "Spark"}
+        answer: pandas
+      - id: adhoc
+        label: "Ad hoc SQL joins across 30 CSV and Parquet exports on your laptop"
+        options: *engines
+        answer: duckdb
+      - id: nightly
+        label: "Nightly job over tables that already live in the Databricks lakehouse"
+        options: *engines
+        answer: spark
+      - id: transform
+        label: "Heavy column transforms over 25 GB of Parquet on one 32 GB machine"
+        options: *engines
+        answer: polars
+    model_answer: |
+      - Small data feeding the Python modelling stack: pandas.
+      - SQL across many local files: DuckDB.
+      - Data already in the lakehouse, scheduled: Spark.
+      - Large local files with a transform pipeline: Polars lazy.
+    wrong_answers:
+      - answer: {model: spark}
+        feedback: "50,000 rows fit in memory many times over. Spark adds start-up time and a cluster for no gain."
+      - answer: {nightly: pandas}
+        feedback: "Pulling lakehouse tables into one pandas process moves the data away from the compute that already sits next to it."
+      - answer: {transform: pandas}
+        feedback: "pandas would load most of 25 GB into 32 GB of RAM. A lazy scan keeps memory in check."
+    hints:
+      - "Where does the data live?"
+      - "How big is it next to memory?"
+      - "Which library does the next step need?"
+    explanation: |
+      Size against memory, location of the data, and the next library in line decide the engine.
+
+recap:
+  - front: "Group-by over 10M rows: pandas, Polars, DuckDB"
+    back: "0.22 s, 0.11 s, 0.06 s on 4 cores. All fast enough. Choose by size against memory and where data lives."
+  - front: "Mixing engines"
+    back: "Reduce first in the engine that reads the files, convert the small result last."
+  - front: "pl.from_pandas and the index"
+    back: "Dropped by default. reset_index() first, or include_index=True."
+  - front: "When Spark"
+    back: "Data already in the lakehouse, larger than one machine, or a scheduled production job."
+
+claims:
+  - claim: "Group-by sum and mean over 10M rows: pandas 3.0.6 0.22 s, Polars 1.44.2 0.11 s, DuckDB 1.5.5 0.06 s (best of 3, 4 cores)."
+    status: verified
+    source: "Measured in this repository's dev environment."
+  - claim: "pl.from_pandas drops the pandas index unless include_index=True."
+    status: verified
+    source: "Polars API reference; run on Polars 1.33.1 and 1.44.2 in this repository."
