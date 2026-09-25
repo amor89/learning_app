@@ -1,0 +1,280 @@
+id: C7-L1
+title: Eventstream, events in, routed out
+
+concept: |
+  An **eventstream** brings real-time events into Fabric, optionally transforms them, and routes them to destinations, without code. It is Microsoft's recommended path for low-latency, event-driven ingestion (lesson C4-L1).
+
+  **Sources** include Azure Event Hubs, IoT Hub, custom apps, and change data capture (CDC) connectors for Azure SQL Database, PostgreSQL, MySQL and SQL Server on a VM. A CDC source first captures a snapshot of the current data, then streams the changes.
+
+  **Transformations** are no-code operators on the stream: filter, manage fields, aggregate over a time window, group by, union, join, expand. You can split one stream into **derived streams** for different consumers.
+
+  **Destinations** (Microsoft Learn, checked September 2026):
+
+  - **Eventhouse**, for KQL analysis (lesson C7-L2). Two ingestion modes: **direct ingestion**, or **event processing before ingestion** when you apply transformations in the eventstream first.
+  - **Lakehouse**. Events are converted to Delta Lake format and written to lakehouse tables.
+  - **Activator**, to trigger actions on conditions (lesson C7-L3).
+  - A **custom endpoint**, to route events to your own application.
+
+  Writing to an eventhouse, lakehouse or Activator destination needs **Contributor or higher** on the destination's workspace.
+
+  Design choices that matter:
+
+  - **Filter early.** Drop events nobody needs in the eventstream, before they cost storage and query time.
+  - **Keep the raw stream.** Route an unfiltered copy to an eventhouse or lakehouse table as your bronze layer, and derive cleaned streams from it. You cannot replay events you dropped.
+  - **Decide the event time.** Events carry their own timestamp. Use it for windows and analysis, not the time of arrival, which drifts when senders buffer or reconnect.
+
+why_it_matters: |
+  A fleet team filtered its eventstream to keep only engine-fault events and wrote those to an eventhouse. Three months later, engineers needed the normal readings before each fault to build a failure model. They had never been stored. Keeping the raw stream in a cheap table, and deriving the fault stream from it, would have preserved the history the model needed.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Source: IoT Hub (all vehicle telemetry)
+      Transform: Filter event_type == "fault"
+      Destination: Eventhouse table faults
+    annotations:
+      - find: 'Transform: Filter event_type == "fault"'
+        note: "The only copy of the data is filtered. Normal readings are lost for good."
+  strong:
+    code: |
+      Source: IoT Hub (all vehicle telemetry)
+      Destination 1: Eventhouse table telemetry_raw        (direct ingestion, every event)
+      Derived stream: faults = Filter event_type == "fault"
+      Destination 2: Activator rule on faults               (alert within seconds)
+      Destination 3: Lakehouse table bronze.vehicle_faults  (Delta, for Spark models)
+    annotations:
+      - find: "Destination 1: Eventhouse table telemetry_raw        (direct ingestion, every event)"
+        note: "The raw stream is kept as bronze. Anything else can be rebuilt from it."
+      - find: 'Derived stream: faults = Filter event_type == "fault"'
+        note: "Consumers get a filtered stream without losing the source."
+      - find: "Destination 2: Activator rule on faults               (alert within seconds)"
+        note: "Alerts come from the stream, not from a scheduled query."
+  takeaway: |
+    Land the raw stream once, derive filtered streams for consumers, and route each to the destination that suits it.
+
+exercises:
+  - id: C7-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      An eventstream sends events to a lakehouse destination. In what format are they stored?
+    options:
+      - {id: a, text: "JSON files under Files"}
+      - {id: b, text: "Delta Lake tables"}
+      - {id: c, text: "CSV files"}
+      - {id: d, text: "KQL tables"}
+    answer: b
+    reasons:
+      - {id: r1, text: "The lakehouse destination converts real-time events to Delta Lake format in lakehouse tables."}
+      - {id: r2, text: "Eventstream only writes Delta."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Events become Delta tables, which Spark, SQL and Direct Lake can read."
+      - answer: c
+        feedback: "Events become Delta tables."
+      - answer: d
+        feedback: "KQL tables live in an eventhouse, a different destination."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Eventhouse destinations store data in KQL databases."
+    hints:
+      - "Which format does a lakehouse use for tables?"
+      - "Delta."
+      - "Eventhouse is a different destination."
+    explanation: |
+      Lakehouse destinations write Delta tables. Eventhouse destinations write KQL tables.
+
+  - id: C7-L1-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Which permission does the person setting up an eventstream need on the workspace of an eventhouse destination?
+    options:
+      - {id: a, text: "Viewer"}
+      - {id: b, text: "Contributor or higher"}
+      - {id: c, text: "Admin only"}
+      - {id: d, text: "None: eventstreams write as the service"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Microsoft Learn requires Contributor or higher on the destination workspace for eventhouse, lakehouse and Activator destinations."}
+      - {id: r2, text: "Contributors can create any item in any workspace."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Viewers cannot write to items (lesson C1-L3)."
+      - answer: c
+        feedback: "Admin is more than needed."
+      - answer: d
+        feedback: "Access to the destination workspace is required."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Contributor applies to the workspace where the role is granted."
+    hints:
+      - "Writing to an item needs which role?"
+      - "Lesson C1-L3."
+      - "Contributor."
+    explanation: |
+      Contributor or higher on the destination workspace.
+
+  - id: C7-L1-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the design steps for a new telemetry eventstream.
+    items:
+      - {id: source, text: "Connect the source"}
+      - {id: raw, text: "Route every event to a raw table"}
+      - {id: derive, text: "Create derived streams with filters for each consumer"}
+      - {id: dest, text: "Connect each derived stream to its destination"}
+      - {id: check, text: "Compare event counts at source and destinations"}
+    answer: [source, raw, derive, dest, check]
+    wrong_answers:
+      - answer: [source, derive, dest, raw, check]
+        feedback: "Store the raw stream first, so nothing is lost while you design filters."
+      - answer: [source, raw, derive, check, dest]
+        feedback: "Counts can only be compared once destinations are connected and receiving events."
+    hints:
+      - "Source first."
+      - "Protect the raw data before filtering."
+      - "Verify at the end."
+    explanation: |
+      Source, raw landing, derived streams, destinations, then a count check.
+
+  - id: C7-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `route(event: dict[str, object]) -> list[str]` modelling the strong design. Every event goes to `"telemetry_raw"`. Events with `event_type == "fault"` also go to `"activator_faults"` and `"bronze.vehicle_faults"`. Events without an `event_type` key go to `"telemetry_raw"` and `"quarantine"`. Return destinations in that order.
+    starter: |
+      def route(event):
+          if event["event_type"] == "fault":
+              return ["activator_faults"]
+          return []
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: route
+          typed: true
+          docstring: true
+          message: "Give `route` type hints and a docstring."
+      tests:
+        - id: normal
+          code: |
+            assert route({"event_type": "reading", "rpm": 900}) == ["telemetry_raw"]
+          message: "Every event is kept in telemetry_raw."
+        - id: fault
+          code: |
+            assert route({"event_type": "fault", "code": "E12"}) == ["telemetry_raw", "activator_faults", "bronze.vehicle_faults"]
+          message: "Faults go to the raw table, Activator and the bronze faults table, in that order."
+        - id: missing
+          code: |
+            assert route({"rpm": 900}) == ["telemetry_raw", "quarantine"]
+          message: "Events without event_type are kept raw and quarantined, not dropped or crashing."
+    solution: |
+      def route(event: dict[str, object]) -> list[str]:
+          """Destinations for one telemetry event. Every event is kept raw.
+
+          Args:
+              event: Parsed event.
+
+          Returns:
+              Destination names in routing order.
+          """
+          destinations = ["telemetry_raw"]
+          if "event_type" not in event:
+              destinations.append("quarantine")
+          elif event["event_type"] == "fault":
+              destinations += ["activator_faults", "bronze.vehicle_faults"]
+          return destinations
+    seeded_bugs:
+      - |
+        def route(event: dict[str, object]) -> list[str]:
+            """Drops non-fault events."""
+            if event.get("event_type") == "fault":
+                return ["telemetry_raw", "activator_faults", "bronze.vehicle_faults"]
+            return []
+      - |
+        def route(event: dict[str, object]) -> list[str]:
+            """Crashes on missing event_type."""
+            destinations = ["telemetry_raw"]
+            if event["event_type"] == "fault":
+                destinations += ["activator_faults", "bronze.vehicle_faults"]
+            return destinations
+    wrong_answers:
+      - answer: |
+          def route(event: dict[str, object]) -> list[str]:
+              """Crashes on missing event_type."""
+              destinations = ["telemetry_raw"]
+              if event["event_type"] == "fault":
+                  destinations += ["activator_faults", "bronze.vehicle_faults"]
+              return destinations
+        triggers: missing
+    hints:
+      - "Start with telemetry_raw for every event."
+      - "Check for a missing key before reading it."
+      - "Add fault destinations after the raw one."
+    explanation: |
+      Raw first, always. Malformed events are kept and flagged, not lost.
+
+  - id: C7-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Stream order changes from an Azure SQL database into Fabric for a live dashboard and for nightly Spark models.
+    slots:
+      - id: source
+        label: "Source connector"
+        options:
+          - {id: cdc, text: "Azure SQL Database CDC source"}
+          - {id: poll, text: "A pipeline polling the table every minute"}
+        answer: cdc
+      - id: live
+        label: "Destination for the live dashboard"
+        options:
+          - {id: eventhouse, text: "Eventhouse"}
+          - {id: lakehouse, text: "Lakehouse"}
+        answer: eventhouse
+      - id: models
+        label: "Destination for nightly Spark models"
+        options:
+          - {id: lakehouse, text: "Lakehouse (Delta tables)"}
+          - {id: custom, text: "Custom endpoint"}
+        answer: lakehouse
+    model_answer: |
+      - The CDC source streams inserts, updates and deletes after an initial snapshot.
+      - An eventhouse serves low-latency KQL queries for dashboards.
+      - A lakehouse destination writes Delta tables for Spark.
+    wrong_answers:
+      - answer: {source: poll}
+        feedback: "Polling misses deletes and adds load. CDC streams every change."
+      - answer: {live: lakehouse}
+        feedback: "Lakehouse tables suit batch analysis. Live dashboards query an eventhouse with KQL."
+      - answer: {models: custom}
+        feedback: "Spark reads Delta tables in a lakehouse directly."
+    hints:
+      - "Which source captures every change?"
+      - "Which store answers queries in seconds?"
+      - "Which store does Spark read?"
+    explanation: |
+      One CDC source, two destinations, each suited to its consumer.
+
+recap:
+  - front: "What an eventstream does"
+    back: "Ingests real-time events, transforms them without code, and routes them to destinations."
+  - front: "Eventstream destinations"
+    back: "Eventhouse (direct or processed ingestion), Lakehouse (Delta tables), Activator, custom endpoint."
+  - front: "Permission for eventhouse, lakehouse or Activator destinations"
+    back: "Contributor or higher on the destination workspace."
+  - front: "Protect replay"
+    back: "Land the raw stream first. Derive filtered streams from it."
+
+claims:
+  - claim: "Eventstreams ingest, transform without code and route events; CDC source connectors for Azure SQL, PostgreSQL, MySQL and SQL Server on VM capture a snapshot then changes."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/real-time-intelligence/event-streams/overview (updated 2026-04-29)"
+  - claim: "Destinations include custom endpoint, eventhouse (direct ingestion or processing before ingestion), lakehouse (Delta) and Activator; Contributor or higher is required for eventhouse, lakehouse and Activator destinations."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/real-time-intelligence/event-streams/add-manage-eventstream-destinations (updated 2026-03-19)"

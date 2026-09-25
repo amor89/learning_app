@@ -1,0 +1,271 @@
+id: C7-L2
+title: Eventhouse and KQL for time-series questions
+
+concept: |
+  An **eventhouse** holds one or more **KQL databases**, built for high-volume, time-stamped data such as telemetry, logs and clickstreams. You query them with the **Kusto Query Language (KQL)**: a pipeline of operators joined by `|`, read top to bottom.
+
+  ```text
+  telemetry_raw
+  | where event_time > ago(1h)
+  | where event_type == "reading"
+  | summarize avg_rpm = avg(rpm), n = count() by vehicle_id, bin(event_time, 5m)
+  ```
+
+  - Put `where` filters first, especially on time. They cut the data every later operator touches.
+  - `ago(1h)` is one hour before now. `bin(event_time, 5m)` rounds times **down** to five-minute buckets.
+  - `summarize ... by` aggregates per group.
+
+  Three KQL behaviours catch people out (Microsoft Learn, checked September 2026):
+
+  - **`take` returns arbitrary rows.** There is no guarantee which records come back, and repeated runs can differ, unless the data is sorted. For "the latest 10", use `top 10 by event_time desc`.
+  - **`summarize` leaves gaps.** A five-minute bin with no events produces no row, so a chart draws a straight line across an outage. `make-series ... default = 0 ... step 5m` fills missing bins.
+  - **Empty input.** `summarize count()` without `by` returns one row. With `by`, empty input returns no rows at all.
+
+  **Data policies** are set per database or table. The **retention policy** removes old data automatically. The default is 3,650 days, the maximum 36,500, the minimum one day, and you can set it to unlimited. The **caching policy** decides how much recent data stays in the hot cache on local SSD: faster queries, higher cost. Set retention from the use: raw telemetry kept 90 days, daily aggregates kept for years.
+
+  Turn on **OneLake availability** for a database or table to expose its data as Delta in OneLake, so Spark and the SQL analytics endpoint can read it without a copy.
+
+why_it_matters: |
+  An on-call dashboard showed the "latest readings" from a KQL query ending in `| take 10`. During an incident, the panel showed readings from two hours earlier, mixed with current ones, and the engineer concluded the sensor had recovered. It had not. `take` returned arbitrary rows. `top 10 by event_time desc` would have shown the true latest readings.
+
+worked_example:
+  language: kql
+  weak:
+    code: |
+      telemetry_raw
+      | summarize avg_rpm = avg(rpm) by vehicle_id, bin(event_time, 5m)
+      | where event_time > ago(1h)
+      | take 10
+    annotations:
+      - find: "| summarize avg_rpm = avg(rpm) by vehicle_id, bin(event_time, 5m)"
+        note: "Aggregates the whole table before filtering to the last hour."
+      - find: "| take 10"
+        note: "Arbitrary rows, different on each run."
+  strong:
+    code: |
+      telemetry_raw
+      | where event_time > ago(1h)
+      | where event_type == "reading"
+      | make-series avg_rpm = avg(rpm) default = 0 on event_time step 5m by vehicle_id
+
+      telemetry_raw
+      | where event_time > ago(15m)
+      | top 10 by event_time desc
+    annotations:
+      - find: "| where event_time > ago(1h)"
+        note: "Time filter first: less data for every later step."
+      - find: "| make-series avg_rpm = avg(rpm) default = 0 on event_time step 5m by vehicle_id"
+        note: "Every five-minute bin exists, so outages show as zeros, not as smooth lines."
+      - find: "| top 10 by event_time desc"
+        note: "The true latest ten, every time."
+  takeaway: |
+    Filter on time first, use top for "latest", make-series for continuous charts, and set retention and caching per table on purpose.
+
+exercises:
+  - id: C7-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A query ends with `| take 10`. What do you get?
+    options:
+      - {id: a, text: "The 10 most recent rows"}
+      - {id: b, text: "The first 10 rows ingested"}
+      - {id: c, text: "10 arbitrary rows, possibly different on each run"}
+      - {id: d, text: "An error unless the table is sorted"}
+    answer: c
+    reasons:
+      - {id: r1, text: "take guarantees nothing about which records it returns unless the data is sorted."}
+      - {id: r2, text: "take samples randomly with a fixed seed."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Use top 10 by event_time desc for the most recent rows."
+      - answer: b
+        feedback: "Ingestion order is not guaranteed either."
+      - answer: d
+        feedback: "take runs without error. It just promises nothing about which rows."
+      - answer: c|r2
+        feedback: "Right answer, wrong reason. There is no fixed seed. Results can change between runs."
+    hints:
+      - "Does take sort?"
+      - "Is its result consistent?"
+      - "Use top for ordered results."
+    explanation: |
+      take is for browsing. top is for answers.
+
+  - id: C7-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A sensor sent nothing between 10:05 and 10:20. What does `summarize n = count() by bin(event_time, 5m)` return for those bins?
+    options:
+      - {id: a, text: "Rows with n = 0"}
+      - {id: b, text: "No rows for those bins"}
+      - {id: c, text: "Rows with n = null"}
+      - {id: d, text: "An error"}
+    answer: b
+    reasons:
+      - {id: r1, text: "summarize groups existing rows. Bins with no rows do not appear. make-series fills them."}
+      - {id: r2, text: "KQL drops zero counts to save space."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That is make-series with default = 0. summarize only returns groups that exist."
+      - answer: c
+        feedback: "No rows are created at all."
+      - answer: d
+        feedback: "Empty bins are not an error."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. There are no rows to count, so no group is formed."
+    hints:
+      - "Which rows does summarize group?"
+      - "Are there rows in those bins?"
+      - "No."
+    explanation: |
+      Charts draw a line straight across the gap. Use make-series with a default to show the outage.
+
+  - id: C7-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: kql
+    prompt: |
+      Return the 10 most recent readings from the last hour.
+    template: |
+      telemetry_raw
+      | where event_time > [[g1]](1h)
+      | [[g2]] 10 by event_time desc
+    gaps:
+      g1: {accepted: [ago]}
+      g2: {accepted: [top]}
+    wrong_answers:
+      - answer: {g2: take}
+        feedback: "take does not accept a sort and returns arbitrary rows."
+    hints:
+      - "A function for 'one hour before now'."
+      - "The operator that sorts and limits."
+      - "`ago` and `top`."
+    explanation: |
+      `ago(1h)` sets the window. `top 10 by event_time desc` returns the latest ten.
+
+  - id: C7-L2-E4
+    type: write_function
+    difficulty: 3
+    language: kql
+    prompt: |
+      Write a KQL query on `telemetry_raw` that returns, for the last 24 hours, the average `rpm` per `vehicle_id` in one-hour steps, with **every** hour present and missing hours as 0. Filter on time first. Name the series `avg_rpm`.
+    starter: |
+      telemetry_raw
+      | summarize avg_rpm = avg(rpm) by vehicle_id, bin(event_time, 1h)
+    checker:
+      kind: text
+      comments: kql
+      rules:
+        - id: table
+          type: required
+          pattern: "^\\s*telemetry_raw"
+          message: "Start from telemetry_raw."
+        - id: time_first
+          type: required
+          pattern: "telemetry_raw\\s*\\|\\s*where\\s+event_time\\s*>\\s*ago\\(\\s*24h\\s*\\)"
+          message: "Filter to the last 24 hours immediately after the table: | where event_time > ago(24h)."
+        - id: make_series
+          type: required
+          pattern: "make-series\\s+avg_rpm\\s*=\\s*avg\\(\\s*rpm\\s*\\)\\s+default\\s*=\\s*0\\s+on\\s+event_time"
+          message: "Use make-series avg_rpm = avg(rpm) default = 0 on event_time."
+        - id: step
+          type: required
+          pattern: "step\\s+1h\\s+by\\s+vehicle_id"
+          message: "One-hour steps per vehicle: step 1h by vehicle_id."
+        - id: no_take
+          type: forbidden
+          pattern: "\\btake\\b"
+          message: "take returns arbitrary rows. It has no place here."
+    solution: |
+      telemetry_raw
+      | where event_time > ago(24h)
+      | make-series avg_rpm = avg(rpm) default = 0 on event_time step 1h by vehicle_id
+    seeded_bugs:
+      - |
+        telemetry_raw
+        | where event_time > ago(24h)
+        | summarize avg_rpm = avg(rpm) by vehicle_id, bin(event_time, 1h)
+      - |
+        telemetry_raw
+        | make-series avg_rpm = avg(rpm) default = 0 on event_time step 1h by vehicle_id
+        | where event_time > ago(24h)
+    wrong_answers:
+      - answer: |
+          telemetry_raw
+          | where event_time > ago(24h)
+          | summarize avg_rpm = avg(rpm) by vehicle_id, bin(event_time, 1h)
+        triggers: make_series
+    hints:
+      - "Filter with where and ago first."
+      - "make-series fills missing steps with the default."
+      - "... default = 0 on event_time step 1h by vehicle_id."
+    explanation: |
+      make-series returns one array per vehicle with every hour present, so gaps show as zeros.
+
+  - id: C7-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Set data policies for a telemetry eventhouse.
+    slots:
+      - id: raw_ret
+        label: "Retention for telemetry_raw (queried for 30 days, needed for audits for 90)"
+        options:
+          - {id: d90, text: "90 days"}
+          - {id: keep_default, text: "Leave the default of 3,650 days"}
+          - {id: d7, text: "7 days"}
+        answer: d90
+      - id: raw_cache
+        label: "Hot cache for telemetry_raw"
+        options:
+          - {id: c30, text: "30 days"}
+          - {id: c90, text: "90 days"}
+        answer: c30
+      - id: agg
+        label: "Retention for daily aggregates used in yearly trends"
+        options:
+          - {id: years, text: "Several years, or unlimited"}
+          - {id: d90, text: "90 days"}
+        answer: years
+    model_answer: |
+      - Keep raw data as long as audits need, and no longer: 90 days.
+      - Cache the 30 days people query, to balance speed and cost.
+      - Keep small aggregates for years, where trends need them.
+    wrong_answers:
+      - answer: {raw_ret: keep_default}
+        feedback: "Ten years of raw telemetry costs storage nobody uses. Set retention from the need."
+      - answer: {raw_ret: d7}
+        feedback: "Audits need 90 days. Data past retention is removed automatically."
+      - answer: {raw_cache: c90}
+        feedback: "Caching data nobody queries raises cost without speeding up real queries."
+    hints:
+      - "Who needs the raw data, and for how long?"
+      - "Which period is actually queried?"
+      - "Aggregates are small."
+    explanation: |
+      Retention follows need, cache follows query patterns, and aggregates outlive raw data.
+
+recap:
+  - front: "take vs top in KQL"
+    back: "take: arbitrary rows, not repeatable. top N by col desc: ordered, repeatable."
+  - front: "Gaps in time series"
+    back: "summarize omits empty bins. make-series ... default = 0 fills them."
+  - front: "KQL retention policy defaults"
+    back: "Default 3,650 days, maximum 36,500, minimum 1 day, or unlimited."
+  - front: "Caching policy"
+    back: "How much recent data stays in the hot SSD cache: faster queries, higher cost."
+
+claims:
+  - claim: "take guarantees nothing about which records it returns unless the data is sorted; bin rounds down; summarize on empty input with a by clause returns no rows; make-series assigns a default to absent values."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/kusto/query/ (take-operator, bin-function, summarize-operator, make-series-operator; view=microsoft-fabric)"
+  - claim: "KQL database retention defaults to 3,650 days, maximum 36,500, minimum one day, unlimited option; caching policy controls data kept in the hot cache."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/real-time-intelligence/data-policies (updated 2026-03-22)"
+  - claim: "OneLake availability can be enabled per database or table."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/real-time-intelligence/eventhouse (updated 2026-06-15)"

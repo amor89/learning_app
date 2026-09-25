@@ -1,0 +1,299 @@
+id: C7-L3
+title: Activator, rules that act on events
+concept: |
+  **Activator** is Fabric's no-code event detection engine. It watches data and takes an action when a condition is met. Its sources include eventstreams, Fabric and Azure events, Power BI reports and Real-Time dashboards.
+
+  Activator groups **events** into **objects** by a shared ID, such as `vehicle_id`. It evaluates each rule **per object** and keeps state for each one. "Vehicle 17 overheated" is a separate fact from "vehicle 42 overheated".
+
+  Two kinds of condition behave differently (Microsoft Learn, checked September 2026):
+
+  - **Change conditions** fire on a transition. `Increases above 100` fires when a value crosses 100 from below. `Becomes true` fires when a boolean changes from false to true.
+  - **State conditions** fire on every event that matches. `Is greater than 100` fires for each reading above 100.
+
+  For alerts, you want a change condition, or a state condition with an **occurrence** setting: "When it has been true for 10 minutes" fires only if the condition holds for the whole period. **No presence of data** (heartbeat) fires when no new events arrive within a set time. Use it to detect a silent sensor.
+
+  **Actions** include an email, a Teams message, a Power Automate flow, or running a Fabric item such as a pipeline or notebook.
+
+  Limits to design around:
+
+  - Up to 10,000 incoming events per second per rule. Above that, Activator stops the rule.
+  - Emails and Teams messages: 30 per rule per recipient per hour.
+  - Late events: by default, Activator drops events that arrive after their time window closes. The **Wait time for late-arriving events** setting (default two minutes) lets them in, at the cost of added latency.
+
+why_it_matters: |
+  A plant set a rule `Temperature Is greater than 80` on a stream that reports every 10 seconds. One oven ran hot for 20 minutes. The rule tried to send 120 emails to the shift lead. After 30, the rate limit throttled the rest, and the lead muted the alerts. An `Increases above 80` rule, or `Is greater than 80` with an occurrence of five minutes, would have sent one useful alert.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Object: all events (no ID)
+      Condition: temperature Is greater than 80
+      Occurrence: Every time the condition is met
+      Action: Email shift lead
+    annotations:
+      - find: "Object: all events (no ID)"
+        note: "One oven's reading clears the state of another. Group by oven."
+      - find: "Condition: temperature Is greater than 80"
+        note: "A state condition fires on every hot reading."
+  strong:
+    code: |
+      Object: oven, keyed by oven_id
+      Condition: temperature Is greater than 80
+      Occurrence: When it has been true for 5 minutes
+      Action: Teams message to the line channel
+      Rule 2: No presence of data for 2 minutes per oven_id
+    annotations:
+      - find: "Object: oven, keyed by oven_id"
+        note: "State is tracked per oven."
+      - find: "Occurrence: When it has been true for 5 minutes"
+        note: "One alert for a sustained problem, not one per reading."
+      - find: "Rule 2: No presence of data for 2 minutes per oven_id"
+        note: "A silent sensor is a problem too. Heartbeat detects it."
+  takeaway: |
+    Key each rule by the object it describes. Fire on change or sustained state, not on every event. Add a heartbeat for silence.
+
+exercises:
+  - id: C7-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A stream reports `temperature` every 10 seconds. It rises above 100 and stays there for 3 minutes. How many times does `Increases above 100` fire?
+    options:
+      - {id: a, text: "Once"}
+      - {id: b, text: "18 times, once per reading"}
+      - {id: c, text: "Never, because the value never decreases"}
+      - {id: d, text: "Once every minute"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Increases above is a change condition. It fires when the value crosses the threshold from below."}
+      - {id: r2, text: "Activator sends one alert per rule per day."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That is Is greater than, a state condition that fires on each matching event."
+      - answer: c
+        feedback: "The crossing from below is the trigger. No decrease is needed."
+      - answer: d
+        feedback: "Change conditions do not repeat on a timer."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. There is no daily limit of one. The rule fires once because there is one crossing."
+    hints:
+      - "Is this a change or a state condition?"
+      - "How many times does the value cross 100 from below?"
+      - "Once."
+    explanation: |
+      Change conditions fire on transitions. State conditions fire on every matching event.
+
+  - id: C7-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A sensor stops sending data. Which Activator condition detects it?
+    options:
+      - {id: a, text: "Is less than 1"}
+      - {id: b, text: "No presence of data"}
+      - {id: c, text: "Becomes false"}
+      - {id: d, text: "Changes"}
+    answer: b
+    reasons:
+      - {id: r1, text: "No presence of data fires when no new events arrive within a set time. Other conditions need an event to evaluate."}
+      - {id: r2, text: "A silent sensor sends zeros."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "No event arrives, so there is no value to compare."
+      - answer: c
+        feedback: "Becomes false needs a new event with the value false."
+      - answer: d
+        feedback: "Changes needs a new event with a different value."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. A silent sensor sends nothing at all."
+    hints:
+      - "What arrives from a silent sensor?"
+      - "Nothing. Which condition works on absence?"
+      - "Heartbeat."
+    explanation: |
+      Every value-based condition needs an event. Only the heartbeat condition sees silence.
+
+  - id: C7-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Alert once when a freezer stays above -15 for 10 minutes. Complete the rule.
+    template: |
+      Object: freezer, keyed by [[g1]]
+      Condition: temperature Is greater than -15
+      Occurrence: When it has been [[g2]] for 10 minutes
+    gaps:
+      g1: {accepted: [freezer_id]}
+      g2: {accepted: ["true"]}
+    wrong_answers:
+      - answer: {g1: event_id}
+        feedback: "Every event has its own ID, so no state carries across readings. Key by the freezer."
+    hints:
+      - "Which column identifies one freezer?"
+      - "The occurrence option reads 'When it has been ... for'."
+      - "`freezer_id` and `true`."
+    explanation: |
+      Key by the object. The occurrence turns a state condition into one alert for a sustained problem.
+
+  - id: C7-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Model an Activator `Increases above` rule. Write `activations(events: list[tuple[str, float]], threshold: float) -> list[int]`. Each event is `(object_id, value)` in arrival order. Return the indexes of events where that object's value goes above `threshold` and its previous value was at or below it. An object's first event counts as crossing if it is above the threshold. Track state per object.
+    starter: |
+      def activations(events, threshold):
+          return [i for i, (_, value) in enumerate(events) if value > threshold]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: activations
+          typed: true
+          docstring: true
+          message: "Give `activations` type hints and a docstring."
+      tests:
+        - id: single
+          code: |
+            assert activations([("a", 70.0), ("a", 85.0), ("a", 90.0), ("a", 60.0), ("a", 95.0)], 80.0) == [1, 4]
+          message: "Fire on each crossing from at or below to above, not on every hot reading."
+        - id: per_object
+          code: |
+            assert activations([("a", 85.0), ("b", 70.0), ("a", 90.0), ("b", 82.0)], 80.0) == [0, 3]
+          message: "Track state per object. Oven b's cool reading does not reset oven a."
+        - id: boundary
+          code: |
+            assert activations([("a", 80.0), ("a", 80.5)], 80.0) == [1]
+          message: "A value equal to the threshold is not above it."
+        - id: empty
+          code: |
+            assert activations([], 80.0) == []
+          message: "No events, no activations."
+    solution: |
+      def activations(events: list[tuple[str, float]], threshold: float) -> list[int]:
+          """Indexes of events where an object's value crosses above a threshold.
+
+          Args:
+              events: (object_id, value) pairs in arrival order.
+              threshold: Value that must be exceeded.
+
+          Returns:
+              Event indexes where the object moved from at-or-below to above.
+          """
+          above: dict[str, bool] = {}
+          fired: list[int] = []
+          for index, (object_id, value) in enumerate(events):
+              is_above = value > threshold
+              if is_above and not above.get(object_id, False):
+                  fired.append(index)
+              above[object_id] = is_above
+          return fired
+    seeded_bugs:
+      - |
+        def activations(events: list[tuple[str, float]], threshold: float) -> list[int]:
+            """State condition: fires on every hot reading."""
+            return [i for i, (_, value) in enumerate(events) if value > threshold]
+      - |
+        def activations(events: list[tuple[str, float]], threshold: float) -> list[int]:
+            """One shared state for all objects."""
+            was_above = False
+            fired: list[int] = []
+            for index, (_, value) in enumerate(events):
+                is_above = value > threshold
+                if is_above and not was_above:
+                    fired.append(index)
+                was_above = is_above
+            return fired
+    wrong_answers:
+      - answer: |
+          def activations(events: list[tuple[str, float]], threshold: float) -> list[int]:
+              """One shared state for all objects."""
+              was_above = False
+              fired: list[int] = []
+              for index, (_, value) in enumerate(events):
+                  is_above = value > threshold
+                  if is_above and not was_above:
+                      fired.append(index)
+                  was_above = is_above
+              return fired
+        triggers: per_object
+    hints:
+      - "Keep a dict from object_id to 'was above'."
+      - "Fire when the value is above and the object was not."
+      - "Update the object's state after every event."
+    explanation: |
+      Per-object state is what makes the rule mean "this oven crossed 80", not "some reading somewhere crossed 80".
+
+  - id: C7-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Design alerts for 400 delivery vans that send GPS and engine data every 5 seconds. The fleet manager wants one Teams message when a van's engine runs hot for a sustained period, and to know when a van goes silent.
+    slots:
+      - id: object
+        label: "Object key"
+        options:
+          - {id: van, text: "van_id"}
+          - {id: fleet, text: "One object for the whole fleet"}
+        answer: van
+      - id: hot
+        label: "Hot-engine condition"
+        options:
+          - {id: sustained, text: "engine_temp Is greater than 105, occurrence: When it has been true for 3 minutes"}
+          - {id: every, text: "engine_temp Is greater than 105, occurrence: Every time the condition is met"}
+        answer: sustained
+      - id: silent
+        label: "Silent van"
+        options:
+          - {id: heartbeat, text: "No presence of data for 2 minutes"}
+          - {id: speed_zero, text: "speed Is less than 1"}
+        answer: heartbeat
+    model_answer: |
+      - Key by van_id, so each van keeps its own state.
+      - A sustained state condition sends one message per incident, well under the 30 per rule per recipient per hour limit.
+      - A heartbeat rule detects silence, which no value-based condition sees.
+    wrong_answers:
+      - answer: {object: fleet}
+        feedback: "One object mixes 400 vans. A cool reading from one van clears a hot one."
+      - answer: {hot: every}
+        feedback: "At one reading every 5 seconds, a hot van sends 12 messages a minute and hits the 30-per-hour limit in under 3 minutes."
+      - answer: {silent: speed_zero}
+        feedback: "A parked van reports speed 0. A silent van reports nothing."
+    hints:
+      - "Which ID identifies one van?"
+      - "How many readings arrive per minute?"
+      - "Which condition works without events?"
+    explanation: |
+      Per-object keys, sustained conditions for noisy streams, and a heartbeat for silence.
+
+recap:
+  - front: "Events and objects in Activator"
+    back: "Events are grouped into objects by a shared ID. Rules run and keep state per object."
+  - front: "Increases above vs Is greater than"
+    back: "Increases above fires on the crossing. Is greater than fires on every matching event."
+  - front: "Detect a silent sensor"
+    back: "No presence of data (heartbeat) fires when no events arrive within a set time."
+  - front: "Activator limits to design around"
+    back: "10,000 events per second per rule. 30 emails or Teams messages per rule per recipient per hour."
+
+claims:
+  - claim: "Activator is a no-code event detection engine; events are grouped into objects by a shared identifier; rules are evaluated per object with state tracking; subsecond latency for stateless rules on streaming data."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/real-time-intelligence/data-activator/activator-introduction (updated 2026-04-17)"
+  - claim: "Conditions include Increases above, Decreases below, Is greater than, Becomes true/false, Changes and No presence of data; occurrence options are every time, n times, and true for a duration."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/real-time-intelligence/data-activator/activator-detection-conditions (updated 2026-05-04)"
+  - claim: "Actions include email, Teams message (individual, group chat, channel), Power Automate and running Fabric items such as pipelines and notebooks."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/real-time-intelligence/data-activator/rule-actions (updated 2026-05-11)"
+  - claim: "Up to 10,000 incoming events per second per rule, after which the rule stops; 30 email or Teams messages per rule per recipient per hour."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/real-time-intelligence/data-activator/activator-limitations (updated 2026-04-17)"
+  - claim: "Late events are dropped by default; the wait time for late-arriving events defaults to two minutes and adds latency."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/real-time-intelligence/data-activator/activator-latency (updated 2026-04-30)"
