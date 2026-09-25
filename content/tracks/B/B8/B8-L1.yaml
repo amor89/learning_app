@@ -1,0 +1,368 @@
+id: B8-L1
+title: Survey weights and the effective sample size
+
+concept: |
+  A survey sample rarely matches its population. If young adults are 20% of the population but 10% of your completes, each young respondent gets a larger **weight** so the weighted sample matches the population.
+
+  The **weighted mean** divides by the sum of the weights, not by the row count:
+
+  ```python
+  weighted_mean = (y * w).sum() / w.sum()      # same as np.average(y, weights=w)
+  ```
+
+  Weights have a cost. Unequal weights make estimates less precise than the raw sample size suggests. Kish's **effective sample size** measures that cost:
+
+  ```python
+  n_eff = w.sum() ** 2 / (w ** 2).sum()
+  design_effect = n / n_eff
+  ```
+
+  Equal weights give `n_eff = n`. A sample of 5 with weights 0.5, 0.5, 1, 2 and 4 has `n_eff = 2.98`: it carries about as much information as three unweighted respondents. The design effect is 1.68.
+
+  Rules that prevent the common mistakes:
+
+  - **Use weights for population estimates:** shares, means and totals you report as "UK adults".
+  - **Use `n_eff`, not `n`, for precision:** confidence intervals, significance tests and minimum base rules (lesson B8-L2).
+  - **Report the unweighted base** next to every weighted figure, so readers see how many people stand behind it.
+  - **Drop rows where the value or the weight is missing** before you compute. A missing weight is not zero, and a missing answer is not a zero answer.
+  - **Guard the division.** An empty subgroup or a zero weight total has no mean. Return `None`.
+
+  Check weights before using them: all positive, none missing, and a sum equal to the sample size or the population total, whichever the weighting scheme promises. Extreme weights (above about 5 times the mean) are a warning sign. Trimming them is a design decision, logged as an assumption (lesson B7-L3).
+
+why_it_matters: |
+  A brand tracker reported that awareness among 18 to 24s rose from 41% to 52%, "significant at 95%". The test used the 180 raw respondents in the group. Their weights were uneven, and the effective sample size was 71. With 71, the change was well inside the margin of error. The client moved budget on a result the data did not support.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      share = (df["aware"] * df["weight"]).mean()
+      se = (share * (1 - share) / len(df)) ** 0.5
+    annotations:
+      - find: 'share = (df["aware"] * df["weight"]).mean()'
+        note: "Divides by the row count, not the weight total. Only right if weights average exactly 1."
+      - find: 'se = (share * (1 - share) / len(df)) ** 0.5'
+        note: "Uses raw n, overstating precision whenever weights vary."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def weighted_share(df: pd.DataFrame, value: str, weight: str) -> float | None:
+          """Weighted mean of value, ignoring rows with a missing value or weight."""
+          d = df[[value, weight]].dropna()
+          total = d[weight].sum()
+          if len(d) == 0 or total == 0:
+              return None
+          return float((d[value] * d[weight]).sum() / total)
+
+
+      def effective_n(weights: pd.Series) -> float | None:
+          """Kish effective sample size: (sum w)^2 / sum(w^2)."""
+          w = weights.dropna()
+          sum_sq = (w**2).sum()
+          if sum_sq == 0:
+              return None
+          return float(w.sum() ** 2 / sum_sq)
+    annotations:
+      - find: "d = df[[value, weight]].dropna()"
+        note: "Rows missing either the answer or the weight do not count."
+      - find: "return float((d[value] * d[weight]).sum() / total)"
+        note: "Divides by the weight total."
+      - find: "return float(w.sum() ** 2 / sum_sq)"
+        note: "The n to use for precision."
+  takeaway: |
+    Weighted estimates divide by the weight total. Precision uses the effective sample size.
+
+exercises:
+  - id: B8-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A subgroup has 180 respondents and an effective sample size of 71. Which number belongs in the standard error of its weighted share?
+    options:
+      - {id: a, text: "180"}
+      - {id: b, text: "71"}
+      - {id: c, text: "The sum of the weights"}
+      - {id: d, text: "180 minus 71"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Unequal weights reduce precision, and n_eff measures the information that remains."}
+      - {id: r2, text: "Smaller numbers are always safer."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Raw n overstates precision when weights vary, so intervals come out too narrow."
+      - answer: c
+        feedback: "The weight total depends on the scaling of the weights, not on the information in the sample."
+      - answer: d
+        feedback: "That difference has no statistical meaning."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. n_eff is the correct amount of information, not a cautious guess."
+    hints:
+      - "What do unequal weights do to precision?"
+      - "Which number measures the remaining information?"
+      - "Kish's n_eff."
+    explanation: |
+      Use `n_eff` for standard errors, intervals and tests. Report the raw base alongside.
+
+  - id: B8-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (NumPy 2.4)
+    code: |
+      import numpy as np
+
+      y = np.array([1, 0, 1, 0, 1])
+      w = np.array([0.5, 0.5, 1.0, 2.0, 4.0])
+      print(np.average(y, weights=w), y.mean())
+    answer: "0.6875 0.6"
+    wrong_answers:
+      - answer: "0.6 0.6"
+        feedback: "np.average with weights gives (0.5 + 1 + 4) / 8 = 0.6875."
+      - answer: "1.1 0.6"
+        feedback: "That is sum(y * w) / n. A weighted mean divides by sum(w) = 8."
+    hints:
+      - "Which respondents answered 1, and what are their weights?"
+      - "Sum of those weights over the total weight."
+      - "5.5 / 8."
+    explanation: |
+      Weighted: 5.5 / 8 = 0.6875. Unweighted: 3 / 5 = 0.6.
+
+  - id: B8-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Compute Kish's effective sample size and the design effect.
+    template: |
+      n_eff = w.sum() ** 2 / (w ** [[g1]]).sum()
+      deff = [[g2]] / n_eff
+    gaps:
+      g1: {accepted: ["2"]}
+      g2: {accepted: [len(w), n, "w.size"]}
+    wrong_answers:
+      - answer: {g2: w.sum()}
+        feedback: "The design effect compares the raw count with n_eff: len(w) / n_eff."
+    hints:
+      - "Sum of weights, squared, over the sum of squared weights."
+      - "Design effect = raw n / n_eff."
+      - "`2` and `len(w)`."
+    explanation: |
+      `n_eff = (Σw)² / Σw²`. `deff = n / n_eff`. Equal weights give 1.
+
+  - id: B8-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Write two functions.
+
+      - `weighted_share(df, value, weight) -> float | None`: the weighted mean of `value`, ignoring rows where the value or the weight is missing. Return `None` when no rows remain or the weight total is 0.
+      - `effective_n(weights: pd.Series) -> float | None`: Kish's effective sample size, ignoring missing weights. Return `None` when the sum of squared weights is 0.
+    starter: |
+      import pandas as pd
+
+
+      def weighted_share(df, value, weight):
+          return (df[value] * df[weight]).mean()
+
+
+      def effective_n(weights):
+          return len(weights)
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        DF = pd.DataFrame({"aware": [1, 0, 1, 0, 1, 1], "weight": [0.5, 0.5, 1.0, 2.0, 4.0, None]})
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: weighted_share
+          typed: true
+          docstring: true
+          message: "Give `weighted_share` type hints and a docstring."
+        - id: neff_typed
+          kind: requires_function
+          name: effective_n
+          typed: true
+          docstring: true
+          message: "Give `effective_n` type hints and a docstring."
+        - id: no_truthiness
+          kind: forbids_bare_truthiness
+          names: [total, sum_sq]
+          message: "Compare totals with == 0, not truthiness."
+      tests:
+        - id: share
+          code: |
+            assert weighted_share(DF, "aware", "weight") == 0.6875
+          message: "Divide sum(value * weight) by sum(weight), over rows with both present."
+        - id: share_empty
+          code: |
+            assert weighted_share(DF.iloc[0:0], "aware", "weight") is None
+            zero = pd.DataFrame({"aware": [1], "weight": [0.0]})
+            assert weighted_share(zero, "aware", "weight") is None
+          message: "An empty frame or a zero weight total must return None."
+        - id: neff
+          code: |
+            assert round(effective_n(DF["weight"]), 3) == 2.977
+            assert effective_n(pd.Series([1.0, 1.0, 1.0])) == 3.0
+          message: "n_eff = sum(w)^2 / sum(w^2), ignoring missing weights. Equal weights give n."
+        - id: neff_zero
+          code: |
+            assert effective_n(pd.Series([], dtype=float)) is None
+          message: "No weights must return None, not ZeroDivisionError."
+    solution: |
+      import pandas as pd
+
+
+      def weighted_share(df: pd.DataFrame, value: str, weight: str) -> float | None:
+          """Weighted mean of value over rows with both value and weight present.
+
+          Returns:
+              The weighted mean, or None for no rows or a zero weight total.
+          """
+          d = df[[value, weight]].dropna()
+          total = d[weight].sum()
+          if len(d) == 0 or total == 0:
+              return None
+          return float((d[value] * d[weight]).sum() / total)
+
+
+      def effective_n(weights: pd.Series) -> float | None:
+          """Kish effective sample size, (sum w)^2 / sum(w^2), ignoring missing weights.
+
+          Returns:
+              n_eff, or None when there are no non-zero weights.
+          """
+          w = weights.dropna()
+          sum_sq = (w**2).sum()
+          if sum_sq == 0:
+              return None
+          return float(w.sum() ** 2 / sum_sq)
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def weighted_share(df: pd.DataFrame, value: str, weight: str) -> float | None:
+            """Divides by n."""
+            d = df[[value, weight]].dropna()
+            if len(d) == 0:
+                return None
+            return float((d[value] * d[weight]).sum() / len(d))
+
+
+        def effective_n(weights: pd.Series) -> float | None:
+            """Kish."""
+            w = weights.dropna()
+            sum_sq = (w**2).sum()
+            if sum_sq == 0:
+                return None
+            return float(w.sum() ** 2 / sum_sq)
+      - |
+        import pandas as pd
+
+
+        def weighted_share(df: pd.DataFrame, value: str, weight: str) -> float | None:
+            """Correct."""
+            d = df[[value, weight]].dropna()
+            total = d[weight].sum()
+            if len(d) == 0 or total == 0:
+                return None
+            return float((d[value] * d[weight]).sum() / total)
+
+
+        def effective_n(weights: pd.Series) -> float | None:
+            """Raw count."""
+            return float(weights.notna().sum())
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def weighted_share(df: pd.DataFrame, value: str, weight: str) -> float | None:
+              """Divides by n."""
+              d = df[[value, weight]].dropna()
+              if len(d) == 0:
+                  return None
+              return float((d[value] * d[weight]).sum() / len(d))
+
+
+          def effective_n(weights: pd.Series) -> float | None:
+              """Kish."""
+              w = weights.dropna()
+              sum_sq = (w**2).sum()
+              if sum_sq == 0:
+                  return None
+              return float(w.sum() ** 2 / sum_sq)
+        triggers: share
+    hints:
+      - "Drop rows missing either column first."
+      - "Divide by the weight total, and return None when it is 0."
+      - "n_eff = w.sum() ** 2 / (w ** 2).sum()."
+    explanation: |
+      Weighted means divide by the weight total. `n_eff` tells you how much information the weighted sample holds.
+
+  - id: B8-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Choose the right quantity for each part of a weighted subgroup report.
+    slots:
+      - id: estimate
+        label: "The share shown in the chart"
+        options: &q
+          - {id: weighted, text: "Weighted estimate"}
+          - {id: unweighted, text: "Unweighted estimate"}
+          - {id: raw_n, text: "Raw base (n)"}
+          - {id: n_eff, text: "Effective sample size"}
+        answer: weighted
+      - id: ci
+        label: "The n in the confidence interval"
+        options: *q
+        answer: n_eff
+      - id: footnote
+        label: "The base printed under the chart"
+        options: *q
+        answer: raw_n
+      - id: suppress
+        label: "The number compared with the minimum reporting base"
+        options: *q
+        answer: n_eff
+    model_answer: |
+      - Chart: the weighted share, which estimates the population.
+      - Interval: n_eff, so precision reflects the weights.
+      - Footnote: the raw base, so readers know how many people answered.
+      - Suppression: n_eff, so a heavily weighted small group is not reported as if it were large.
+    wrong_answers:
+      - answer: {estimate: unweighted}
+        feedback: "The unweighted share describes the sample, not the population."
+      - answer: {ci: raw_n}
+        feedback: "Raw n overstates precision when weights vary."
+      - answer: {suppress: raw_n}
+        feedback: "A group of 60 with n_eff 25 carries the information of 25 people. Compare n_eff with the threshold."
+    hints:
+      - "Which describes the population?"
+      - "Which measures information?"
+      - "Which tells readers how many answered?"
+    explanation: |
+      Weighted for estimates, n_eff for precision and suppression, raw n for transparency.
+
+recap:
+  - front: "Weighted mean"
+    back: "sum(y * w) / sum(w), over rows with both present. Same as np.average(y, weights=w)."
+  - front: "Kish effective sample size"
+    back: "(sum w)^2 / sum(w^2). Design effect = n / n_eff."
+  - front: "Which n for intervals and suppression?"
+    back: "n_eff. Report the raw base as well."
+  - front: "Missing weight"
+    back: "Not zero. Drop the row from weighted estimates, and investigate."
+
+claims:
+  - claim: "Kish effective sample size is (sum w)^2 / sum(w^2)."
+    status: verified
+    source: "Kish (1965), Survey Sampling; computed with NumPy 2.4.6 in this repository."

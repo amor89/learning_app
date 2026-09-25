@@ -1,0 +1,303 @@
+id: B8-L3
+title: Many tests, and the false positives they bring
+
+concept: |
+  At a 5% significance level, each test of a true null hypothesis has a 5% chance of a false positive. Run 20 such tests and the chance of **at least one** false positive is `1 - 0.95**20 = 0.64`. A simulation in this course's build agreed: 20 t-tests on pure noise, repeated 2,000 times, gave at least one "significant" result 66% of the time.
+
+  Survey reports run many tests by default: every brand, every region, every age band, every wave. Some cells will light up by chance every time.
+
+  **Adjust the p-values** for the number of tests in the family. In statsmodels 0.14:
+
+  ```python
+  from statsmodels.stats.multitest import multipletests
+  reject, p_adj, _, _ = multipletests(p_values, alpha=0.05, method="holm")
+  ```
+
+  - **Bonferroni** multiplies each p-value by the number of tests `m`. Simple and strict.
+  - **Holm** is a step-down version of Bonferroni. It controls the same error (any false positive in the family) and always rejects at least as many hypotheses. Prefer it to Bonferroni.
+  - **Benjamini-Hochberg** (`method="fdr_bh"`) controls the **false discovery rate**: the expected share of false positives among the results you flag. It is less strict and suits screening many cells for follow-up.
+
+  For p-values 0.01, 0.02, 0.03, 0.04 and 0.20, Bonferroni and Holm reject only the first. Benjamini-Hochberg rejects the first four.
+
+  Define the **family** before you look: "the 12 regional comparisons in this chart". Adjust within it. Choosing the family after seeing the results defeats the point.
+
+  Two habits that reduce the problem at the source:
+
+  - Pre-register the few comparisons that answer the business question. Test those. Label the rest as exploratory.
+  - Report how many tests you ran. "3 of 40 regions changed significantly" reads very differently from "Region 7 changed significantly".
+
+why_it_matters: |
+  A monthly tracker tested 14 brands in 9 regions, 126 tests, each at 5%. Every month about six cells were flagged in red on the dashboard. Regional managers were asked to explain their red cells. The following month, different cells turned red. Nobody could explain the pattern, because there was none: 126 tests at 5% produce about six false positives by chance.
+
+  Holm adjustment within each brand's family of 9 regions removed nearly all the monthly red cells. The few that remained repeated in the next month.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      for region, p in p_values.items():
+          if p < 0.05:
+              flag(region)
+    annotations:
+      - find: "if p < 0.05:"
+        note: "Each test at 5%, with no adjustment for how many run: false positives are expected."
+  strong:
+    code: |
+      from statsmodels.stats.multitest import multipletests
+
+
+      def flag_regions(p_values: dict[str, float], alpha: float = 0.05) -> dict[str, float]:
+          """Holm-adjusted p-values for one family of regional tests, flagged below alpha."""
+          regions = list(p_values)
+          reject, p_adj, _, _ = multipletests([p_values[r] for r in regions], alpha=alpha, method="holm")
+          return {r: float(p) for r, p, rej in zip(regions, p_adj, reject, strict=True) if rej}
+    annotations:
+      - find: 'reject, p_adj, _, _ = multipletests([p_values[r] for r in regions], alpha=alpha, method="holm")'
+        note: "One family, adjusted together with Holm."
+      - find: "return {r: float(p) for r, p, rej in zip(regions, p_adj, reject, strict=True) if rej}"
+        note: "Report adjusted p-values, so readers see the correction."
+  takeaway: |
+    Define the family first, adjust within it with Holm or Benjamini-Hochberg, and report how many tests ran.
+
+exercises:
+  - id: B8-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You run 20 independent tests at the 5% level. All null hypotheses are true. What is the chance of at least one significant result?
+    options:
+      - {id: a, text: "5%"}
+      - {id: b, text: "About 64%"}
+      - {id: c, text: "100%"}
+      - {id: d, text: "0%, because the nulls are true"}
+    answer: b
+    reasons:
+      - {id: r1, text: "1 - 0.95^20 = 0.64."}
+      - {id: r2, text: "20 × 5% = 100%, minus overlap."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "5% is the rate for one test. The family has 20 chances."
+      - answer: c
+        feedback: "20 × 5% is the expected number of false positives (1), not a probability."
+      - answer: d
+        feedback: "True nulls still produce p < 0.05 in 5% of tests, by definition."
+      - answer: b|r2
+        feedback: "Right number, shaky reasoning. The exact calculation is 1 minus the chance of no false positives."
+    hints:
+      - "What is the chance one test is not significant?"
+      - "And all 20?"
+      - "1 - 0.95**20."
+    explanation: |
+      The chance none of 20 fire is 0.95^20 = 0.36, so at least one fires with probability 0.64.
+
+  - id: B8-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (statsmodels 0.14)
+    code: |
+      from statsmodels.stats.multitest import multipletests
+
+      p = [0.01, 0.02, 0.03, 0.04, 0.20]
+      print(multipletests(p, alpha=0.05, method="holm")[0].sum(), multipletests(p, alpha=0.05, method="fdr_bh")[0].sum())
+    answer: "1 4"
+    wrong_answers:
+      - answer: "4 4"
+        feedback: "Holm multiplies the smallest p by 5, the next by 4, and so on: 0.02 × 4 = 0.08 fails."
+      - answer: "1 1"
+        feedback: "Benjamini-Hochberg compares p_(k) with k/m × alpha: 0.04 ≤ 4/5 × 0.05, so four pass."
+    hints:
+      - "Holm: 0.01×5, 0.02×4, ..."
+      - "BH: compare the k-th smallest p with k × 0.05 / 5."
+      - "BH is less strict."
+    explanation: |
+      Holm rejects only 0.01 (adjusted 0.05). BH rejects the four p-values up to 0.04, controlling the share of false discoveries instead.
+
+  - id: B8-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Adjust a family of p-values with Holm's method.
+    template: |
+      reject, p_adj, _, _ = [[g1]](p_values, alpha=0.05, method="[[g2]]")
+    gaps:
+      g1: {accepted: [multipletests]}
+      g2: {accepted: [holm]}
+    wrong_answers:
+      - answer: {g2: fdr_bh}
+        feedback: "fdr_bh is Benjamini-Hochberg. Holm's method is \"holm\"."
+    hints:
+      - "The statsmodels function in stats.multitest."
+      - "The method name is the author's surname."
+      - "`multipletests` and `holm`."
+    explanation: |
+      `multipletests(..., method="holm")` returns reject flags and adjusted p-values.
+
+  - id: B8-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `holm_adjust(p_values: list[float]) -> list[float]` without statsmodels. Return adjusted p-values **in the input order**.
+
+      1. Sort the p-values ascending. For the k-th smallest (k from 0), compute `min(1, (m - k) * p)`, where `m` is the number of p-values.
+      2. Walk the sorted list and keep a running maximum, so adjusted values never decrease.
+      3. Put each adjusted value back at its original position.
+    starter: |
+      def holm_adjust(p_values):
+          m = len(p_values)
+          return [min(1.0, p * m) for p in p_values]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: holm_adjust
+          typed: true
+          docstring: true
+          message: "Give `holm_adjust` type hints and a docstring."
+        - id: no_statsmodels
+          kind: forbids_pattern
+          pattern: "statsmodels"
+          message: "Implement the steps yourself for this exercise."
+      tests:
+        - id: sorted_input
+          code: |
+            out = holm_adjust([0.01, 0.02, 0.03, 0.04, 0.20])
+            assert [round(x, 4) for x in out] == [0.05, 0.08, 0.09, 0.09, 0.2]
+          message: "Multiply the k-th smallest by (m - k) and keep a running maximum."
+        - id: input_order
+          code: |
+            out = holm_adjust([0.20, 0.03, 0.01, 0.04, 0.02])
+            assert [round(x, 4) for x in out] == [0.2, 0.09, 0.05, 0.09, 0.08]
+          message: "Return adjusted values in the input order, not sorted order."
+        - id: capped
+          code: |
+            assert holm_adjust([0.5, 0.6]) == [1.0, 1.0]
+            assert holm_adjust([]) == []
+          message: "Cap at 1.0, and return an empty list for no input."
+    solution: |
+      def holm_adjust(p_values: list[float]) -> list[float]:
+          """Holm step-down adjusted p-values, in input order.
+
+          Args:
+              p_values: Raw p-values for one family of tests.
+
+          Returns:
+              Adjusted p-values, same order as the input.
+          """
+          m = len(p_values)
+          order = sorted(range(m), key=lambda i: p_values[i])
+          adjusted = [0.0] * m
+          running = 0.0
+          for k, i in enumerate(order):
+              running = max(running, min(1.0, (m - k) * p_values[i]))
+              adjusted[i] = running
+          return adjusted
+    seeded_bugs:
+      - |
+        def holm_adjust(p_values: list[float]) -> list[float]:
+            """Bonferroni."""
+            return [min(1.0, p * len(p_values)) for p in p_values]
+      - |
+        def holm_adjust(p_values: list[float]) -> list[float]:
+            """Returns sorted order."""
+            m = len(p_values)
+            out = []
+            running = 0.0
+            for k, p in enumerate(sorted(p_values)):
+                running = max(running, min(1.0, (m - k) * p))
+                out.append(running)
+            return out
+      - |
+        def holm_adjust(p_values: list[float]) -> list[float]:
+            """No running maximum."""
+            m = len(p_values)
+            order = sorted(range(m), key=lambda i: p_values[i])
+            adjusted = [0.0] * m
+            for k, i in enumerate(order):
+                adjusted[i] = min(1.0, (m - k) * p_values[i])
+            return adjusted
+    wrong_answers:
+      - answer: |
+          def holm_adjust(p_values: list[float]) -> list[float]:
+              """Returns sorted order."""
+              m = len(p_values)
+              out = []
+              running = 0.0
+              for k, p in enumerate(sorted(p_values)):
+                  running = max(running, min(1.0, (m - k) * p))
+                  out.append(running)
+              return out
+        triggers: input_order
+      - answer: |
+          def holm_adjust(p_values: list[float]) -> list[float]:
+              """Bonferroni."""
+              return [min(1.0, p * len(p_values)) for p in p_values]
+        triggers: sorted_input
+    hints:
+      - "`order = sorted(range(m), key=lambda i: p_values[i])` gives positions from smallest p."
+      - "For the k-th position, `running = max(running, min(1.0, (m - k) * p))`."
+      - "Store at `adjusted[i]`, the original position."
+    explanation: |
+      Holm scales the smallest p by m, the next by m - 1, and forces the sequence to be non-decreasing. Keeping positions lets the caller match results to tests.
+
+  - id: B8-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Choose the approach for each analysis.
+    slots:
+      - id: confirm
+        label: "Three pre-registered comparisons that decide a campaign's budget"
+        options: &m
+          - {id: holm, text: "Holm, family of the three"}
+          - {id: bh, text: "Benjamini-Hochberg"}
+          - {id: none, text: "No adjustment"}
+        answer: holm
+      - id: screen
+        label: "Screen 400 item-by-segment cells to pick a few for follow-up research"
+        options: *m
+        answer: bh
+      - id: single
+        label: "One primary hypothesis, stated before fieldwork"
+        options: *m
+        answer: none
+    model_answer: |
+      - Few decisive tests: Holm, which controls any false positive in the family.
+      - Screening many cells: Benjamini-Hochberg, which controls the share of false leads.
+      - A single pre-registered test: no family, so no adjustment.
+    wrong_answers:
+      - answer: {screen: holm}
+        feedback: "Holm across 400 tests is so strict it flags almost nothing. For screening, control the false discovery rate."
+      - answer: {confirm: none}
+        feedback: "Three tests driving one decision form a family. Without adjustment the error rate rises to about 14%."
+      - answer: {single: holm}
+        feedback: "One test is a family of one. Holm leaves its p-value unchanged."
+    hints:
+      - "Is the goal to avoid any false positive, or a high share of them?"
+      - "How many tests are in the family?"
+      - "One test needs no adjustment."
+    explanation: |
+      Match the error rate to the decision: family-wise for confirmation, false discovery rate for screening.
+
+recap:
+  - front: "Chance of at least one false positive in 20 tests at 5%"
+    back: "1 - 0.95^20 = 0.64."
+  - front: "Holm vs Bonferroni"
+    back: "Same family-wise control. Holm is step-down and rejects at least as many. Prefer Holm."
+  - front: "Benjamini-Hochberg"
+    back: "Controls the false discovery rate. Suits screening many cells."
+  - front: "Define the family"
+    back: "Before looking at results. Report how many tests ran."
+
+claims:
+  - claim: "multipletests on [0.01, 0.02, 0.03, 0.04, 0.20]: Holm and Bonferroni reject one, fdr_bh rejects four."
+    status: verified
+    source: "Run on statsmodels 0.14.6 and 0.15.0 in this repository."
+  - claim: "20 t-tests on noise, 2,000 repetitions: at least one p < 0.05 in 66% of repetitions."
+    status: verified
+    source: "Simulated with NumPy 2.4.6 and SciPy 1.17.1 in this repository."

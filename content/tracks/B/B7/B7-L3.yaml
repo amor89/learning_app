@@ -1,0 +1,315 @@
+id: B7-L3
+title: Write assumptions down, then turn them into checks
+
+concept: |
+  Every analysis rests on assumptions: what a row means, how "don't know" is coded, which respondents are in scope, that weights sum to the sample size. Unwritten, they live in one analyst's head and break silently when the data changes.
+
+  Keep an **assumptions log** next to the analysis. One entry per assumption, with the same fields each time:
+
+  ```yaml
+  - id: A3
+    statement: "score uses 1 to 10; 98 = refused, 99 = don't know"
+    evidence: "Questionnaire v4, Q12; profile of waves 1 to 11 shows only 1-10, 98, 99"
+    handling: "98 and 99 become missing before any statistic"
+    check: "score in 1..10 or missing, after recoding"
+    owner: "analysis team"
+    last_verified: 2026-09-01
+  ```
+
+  Then make the assumption **executable**. The `handling` becomes code, and the `check` becomes a QA result (lesson B5-L3) that runs on every delivery.
+
+  ```python
+  MISSING_CODES: dict[str, list[int]] = {"score": [98, 99]}   # from config, per A3
+
+
+  def recode_missing(df: pd.DataFrame, codes: dict[str, list[int]]) -> pd.DataFrame:
+      return df.assign(**{col: df[col].mask(df[col].isin(vals)) for col, vals in codes.items()})
+  ```
+
+  Recode **per column**. `df.replace(99, np.nan)` on the whole frame also blanks a real age of 99. `Series.mask(cond)` sets values to missing where the condition holds and leaves the rest.
+
+  Three kinds of assumption to write down every time:
+
+  - **Structure.** Grain, keys, which columns are required.
+  - **Coding.** Missing codes, scales, units, category lists.
+  - **Scope.** Who is included: age limits, completes only, which markets and waves.
+
+  When a check fails, the log tells you which belief was wrong and who to ask. When a client asks "why is this respondent excluded?", the answer has an ID.
+
+why_it_matters: |
+  An analyst knew that 99 meant "don't know" on the satisfaction scale and removed those rows by hand in a notebook. The analyst left. The next wave went through the scripted pipeline, which did not know. The regional mean rose from 7.1 to 11.4. It was published, because 11.4 looked like a large improvement rather than an impossible value on a 1 to 10 scale.
+
+  A logged assumption with an executable check would have failed the run on the first 99.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      # 99 = don't know, drop them (ask Sam)
+      df = df[df["score"] != 99]
+      df = df.replace(98, np.nan)
+    annotations:
+      - find: "# 99 = don't know, drop them (ask Sam)"
+        note: "An assumption in a comment, tied to one person, with no check."
+      - find: 'df = df[df["score"] != 99]'
+        note: "Drops whole rows, so other answers from those respondents are lost too."
+      - find: "df = df.replace(98, np.nan)"
+        note: "Whole-frame replace: any column with a real 98 is blanked."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def recode_missing(df: pd.DataFrame, codes: dict[str, list[int]]) -> pd.DataFrame:
+          """Set listed codes to missing, per column (assumption A3). Other columns untouched."""
+          return df.assign(**{col: df[col].mask(df[col].isin(vals)) for col, vals in codes.items()})
+
+
+      def score_in_range(df: pd.DataFrame, low: int, high: int) -> bool:
+          """Check for A3: every non-missing score lies in [low, high]."""
+          s = df["score"].dropna()
+          return bool(s.between(low, high).all())
+    annotations:
+      - find: "return df.assign(**{col: df[col].mask(df[col].isin(vals)) for col, vals in codes.items()})"
+        note: "Per-column recoding from config. The respondent keeps their other answers."
+      - find: "return bool(s.between(low, high).all())"
+        note: "The assumption as a check, run on every delivery."
+  takeaway: |
+    Log each assumption with evidence and owner, implement its handling per column, and check it on every run.
+
+exercises:
+  - id: B7-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Where should the assumption "98 and 99 mean refused and don't know on score" live?
+    options:
+      - {id: a, text: "In a code comment where the rows are dropped."}
+      - {id: b, text: "In the assumptions log, in config for the handling, and in a QA check."}
+      - {id: c, text: "In the analyst's notes."}
+      - {id: d, text: "Nowhere: everyone knows the convention."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Written, applied and checked in code, it survives staff changes and new deliveries."}
+      - {id: r2, text: "Logs are required by law."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "A comment explains one line. It does not run, and nothing fails when the coding changes."
+      - answer: c
+        feedback: "Personal notes leave with the person."
+      - answer: d
+        feedback: "New analysts and new pipelines do not know. That is how 99s reach a mean."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The point is surviving change, not compliance."
+    hints:
+      - "What happens when the analyst leaves?"
+      - "What happens when the supplier changes the code?"
+      - "Written, applied, checked."
+    explanation: |
+      The log states it, config applies it, and a check detects when it stops being true.
+
+  - id: B7-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (pandas 3.0)
+    code: |
+      import numpy as np
+      import pandas as pd
+
+      df = pd.DataFrame({"score": [3, 99, 7], "age": [99, 40, 30]})
+      print(df.replace(99, np.nan)["age"].tolist())
+    answer: "[nan, 40.0, 30.0]"
+    wrong_answers:
+      - answer: "[99, 40, 30]"
+        feedback: "replace on the whole frame changes every column, including a real age of 99."
+    hints:
+      - "Which columns does df.replace touch?"
+      - "Is 99 a valid age?"
+      - "It is blanked anyway, and the column becomes float."
+    explanation: |
+      Whole-frame `replace` blanks the 99-year-old too. Recode per column with a mapping of column to codes.
+
+  - id: B7-L3-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the life of one assumption.
+    items:
+      - {id: observe, text: "Observe the coding in the questionnaire and the profile"}
+      - {id: log, text: "Write the assumption, evidence and owner in the log"}
+      - {id: handle, text: "Implement the handling in code, driven by config"}
+      - {id: check, text: "Add a QA check that runs on every delivery"}
+      - {id: review, text: "Update last_verified when the check or the source is reviewed"}
+    answer: [observe, log, handle, check, review]
+    wrong_answers:
+      - answer: [handle, observe, log, check, review]
+        feedback: "Code written before the evidence encodes a guess."
+      - answer: [observe, log, check, handle, review]
+        feedback: "The check runs on recoded data, so the handling comes first."
+    hints:
+      - "Evidence before belief."
+      - "Belief before code."
+      - "Handling before the check that tests its result."
+    explanation: |
+      Observe, write, implement, check, review. Each step leaves a record the next analyst can follow.
+
+  - id: B7-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Write `recode_missing(df, codes) -> pd.DataFrame`. `codes` maps a column name to a list of values that mean "missing" in that column. Return a new frame where those values are missing in those columns only. Leave other columns and the input frame unchanged.
+    starter: |
+      import numpy as np
+      import pandas as pd
+
+
+      def recode_missing(df, codes):
+          for vals in codes.values():
+              df = df.replace(vals, np.nan)
+          return df
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        DF = pd.DataFrame({"score": [3, 99, 98, 7], "age": [99, 40, 98, 30]})
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: recode_missing
+          typed: true
+          docstring: true
+          message: "Give `recode_missing` type hints and a docstring."
+      tests:
+        - id: recoded
+          code: |
+            out = recode_missing(DF, {"score": [98, 99]})
+            assert out["score"].isna().tolist() == [False, True, True, False]
+          message: "Listed codes in the listed column must become missing."
+        - id: other_columns
+          code: |
+            out = recode_missing(DF, {"score": [98, 99]})
+            assert out["age"].tolist() == [99, 40, 98, 30]
+          message: "Other columns must keep their values, including a real 99 or 98."
+        - id: pure
+          code: |
+            recode_missing(DF, {"score": [98, 99]})
+            assert DF["score"].tolist() == [3, 99, 98, 7]
+          message: "The input frame changed. Return a new one."
+    solution: |
+      import pandas as pd
+
+
+      def recode_missing(df: pd.DataFrame, codes: dict[str, list[int]]) -> pd.DataFrame:
+          """Set listed codes to missing, per column.
+
+          Args:
+              df: Input frame.
+              codes: Column name to the values that mean missing in that column.
+
+          Returns:
+              A new frame. Unlisted columns are unchanged.
+          """
+          return df.assign(**{col: df[col].mask(df[col].isin(vals)) for col, vals in codes.items()})
+    seeded_bugs:
+      - |
+        import numpy as np
+        import pandas as pd
+
+
+        def recode_missing(df: pd.DataFrame, codes: dict[str, list[int]]) -> pd.DataFrame:
+            """Whole-frame replace."""
+            out = df
+            for vals in codes.values():
+                out = out.replace(vals, np.nan)
+            return out
+      - |
+        import pandas as pd
+
+
+        def recode_missing(df: pd.DataFrame, codes: dict[str, list[int]]) -> pd.DataFrame:
+            """Mutates."""
+            for col, vals in codes.items():
+                df[col] = df[col].mask(df[col].isin(vals))
+            return df
+    wrong_answers:
+      - answer: |
+          import numpy as np
+          import pandas as pd
+
+
+          def recode_missing(df: pd.DataFrame, codes: dict[str, list[int]]) -> pd.DataFrame:
+              """Whole-frame replace."""
+              out = df
+              for vals in codes.values():
+                  out = out.replace(vals, np.nan)
+              return out
+        triggers: other_columns
+    hints:
+      - "Work column by column: `df[col].isin(vals)` marks the codes."
+      - "`Series.mask(cond)` sets values to missing where cond is True."
+      - "Wrap it in `df.assign(**{col: ... for col, vals in codes.items()})`."
+    explanation: |
+      Per-column masking changes only what the assumption covers, and `assign` returns a new frame.
+
+  - id: B7-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Classify each assumption and pick its check.
+    slots:
+      - id: grain
+        label: "One row per respondent per wave"
+        options: &kinds
+          - {id: structure, text: "Structure: check key uniqueness"}
+          - {id: coding, text: "Coding: check values against the codebook"}
+          - {id: scope, text: "Scope: check inclusion rules"}
+        answer: structure
+      - id: region
+        label: "region uses codes 1 to 12 from the lookup table"
+        options: *kinds
+        answer: coding
+      - id: adults
+        label: "Only respondents aged 18 or over are reported"
+        options: *kinds
+        answer: scope
+      - id: completes
+        label: "Only completed interviews are in the file"
+        options: *kinds
+        answer: scope
+    model_answer: |
+      - Grain: structure, checked with duplicated(keep=False) on the key.
+      - Region codes: coding, checked with isin(lookup).
+      - Age limit and completes only: scope, checked with a filter count that must be zero.
+    wrong_answers:
+      - answer: {grain: coding}
+        feedback: "Grain is about how rows relate to each other. Check it with key uniqueness."
+      - answer: {region: scope}
+        feedback: "Valid region codes are a coding rule: every value must appear in the lookup."
+      - answer: {adults: coding}
+        feedback: "Age is coded correctly. The rule is about who is included: scope."
+    hints:
+      - "Is it about rows, values or people?"
+      - "Rows: structure. Values: coding. People: scope."
+      - "Completes are about who is in, not how answers are coded."
+    explanation: |
+      Naming the kind of assumption tells you the kind of check to write.
+
+recap:
+  - front: "Fields of an assumptions log entry"
+    back: "id, statement, evidence, handling, check, owner, last_verified."
+  - front: "Recode missing codes safely"
+    back: "Per column: df[col].mask(df[col].isin(codes)). Never a whole-frame replace."
+  - front: "Three kinds of assumption"
+    back: "Structure (grain, keys), coding (codes, scales, units), scope (who is included)."
+  - front: "From assumption to code"
+    back: "Handling in config-driven code, and a QA check that runs on every delivery."
+
+claims:
+  - claim: "DataFrame.replace(99, np.nan) changes every column holding 99; Series.mask(cond) sets values where cond is True to missing."
+    status: verified
+    source: "pandas API reference; run on pandas 3.0.6 in this repository."

@@ -1,0 +1,316 @@
+id: B8-L2
+title: Confidence intervals and effect sizes
+
+concept: |
+  A share without an interval is a guess with no stated size. Report every estimate with a **confidence interval**, and every difference with an **effect size**.
+
+  **Intervals for a proportion.** The textbook Wald interval, `p ± 1.96 * sqrt(p(1-p)/n)`, fails at the edges. For 0 out of 20 it gives `[0, 0]`, as if you were certain. The **Wilson** interval behaves well for small `n` and for shares near 0 or 1. For 0 out of 20 it gives `[0, 0.161]`. In statsmodels 0.14:
+
+  ```python
+  from statsmodels.stats.proportion import proportion_confint
+  low, high = proportion_confint(count=40, nobs=100, alpha=0.05, method="wilson")   # (0.309, 0.498)
+  ```
+
+  For a **weighted** share, use the weighted estimate and the effective sample size from lesson B8-L1 in the same formula. The 18 to 24 group from that lesson, with a weighted share of 52% and `n_eff = 71`, has a Wilson interval of 40.6% to 63.2%. With the raw 180 it would be 44.7% to 59.2%, which looks far more precise than the data is.
+
+  **Effect sizes.** A p-value answers "is there any difference?", and with a large sample the answer is nearly always yes. Two groups of 100,000 with shares of 50.5% and 50.0% give p = 0.025, and the difference is too small to matter. State the size:
+
+  - The **difference in shares**, in percentage points, with its interval. This is what a client reads.
+  - **Cohen's h**, `2*asin(sqrt(p1)) - 2*asin(sqrt(p2))`, compares differences across different base rates. Rough guides: 0.2 small, 0.5 medium, 0.8 large.
+  - For means, the difference with its interval, or **Cohen's d** (difference over pooled standard deviation).
+
+  Decide before the analysis what size of difference matters for the decision. A significant difference below that size is reported as "no meaningful change".
+
+why_it_matters: |
+  A retailer's panel of 90,000 customers showed satisfaction at 7.62 against 7.58 the previous quarter, p = 0.01. The headline read "Satisfaction significantly up". The store managers' bonus scheme was tied to "significant improvement", and bonuses were paid. The change was 0.04 points on a 10-point scale, smaller than the rounding in the published chart.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      se = (p * (1 - p) / n) ** 0.5
+      low, high = p - 1.96 * se, p + 1.96 * se
+      if p_value < 0.05:
+          headline = "Significant increase"
+    annotations:
+      - find: "se = (p * (1 - p) / n) ** 0.5"
+        note: "Wald: zero width at p = 0 or 1, and too narrow for small n."
+      - find: 'headline = "Significant increase"'
+        note: "Significance without size: true for trivial differences in large samples."
+  strong:
+    code: |
+      import math
+
+
+      def wilson_interval(p: float, n: float, z: float = 1.959964) -> tuple[float, float] | None:
+          """Wilson interval for a share p from n observations (use n_eff when weighted)."""
+          if n <= 0 or not 0 <= p <= 1:
+              return None
+          denom = 1 + z**2 / n
+          centre = (p + z**2 / (2 * n)) / denom
+          half = z / denom * math.sqrt(p * (1 - p) / n + z**2 / (4 * n**2))
+          return (max(0.0, centre - half), min(1.0, centre + half))
+
+
+      def cohens_h(p1: float, p2: float) -> float:
+          """Effect size for two shares, comparable across base rates."""
+          return 2 * math.asin(math.sqrt(p1)) - 2 * math.asin(math.sqrt(p2))
+    annotations:
+      - find: "def wilson_interval(p: float, n: float, z: float = 1.959964) -> tuple[float, float] | None:"
+        note: "n is a float, so n_eff from weights fits."
+      - find: "if n <= 0 or not 0 <= p <= 1:"
+        note: "No interval for an empty group or an impossible share."
+      - find: "return 2 * math.asin(math.sqrt(p1)) - 2 * math.asin(math.sqrt(p2))"
+        note: "An effect size to report beside the difference in points."
+  takeaway: |
+    Wilson intervals with n_eff for weighted shares, and an effect size beside every p-value.
+
+exercises:
+  - id: B8-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      0 of 20 respondents chose a new brand. What does the Wald interval `p ± 1.96 * sqrt(p(1-p)/n)` give?
+    options:
+      - {id: a, text: "[0, 0]"}
+      - {id: b, text: "[0, 0.161]"}
+      - {id: c, text: "[-0.05, 0.05]"}
+      - {id: d, text: "It raises an error."}
+    answer: a
+    reasons:
+      - {id: r1, text: "With p = 0 the standard error is 0, so the interval collapses."}
+      - {id: r2, text: "Twenty respondents is too few for any interval."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That is the Wilson interval. Wald has zero width at p = 0."
+      - answer: c
+        feedback: "p(1-p) is 0, so the half-width is 0, not 0.05."
+      - answer: d
+        feedback: "sqrt(0) is 0. No error, just a misleading interval."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Wilson gives a sensible interval for 20. Wald fails at the edge."
+    hints:
+      - "What is p(1-p) when p = 0?"
+      - "What is the half-width then?"
+      - "Zero."
+    explanation: |
+      Wald claims certainty from 20 people. Wilson gives [0, 0.161].
+
+  - id: B8-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (statsmodels 0.14)
+    code: |
+      from statsmodels.stats.proportion import proportions_ztest
+
+      stat, p_value = proportions_ztest([50500, 50000], [100000, 100000])
+      print(p_value < 0.05)
+    answer: "True"
+    wrong_answers:
+      - answer: "False"
+        feedback: "With 100,000 per group, a 0.5-point difference gives p = 0.025. Significant, and still tiny."
+    hints:
+      - "How large is each group?"
+      - "What happens to standard errors as n grows?"
+      - "Tiny differences become significant."
+    explanation: |
+      p = 0.025. The difference is 0.5 points, Cohen's h about 0.01. Significant is not the same as important.
+
+  - id: B8-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Get a 95% Wilson interval for 40 out of 100 with statsmodels.
+    template: |
+      low, high = proportion_confint(count=40, nobs=100, alpha=[[g1]], method="[[g2]]")
+    gaps:
+      g1: {accepted: ["0.05", ".05"]}
+      g2: {accepted: [wilson]}
+    wrong_answers:
+      - answer: {g1: "0.95"}
+        feedback: "alpha is the error rate. A 95% interval uses alpha=0.05."
+      - answer: {g2: normal}
+        feedback: "normal is the Wald interval, which fails near 0 and 1."
+    hints:
+      - "alpha is 1 minus the confidence level."
+      - "The method named after Edwin Wilson."
+      - "`0.05` and `wilson`."
+    explanation: |
+      `alpha=0.05, method="wilson"` gives (0.309, 0.498).
+
+  - id: B8-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `wilson_interval(p: float, n: float, z: float = 1.959964) -> tuple[float, float] | None` with the formula:
+
+      - `denom = 1 + z**2 / n`
+      - `centre = (p + z**2 / (2 * n)) / denom`
+      - `half = z / denom * sqrt(p * (1 - p) / n + z**2 / (4 * n**2))`
+
+      Return `(centre - half, centre + half)`, clipped to [0, 1]. Return `None` when `n <= 0` or `p` is outside [0, 1]. `n` is a float so you pass `n_eff` for weighted shares.
+    starter: |
+      import math
+
+
+      def wilson_interval(p, n, z=1.96):
+          se = math.sqrt(p * (1 - p) / n)
+          return (p - z * se, p + z * se)
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: wilson_interval
+          typed: true
+          docstring: true
+          message: "Give `wilson_interval` type hints and a docstring."
+      tests:
+        - id: value
+          code: |
+            low, high = wilson_interval(0.4, 100)
+            assert (round(low, 4), round(high, 4)) == (0.3094, 0.498)
+          message: "0.4 from 100 must give (0.3094, 0.4980). Check the Wilson formula."
+        - id: edge
+          code: |
+            low, high = wilson_interval(0.0, 20)
+            assert low == 0.0 and round(high, 4) == 0.1611
+          message: "0 from 20 must give (0, 0.1611), not a zero-width interval."
+        - id: weighted_n
+          code: |
+            low, high = wilson_interval(0.52, 71.0)
+            assert (round(low, 3), round(high, 3)) == (0.406, 0.632)
+          message: "A float n_eff such as 71.0 must work."
+        - id: invalid
+          code: |
+            assert wilson_interval(0.5, 0) is None
+            assert wilson_interval(1.2, 50) is None
+          message: "Return None for n <= 0 or p outside [0, 1]."
+    solution: |
+      import math
+
+
+      def wilson_interval(p: float, n: float, z: float = 1.959964) -> tuple[float, float] | None:
+          """Wilson score interval for a share.
+
+          Args:
+              p: Observed share, weighted or not.
+              n: Sample size, or n_eff for a weighted share.
+              z: Normal quantile. 1.959964 gives 95%.
+
+          Returns:
+              (low, high) clipped to [0, 1], or None for invalid input.
+          """
+          if n <= 0 or not 0 <= p <= 1:
+              return None
+          denom = 1 + z**2 / n
+          centre = (p + z**2 / (2 * n)) / denom
+          half = z / denom * math.sqrt(p * (1 - p) / n + z**2 / (4 * n**2))
+          return (max(0.0, centre - half), min(1.0, centre + half))
+    seeded_bugs:
+      - |
+        import math
+
+
+        def wilson_interval(p: float, n: float, z: float = 1.959964) -> tuple[float, float] | None:
+            """Wald."""
+            if n <= 0 or not 0 <= p <= 1:
+                return None
+            se = math.sqrt(p * (1 - p) / n)
+            return (max(0.0, p - z * se), min(1.0, p + z * se))
+      - |
+        import math
+
+
+        def wilson_interval(p: float, n: float, z: float = 1.959964) -> tuple[float, float] | None:
+            """No guard."""
+            denom = 1 + z**2 / n
+            centre = (p + z**2 / (2 * n)) / denom
+            half = z / denom * math.sqrt(p * (1 - p) / n + z**2 / (4 * n**2))
+            return (max(0.0, centre - half), min(1.0, centre + half))
+    wrong_answers:
+      - answer: |
+          import math
+
+
+          def wilson_interval(p: float, n: float, z: float = 1.959964) -> tuple[float, float] | None:
+              """Wald."""
+              if n <= 0 or not 0 <= p <= 1:
+                  return None
+              se = math.sqrt(p * (1 - p) / n)
+              return (max(0.0, p - z * se), min(1.0, p + z * se))
+        triggers: value
+    hints:
+      - "Guard first: n <= 0 or p outside [0, 1] returns None."
+      - "Compute denom, centre and half in that order."
+      - "Clip with max(0.0, ...) and min(1.0, ...)."
+    explanation: |
+      Wilson shifts the centre towards 0.5 and widens the interval when information is thin, so it never collapses to zero width.
+
+  - id: B8-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A panel of 90,000 shows satisfaction of 7.62 against 7.58 last quarter, p = 0.01. The team agreed beforehand that 0.2 points matters for decisions. Choose what to report.
+    slots:
+      - id: headline
+        label: "Headline"
+        options:
+          - {id: no_change, text: "No meaningful change in satisfaction"}
+          - {id: sig_up, text: "Satisfaction significantly up"}
+        answer: no_change
+      - id: detail
+        label: "Supporting detail"
+        options:
+          - {id: diff_ci, text: "Difference of 0.04 points with its interval, against the agreed 0.2"}
+          - {id: p_only, text: "p = 0.01"}
+        answer: diff_ci
+      - id: rule
+        label: "Rule for future quarters"
+        options:
+          - {id: size_first, text: "Report changes as meaningful only when they exceed the agreed size"}
+          - {id: p_rule, text: "Report any change with p below 0.05"}
+        answer: size_first
+    model_answer: |
+      - Headline: no meaningful change. 0.04 is far below the agreed 0.2.
+      - Detail: the difference and its interval, next to the threshold, so readers see the size.
+      - Rule: decide the meaningful size in advance and judge against it.
+    wrong_answers:
+      - answer: {headline: sig_up}
+        feedback: "True, and misleading. With 90,000 respondents almost any change is significant."
+      - answer: {detail: p_only}
+        feedback: "A p-value says nothing about size. Show the difference and its interval."
+      - answer: {rule: p_rule}
+        feedback: "In large samples this flags trivial changes every quarter."
+    hints:
+      - "Is 0.04 bigger than 0.2?"
+      - "What does a reader need to judge size?"
+      - "Set the threshold before looking."
+    explanation: |
+      Size decides meaning. Significance only says the size is not zero.
+
+recap:
+  - front: "Why not the Wald interval?"
+    back: "Zero width at p = 0 or 1, and too narrow for small n. Use Wilson."
+  - front: "Interval for a weighted share"
+    back: "Wilson with the weighted p and n_eff."
+  - front: "Significant vs meaningful"
+    back: "Large samples make trivial differences significant. Report the size with its interval."
+  - front: "Cohen's h"
+    back: "2*asin(sqrt(p1)) - 2*asin(sqrt(p2)). About 0.2 small, 0.5 medium, 0.8 large."
+
+claims:
+  - claim: "statsmodels proportion_confint(40, 100, method=\"wilson\") returns (0.3094, 0.4980); method=\"normal\" gives (0, 0) for 0 of 20."
+    status: verified
+    source: "Run on statsmodels 0.14.6 and 0.15.0 in this repository."
+  - claim: "proportions_ztest([50500, 50000], [100000, 100000]) gives p = 0.025."
+    status: verified
+    source: "Run on statsmodels 0.14.6 in this repository."
+  - claim: "Cohen's h thresholds of 0.2, 0.5 and 0.8 for small, medium and large."
+    status: verified
+    source: "Cohen (1988), Statistical Power Analysis for the Behavioral Sciences."

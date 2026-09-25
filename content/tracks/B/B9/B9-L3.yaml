@@ -1,0 +1,333 @@
+id: B9-L3
+title: Peeking, novelty and other ways tests mislead
+
+concept: |
+  A test's 5% false positive rate holds only if you analyse once, at the planned sample size. Common habits break it.
+
+  **Peeking.** Checking results every day and stopping the first time p < 0.05 gives the noise ten chances to cross the line. A simulation in this course's build: two identical arms with a 10% conversion rate, 1,000 runs, 200 users per arm per look. One look: 5.2% false positives. Five looks: 12.9%. Ten looks: 18.4%.
+
+  Fixes, in order of simplicity:
+
+  - **Fixed horizon.** Compute the sample size (lesson B9-L1), run to it, analyse once. Dashboards during the test show health metrics and the split check, not the lift.
+  - **Planned interim looks** with a group-sequential design, where each look uses a stricter threshold so the overall rate stays at 5%. Plan the number of looks and the boundaries before launch.
+  - **Always-valid methods** designed for continuous monitoring,, offered by some experimentation platforms. Use them as the platform documents them.
+
+  **Novelty and learning effects.** Users click a new button because it is new. The lift fades after a week. Run for at least one full weekly cycle, and compare the effect in week 1 and week 2.
+
+  **Too many metrics.** Twenty secondary metrics produce about one false positive per test (lesson B8-L3). Name one primary metric and a few guardrails before launch.
+
+  **Stopping for a good result only.** A team that stops early when B looks good but runs longer when B looks bad biases every conclusion towards B.
+
+  **Interference.** If treated users affect control users, through shared inventory, pricing or social features, the arms are not independent. Randomise at a level that contains the interaction, such as city or store.
+
+  Write the plan down: primary metric, MDE, sample size, duration, looks, and the decision rule. Then follow it.
+
+why_it_matters: |
+  A growth team ran 30 tests a quarter, checked each daily, and shipped any variant that reached p < 0.05. Their dashboard showed 11 winners, with a combined forecast lift of 9% in sign-ups. Sign-ups over the quarter were flat. With daily peeking over three-week tests, the false positive rate per test was far above 5%, and most of the winners were noise.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      for day in range(1, 29):
+          p = daily_p_value(day)
+          if p < 0.05:
+              ship("B")
+              break
+    annotations:
+      - find: "for day in range(1, 29):"
+        note: "Up to 28 looks at the same growing data."
+      - find: "if p < 0.05:"
+        note: "The same 5% threshold at every look: the overall false positive rate climbs well above 5%."
+  strong:
+    code: |
+      from dataclasses import dataclass
+
+
+      @dataclass(frozen=True)
+      class TestPlan:
+          """Written before launch and stored with the results."""
+
+          primary_metric: str
+          mde_points: float
+          n_per_arm: int
+          min_days: int
+          looks: int = 1
+
+
+      def ready_to_analyse(plan: TestPlan, n_per_arm_now: int, days_run: int) -> bool:
+          """True only once the planned sample and duration are both reached."""
+          return n_per_arm_now >= plan.n_per_arm and days_run >= plan.min_days
+    annotations:
+      - find: "class TestPlan:"
+        note: "The plan is data, fixed before launch."
+      - find: "looks: int = 1"
+        note: "One analysis unless a sequential design was planned."
+      - find: "return n_per_arm_now >= plan.n_per_arm and days_run >= plan.min_days"
+        note: "The lift is looked at once, when the plan says so."
+  takeaway: |
+    Plan the sample, duration and looks, analyse once at the horizon, and treat anything else as exploration.
+
+exercises:
+  - id: B9-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You check an A/A test (no real difference) after each of 10 equal batches and stop at the first p < 0.05. In this lesson's simulation, how often did that declare a winner?
+    options:
+      - {id: a, text: "About 5%"}
+      - {id: b, text: "About 18%"}
+      - {id: c, text: "About 50%"}
+      - {id: d, text: "Never, because the arms are identical"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Each look is another chance for noise to cross the threshold."}
+      - {id: r2, text: "Later batches have more users, so they are always significant."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "5% holds for one planned look. Ten looks gave 18.4% in the simulation."
+      - answer: c
+        feedback: "Too high for 10 looks. Unlimited looking pushes it higher still."
+      - answer: d
+        feedback: "Identical arms still produce p < 0.05 by chance. That is what a 5% level means."
+      - answer: b|r2
+        feedback: "Right number, wrong reason. More users do not create significance when there is no effect."
+    hints:
+      - "How many chances does noise get?"
+      - "One look: 5%. Ten looks: more."
+      - "The simulation gave 18.4%."
+    explanation: |
+      Repeated looks multiply the chances of a false positive. Fix the horizon or use a planned sequential design.
+
+  - id: B9-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      A test ran 14 days. The lift in conversion was 3.1 points in week 1 and 0.4 points in week 2. What does this print?
+    code: |
+      week_lifts = {"week_1": 3.1, "week_2": 0.4}
+      fading = week_lifts["week_2"] < week_lifts["week_1"] / 2
+      print("novelty suspected" if fading else "stable")
+    answer: "novelty suspected"
+    wrong_answers:
+      - answer: "stable"
+        feedback: "0.4 is less than half of 3.1, so the effect is fading."
+    hints:
+      - "Half of 3.1 is 1.55."
+      - "Is 0.4 below that?"
+      - "Yes."
+    explanation: |
+      A lift that fades fast is often novelty. Report the later weeks, or run longer before deciding.
+
+  - id: B9-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Allow analysis only when both the planned sample and the planned duration are reached.
+    template: |
+      return n_per_arm_now >= plan.n_per_arm [[g1]] days_run >= plan.[[g2]]
+    gaps:
+      g1: {accepted: [and]}
+      g2: {accepted: [min_days]}
+    wrong_answers:
+      - answer: {g1: or}
+        feedback: "or lets a big day-2 sample through before a full weekly cycle. Both conditions must hold."
+    hints:
+      - "Both, not either."
+      - "The plan field for duration."
+      - "`and` and `min_days`."
+    explanation: |
+      Sample size gives power. Duration covers weekly cycles and novelty. The analysis needs both.
+
+  - id: B9-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `peeking_false_positive_rate(rng, n_sims, n_per_look, looks, rate, z_crit=1.959964) -> float`. It simulates `n_sims` A/A tests where both arms convert at `rate`. Each arm gets `n_per_look` new users per look. At each look, run a pooled two-proportion z-test on the cumulative data. Return the share of simulations where `|z| > z_crit` at **any** look. Treat a zero standard error as z = 0. Use only the `rng` passed in.
+    starter: |
+      import numpy as np
+
+
+      def peeking_false_positive_rate(rng, n_sims, n_per_look, looks, rate, z_crit=1.959964):
+          return 0.05
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: peeking_false_positive_rate
+          typed: true
+          docstring: true
+          message: "Give `peeking_false_positive_rate` type hints and a docstring."
+        - id: no_global_random
+          kind: forbids_pattern
+          pattern: "np\\.random\\.(seed|rand|random|choice|binomial)\\("
+          message: "Use the rng argument, not the global np.random functions."
+      tests:
+        - id: one_look
+          code: |
+            r = peeking_false_positive_rate(np.random.default_rng(1), 1000, 200, 1, 0.1)
+            assert 0.03 <= r <= 0.07, r
+          message: "With one look the false positive rate must be close to 5%."
+        - id: ten_looks
+          code: |
+            r = peeking_false_positive_rate(np.random.default_rng(1), 1000, 200, 10, 0.1)
+            assert 0.14 <= r <= 0.23, r
+          message: "With ten looks, count a simulation if |z| crosses the line at any look. Expect roughly 18%."
+        - id: reproducible
+          code: |
+            a = peeking_false_positive_rate(np.random.default_rng(5), 200, 100, 3, 0.2)
+            b = peeking_false_positive_rate(np.random.default_rng(5), 200, 100, 3, 0.2)
+            assert a == b
+          message: "The same seed must give the same result."
+    solution: |
+      import numpy as np
+
+
+      def peeking_false_positive_rate(
+          rng: np.random.Generator,
+          n_sims: int,
+          n_per_look: int,
+          looks: int,
+          rate: float,
+          z_crit: float = 1.959964,
+      ) -> float:
+          """Share of A/A simulations declared significant at any of the looks.
+
+          Args:
+              rng: Seeded generator.
+              n_sims: Number of simulated tests.
+              n_per_look: New users per arm between looks.
+              looks: Number of analyses.
+              rate: True conversion rate in both arms.
+              z_crit: Two-sided threshold for each look.
+
+          Returns:
+              The false positive rate across simulations.
+          """
+          total = looks * n_per_look
+          a = (rng.random((n_sims, total)) < rate).cumsum(axis=1)
+          b = (rng.random((n_sims, total)) < rate).cumsum(axis=1)
+          idx = np.arange(1, looks + 1) * n_per_look - 1
+          n = idx + 1
+          xa, xb = a[:, idx], b[:, idx]
+          pooled = (xa + xb) / (2 * n)
+          se = np.sqrt(pooled * (1 - pooled) * 2 / n)
+          diff = (xb - xa) / n
+          z = np.divide(diff, se, out=np.zeros_like(diff), where=se > 0)
+          return float((np.abs(z) > z_crit).any(axis=1).mean())
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def peeking_false_positive_rate(
+            rng: np.random.Generator,
+            n_sims: int,
+            n_per_look: int,
+            looks: int,
+            rate: float,
+            z_crit: float = 1.959964,
+        ) -> float:
+            """Only the final look."""
+            total = looks * n_per_look
+            xa = (rng.random((n_sims, total)) < rate).sum(axis=1)
+            xb = (rng.random((n_sims, total)) < rate).sum(axis=1)
+            pooled = (xa + xb) / (2 * total)
+            se = np.sqrt(pooled * (1 - pooled) * 2 / total)
+            diff = (xb - xa) / total
+            z = np.divide(diff, se, out=np.zeros_like(diff), where=se > 0)
+            return float((np.abs(z) > z_crit).mean())
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def peeking_false_positive_rate(
+              rng: np.random.Generator,
+              n_sims: int,
+              n_per_look: int,
+              looks: int,
+              rate: float,
+              z_crit: float = 1.959964,
+          ) -> float:
+              """Only the final look."""
+              total = looks * n_per_look
+              xa = (rng.random((n_sims, total)) < rate).sum(axis=1)
+              xb = (rng.random((n_sims, total)) < rate).sum(axis=1)
+              pooled = (xa + xb) / (2 * total)
+              se = np.sqrt(pooled * (1 - pooled) * 2 / total)
+              diff = (xb - xa) / total
+              z = np.divide(diff, se, out=np.zeros_like(diff), where=se > 0)
+              return float((np.abs(z) > z_crit).mean())
+        triggers: ten_looks
+    hints:
+      - "Draw conversions for all users at once, then take cumulative sums along each row."
+      - "Pick the columns at the end of each look: `np.arange(1, looks + 1) * n_per_look - 1`."
+      - "A simulation counts if `(np.abs(z) > z_crit).any(axis=1)`."
+    explanation: |
+      Cumulative sums give every look's data from one draw. Counting a simulation when any look crosses the threshold shows how peeking inflates false positives.
+
+  - id: B9-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Stakeholders want to "see results daily" on a four-week pricing test. Choose the plan.
+    slots:
+      - id: dashboard
+        label: "What the daily dashboard shows"
+        options:
+          - {id: health, text: "Split check, traffic and error rates. No lift until the horizon."}
+          - {id: lift, text: "Daily lift with p-values"}
+        answer: health
+      - id: looks
+        label: "Analyses of the primary metric"
+        options:
+          - {id: planned, text: "One at the horizon, or a few planned looks with stricter thresholds"}
+          - {id: daily, text: "Every day at p < 0.05"}
+        answer: planned
+      - id: unit
+        label: "Randomisation unit, since prices are shared in store"
+        options:
+          - {id: store, text: "Store"}
+          - {id: visitor, text: "Individual visitor"}
+        answer: store
+    model_answer: |
+      - Daily views of health, not of the answer.
+      - One planned analysis, or a group-sequential design agreed before launch.
+      - Randomise by store, because visitors in the same store share prices.
+    wrong_answers:
+      - answer: {dashboard: lift}
+        feedback: "A daily lift invites stopping on noise. Show health metrics until the horizon."
+      - answer: {looks: daily}
+        feedback: "28 looks at 5% each inflate the false positive rate far above 5%."
+      - answer: {unit: visitor}
+        feedback: "Visitors in one store see the same shelf price. Randomising visitors mixes arms within a store."
+    hints:
+      - "What should people see before the answer is ready?"
+      - "How many looks, at what threshold?"
+      - "Who shares the treatment?"
+    explanation: |
+      Separate monitoring from deciding, plan the looks, and randomise at the level where treatment is shared.
+
+recap:
+  - front: "Why peeking breaks a test"
+    back: "Each look is another chance for noise to cross p < 0.05. Ten looks gave 18.4% false positives in simulation."
+  - front: "Safe alternatives to daily peeking"
+    back: "Fixed horizon, or planned group-sequential looks with stricter thresholds."
+  - front: "Novelty effect"
+    back: "Lift that fades after launch. Run full weeks and compare week 1 with later weeks."
+  - front: "Interference"
+    back: "Treated units affect controls. Randomise at a level that contains the interaction."
+
+claims:
+  - claim: "A/A simulation, 1,000 runs, 200 users per arm per look, rate 10%: 5.2% false positives with 1 look, 12.9% with 5, 18.4% with 10."
+    status: verified
+    source: "Simulated with NumPy 2.4.6 in this repository (seed 1)."

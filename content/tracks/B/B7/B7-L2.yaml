@@ -1,0 +1,325 @@
+id: B7-L2
+title: Plot before you summarise
+
+concept: |
+  Summary statistics hide shape. **Anscombe's quartet** (1973) is four small datasets with the same means, variances and correlation. Computed in this course's build for the first three:
+
+  | Set | mean of y | variance of y | correlation with x |
+  |---|---|---|---|
+  | I | 7.50 | 4.13 | 0.816 |
+  | II | 7.50 | 4.13 | 0.816 |
+  | III | 7.50 | 4.12 | 0.816 |
+
+  Plotted, set I is a noisy line, set II is a curve, and set III is a perfect line with one outlier. The numbers alone cannot tell them apart.
+
+  Four plots catch most problems:
+
+  - **Histogram** of each key numeric column. Shows skew, gaps, spikes at codes such as 99 or 0, and more than one peak.
+  - **Scatter plot** of each pair you will model or correlate. Shows curves, clusters and single points that drive a correlation.
+  - **Line over time** of counts and key rates by wave. Shows breaks in the series when a questionnaire or supplier changed.
+  - **Bar chart of missingness** by column and by subgroup.
+
+  Make each plot honest:
+
+  - Label both axes with units, and give every figure a title that states what it shows.
+  - Choose histogram bins on purpose. Too few hide a spike at 99. Try two or three bin counts.
+  - Use a log scale for heavily skewed values such as spend, and say so on the axis.
+  - Plot the raw data before you plot the smoothed or aggregated version.
+
+  Write plotting code as functions that return a `matplotlib.figure.Figure` (matplotlib 3.10). Build with `fig, ax = plt.subplots()`, not the global `plt.plot()` state. A function that returns a figure is testable: a test reads `ax.get_xlabel()` or counts the bars. The caller decides whether to show it or save it.
+
+why_it_matters: |
+  A team reported a correlation of 0.62 between ad recall and purchase intent across 40 markets, and the client planned a budget shift on it. A scatter plot showed 39 markets in a flat cloud and one market far in the top-right corner. Without that market the correlation was close to zero. The decision was about one market, not 40.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      print(df["spend"].mean(), df["spend"].std())
+      plt.hist(df["spend"])
+      plt.show()
+    annotations:
+      - find: 'print(df["spend"].mean(), df["spend"].std())'
+        note: "Summaries first: a skewed spend column makes the mean misleading."
+      - find: 'plt.hist(df["spend"])'
+        note: "Global pyplot state, default bins, no labels, no title."
+      - find: "plt.show()"
+        note: "Nothing returned: nothing to test or save."
+  strong:
+    code: |
+      import matplotlib.pyplot as plt
+      from matplotlib.figure import Figure
+
+
+      def plot_distribution(values: list[float], title: str, xlabel: str, bins: int = 30) -> Figure:
+          """Histogram of values with labelled axes. The caller shows or saves it."""
+          fig, ax = plt.subplots(figsize=(6, 4))
+          ax.hist(values, bins=bins)
+          ax.set_title(title)
+          ax.set_xlabel(xlabel)
+          ax.set_ylabel("Respondents")
+          return fig
+    annotations:
+      - find: "fig, ax = plt.subplots(figsize=(6, 4))"
+        note: "An explicit figure and axes, not the global pyplot state."
+      - find: "ax.hist(values, bins=bins)"
+        note: "Bins are a parameter, so you try several."
+      - find: "return fig"
+        note: "Returned for the caller to show, save or test."
+  takeaway: |
+    Plot distributions, pairs and time series before summarising, with functions that return labelled figures.
+
+exercises:
+  - id: B7-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Two variables have correlation 0.816 in four different datasets. What can you conclude about the relationship without plotting?
+    options:
+      - {id: a, text: "It is linear in all four."}
+      - {id: b, text: "It is the same shape in all four."}
+      - {id: c, text: "Very little about its shape."}
+      - {id: d, text: "An outlier is present in all four."}
+    answer: c
+    reasons:
+      - {id: r1, text: "Anscombe's quartet has identical correlations with a line, a curve and an outlier-driven fit."}
+      - {id: r2, text: "Correlation is always misleading."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Anscombe's set II is a curve with the same correlation."
+      - answer: b
+        feedback: "Same correlation, different shapes: that is the point of the quartet."
+      - answer: d
+        feedback: "Only some of the sets have an outlier. The number cannot tell you which."
+      - answer: c|r2
+        feedback: "Right answer, wrong reason. Correlation is useful. It does not describe shape."
+    hints:
+      - "What does one number summarise?"
+      - "Remember Anscombe."
+      - "Shape needs a plot."
+    explanation: |
+      Correlation measures linear association. Curves, clusters and single points give the same value. Plot first.
+
+  - id: B7-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (NumPy 2.4)
+    code: |
+      import numpy as np
+
+      x = [10, 8, 13, 9, 11, 14, 6, 4, 12, 7, 5]
+      y1 = [8.04, 6.95, 7.58, 8.81, 8.33, 9.96, 7.24, 4.26, 10.84, 4.82, 5.68]
+      y3 = [7.46, 6.77, 12.74, 7.11, 7.81, 8.84, 6.08, 5.39, 8.15, 6.42, 5.73]
+      print(round(np.corrcoef(x, y1)[0, 1], 2) == round(np.corrcoef(x, y3)[0, 1], 2))
+    answer: "True"
+    wrong_answers:
+      - answer: "False"
+        feedback: "Both are 0.82 to two places. Set III is a straight line plus one outlier, and still matches set I."
+    hints:
+      - "These are Anscombe's sets I and III."
+      - "What correlation does the quartet share?"
+      - "0.816."
+    explanation: |
+      Both correlations round to 0.82. Only a plot shows that set III is a perfect line bent by one point.
+
+  - id: B7-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Create an explicit figure and axes, and label the x axis.
+    template: |
+      fig, ax = plt.[[g1]]()
+      ax.hist(values, bins=30)
+      ax.[[g2]]("Monthly spend (GBP)")
+    gaps:
+      g1: {accepted: [subplots]}
+      g2: {accepted: [set_xlabel]}
+    wrong_answers:
+      - answer: {g2: xlabel}
+        feedback: "plt.xlabel is the global pyplot function. On an Axes object the method is set_xlabel."
+    hints:
+      - "The pyplot function that returns (fig, ax)."
+      - "Axes methods that set things start with set_."
+      - "`subplots` and `set_xlabel`."
+    explanation: |
+      `plt.subplots()` returns a figure and axes. Axes setters are `set_title`, `set_xlabel` and `set_ylabel`.
+
+  - id: B7-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [matplotlib]
+    prompt: |
+      Write `plot_distribution(values, title, xlabel, bins=30) -> Figure`. Draw a histogram with `bins` bins on one axes, set the title and x label from the arguments, set the y label to `"Respondents"`, and return the figure. Do not call `plt.show()`.
+    starter: |
+      import matplotlib.pyplot as plt
+
+
+      def plot_distribution(values, title, xlabel, bins=30):
+          plt.hist(values)
+          plt.show()
+    checker:
+      kind: python
+      setup: |
+        import matplotlib
+        matplotlib.use("Agg")
+        from matplotlib.figure import Figure as _Figure
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: plot_distribution
+          typed: true
+          docstring: true
+          message: "Give `plot_distribution` type hints and a docstring."
+        - id: no_show
+          kind: forbids_pattern
+          pattern: "\\.show\\("
+          message: "Return the figure. The caller decides whether to show it."
+      tests:
+        - id: returns_figure
+          code: |
+            fig = plot_distribution([1.0, 2.0, 2.0, 3.0], "Spend", "GBP", bins=4)
+            assert isinstance(fig, _Figure)
+          message: "Return a matplotlib Figure."
+        - id: labels
+          code: |
+            ax = plot_distribution([1.0, 2.0, 3.0], "Spend", "GBP").axes[0]
+            assert (ax.get_title(), ax.get_xlabel(), ax.get_ylabel()) == ("Spend", "GBP", "Respondents")
+          message: "Set the title and x label from the arguments, and the y label to Respondents."
+        - id: bins
+          code: |
+            ax = plot_distribution([1.0, 2.0, 3.0], "t", "x", bins=7).axes[0]
+            assert len(ax.patches) == 7
+          message: "Use the bins argument for the histogram."
+    solution: |
+      import matplotlib.pyplot as plt
+      from matplotlib.figure import Figure
+
+
+      def plot_distribution(values: list[float], title: str, xlabel: str, bins: int = 30) -> Figure:
+          """Histogram of values with labelled axes.
+
+          Args:
+              values: Numbers to plot.
+              title: Figure title.
+              xlabel: X axis label, with units.
+              bins: Number of histogram bins.
+
+          Returns:
+              The figure. The caller shows or saves it.
+          """
+          fig, ax = plt.subplots(figsize=(6, 4))
+          ax.hist(values, bins=bins)
+          ax.set_title(title)
+          ax.set_xlabel(xlabel)
+          ax.set_ylabel("Respondents")
+          return fig
+    seeded_bugs:
+      - |
+        import matplotlib.pyplot as plt
+        from matplotlib.figure import Figure
+
+
+        def plot_distribution(values: list[float], title: str, xlabel: str, bins: int = 30) -> Figure:
+            """Ignores bins."""
+            fig, ax = plt.subplots()
+            ax.hist(values)
+            ax.set_title(title)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("Respondents")
+            return fig
+      - |
+        import matplotlib.pyplot as plt
+        from matplotlib.figure import Figure
+
+
+        def plot_distribution(values: list[float], title: str, xlabel: str, bins: int = 30) -> Figure:
+            """No labels."""
+            fig, ax = plt.subplots()
+            ax.hist(values, bins=bins)
+            return fig
+    wrong_answers:
+      - answer: |
+          import matplotlib.pyplot as plt
+          from matplotlib.figure import Figure
+
+
+          def plot_distribution(values: list[float], title: str, xlabel: str, bins: int = 30) -> Figure:
+              """Ignores bins."""
+              fig, ax = plt.subplots()
+              ax.hist(values)
+              ax.set_title(title)
+              ax.set_xlabel(xlabel)
+              ax.set_ylabel("Respondents")
+              return fig
+        triggers: bins
+    hints:
+      - "Start with `fig, ax = plt.subplots()`."
+      - "`ax.hist(values, bins=bins)`, then the three set_ calls."
+      - "Return fig."
+    explanation: |
+      Returning a labelled figure makes the plot testable and lets the caller choose to show or save it.
+
+  - id: B7-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Choose the first plot for each question.
+    slots:
+      - id: codes
+        label: "Does the age column hold codes such as 999?"
+        options: &plots
+          - {id: hist, text: "Histogram"}
+          - {id: scatter, text: "Scatter plot"}
+          - {id: line, text: "Line over waves"}
+          - {id: missing_bar, text: "Bar chart of missing share"}
+        answer: hist
+      - id: driver
+        label: "Is the recall and intent correlation driven by a few markets?"
+        options: *plots
+        answer: scatter
+      - id: break
+        label: "Did the supplier change in wave 9 shift the awareness rate?"
+        options: *plots
+        answer: line
+      - id: gaps
+        label: "Which questions did the new mobile layout leave unanswered?"
+        options: *plots
+        answer: missing_bar
+    model_answer: |
+      - Codes and spikes: a histogram.
+      - A relationship and its outliers: a scatter plot.
+      - A break in a series: a line over waves.
+      - Where answers are missing: a bar chart of missing share by column and device.
+    wrong_answers:
+      - answer: {codes: scatter}
+        feedback: "A spike at 999 in one variable shows best as a tall, isolated bar in a histogram."
+      - answer: {driver: hist}
+        feedback: "A histogram shows one variable. Influential points need both variables: a scatter plot."
+      - answer: {break: hist}
+        feedback: "A histogram pools the waves. A line over waves shows the step at wave 9."
+    hints:
+      - "How many variables does the question involve?"
+      - "Is time part of the question?"
+      - "Missingness is its own variable."
+    explanation: |
+      Match the plot to the question: one variable, a pair, a series or missingness.
+
+recap:
+  - front: "Anscombe's quartet"
+    back: "Same mean, variance and correlation (0.816), different shapes. Plot before summarising."
+  - front: "Four first plots"
+    back: "Histograms, scatter plots of modelled pairs, lines over waves, missingness bars."
+  - front: "Testable plotting code"
+    back: "fig, ax = plt.subplots(), set labels on ax, return fig. No plt.show() inside."
+  - front: "Histogram bins"
+    back: "Choose on purpose and try several. Too few hide spikes at codes."
+
+claims:
+  - claim: "Anscombe's sets I to III share mean 7.50, variance about 4.12 to 4.13 and correlation 0.816."
+    status: verified
+    source: "Anscombe (1973), The American Statistician 27(1); computed with NumPy 2.4.6 in this repository."

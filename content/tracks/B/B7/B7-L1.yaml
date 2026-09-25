@@ -1,0 +1,355 @@
+id: B7-L1
+title: Profile a dataset before you analyse it
+
+concept: |
+  Before any chart or model, answer five questions about a new dataset. Each takes one line of pandas, and each catches a class of error that no later step will.
+
+  1. **Shape and grain.** How many rows, and what does one row mean? Check the claimed key is unique: `df.duplicated(subset=["respondent_id", "wave"]).sum()` should be 0.
+  2. **Dtypes.** `df.dtypes`. IDs read as floats, dates as text and numbers as `str` all show here (lesson B3-L1).
+  3. **Missingness.** `df.isna().mean()` gives the share missing per column. Look for columns that are nearly empty, and for shares that differ by wave or region.
+  4. **Cardinality.** `df.nunique()`. A `gender` column with 14 distinct values holds typos. An ID column with fewer distinct values than rows holds duplicates.
+  5. **Ranges.** `df.describe()`. Ages of 999, negative weights, and dates in 1900 are codes for "missing" or errors.
+
+  Put the per-column answers in one table:
+
+  ```python
+  def profile(df: pd.DataFrame) -> pd.DataFrame:
+      return pd.DataFrame({
+          "dtype": df.dtypes.astype(str),
+          "missing_share": df.isna().mean(),
+          "n_unique": df.nunique(),
+      })
+  ```
+
+  Two pandas defaults to know (pandas 3.0):
+
+  - `nunique()` **excludes** missing values. Pass `dropna=False` to count NaN as a value.
+  - `duplicated()` marks every repeat **except the first** (`keep="first"`). To count every row involved in a duplicate, use `keep=False`.
+
+  Save the profile with the analysis. When the next delivery arrives, compare the two profiles. A column whose missing share jumps from 2% to 40% tells you something changed at the source before it changes your results.
+
+  Libraries such as ydata-profiling build long HTML reports. They are useful for a first look. The five checks above, in code, are what you rerun on every delivery.
+
+why_it_matters: |
+  A satisfaction score was coded 1 to 10, with 99 for "don't know". Nobody profiled the file. The mean score for one region came out at 14.2, above the maximum possible value. The analyst assumed a weighting problem and spent a day on the weights. `describe()` would have shown a maximum of 99 in the first minute.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      df = pd.read_csv("wave12.csv")
+      df.head()
+      df.groupby("region")["score"].mean()
+    annotations:
+      - find: "df.head()"
+        note: "Five rows show nothing about codes like 99, duplicates or missingness."
+      - find: 'df.groupby("region")["score"].mean()'
+        note: "Analysis before profiling: 99 codes are averaged in."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def profile(df: pd.DataFrame) -> pd.DataFrame:
+          """One row per column: dtype, missing share and distinct values."""
+          return pd.DataFrame(
+              {
+                  "dtype": df.dtypes.astype(str),
+                  "missing_share": df.isna().mean(),
+                  "n_unique": df.nunique(),
+              }
+          )
+
+
+      def duplicate_rows(df: pd.DataFrame, key: list[str]) -> int:
+          """Rows whose key appears more than once, all copies counted."""
+          return int(df.duplicated(subset=key, keep=False).sum())
+    annotations:
+      - find: '"missing_share": df.isna().mean(),'
+        note: "Share missing per column, comparable across deliveries."
+      - find: "return int(df.duplicated(subset=key, keep=False).sum())"
+        note: "keep=False counts every copy, not only the repeats."
+  takeaway: |
+    Shape and grain, dtypes, missingness, cardinality and ranges, in code, before any analysis.
+
+exercises:
+  - id: B7-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A satisfaction score should run from 1 to 10. Which call shows at once that some rows hold 99?
+    options:
+      - {id: a, text: "`df.head()`"}
+      - {id: b, text: "`df[\"score\"].describe()`"}
+      - {id: c, text: "`df.dtypes`"}
+      - {id: d, text: "`df.shape`"}
+    answer: b
+    reasons:
+      - {id: r1, text: "describe() reports min and max, so a max of 99 stands out."}
+      - {id: r2, text: "describe() removes invalid values."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "head() shows five rows. The 99s are likely elsewhere."
+      - answer: c
+        feedback: "99 is a valid integer. The dtype looks fine."
+      - answer: d
+        feedback: "The shape counts rows and columns, not values."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. describe() reports values. It does not clean them."
+    hints:
+      - "Which call reports the maximum?"
+      - "What would the maximum be?"
+      - "99."
+    explanation: |
+      `describe()` gives count, mean, min, quartiles and max. A max of 99 on a 1 to 10 scale is a code, not a score.
+
+  - id: B7-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (pandas 3.0)
+    code: |
+      import pandas as pd
+
+      ids = pd.Series(["a", "b", "b", None])
+      print(ids.nunique(), ids.duplicated().sum())
+    answer: "2 1"
+    wrong_answers:
+      - answer: "3 1"
+        feedback: "nunique() excludes missing values by default. Only a and b count."
+      - answer: "2 2"
+        feedback: "duplicated() keeps the first b unmarked. Only the second b is True."
+    hints:
+      - "Does nunique count None?"
+      - "Which b does duplicated() mark?"
+      - "keep=\"first\" is the default."
+    explanation: |
+      Two distinct non-missing values. One repeat, because the first `b` is not marked.
+
+  - id: B7-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Count every row that shares a (respondent_id, wave) key with another row, and the share of missing values per column.
+    template: |
+      dupes = df.duplicated(subset=["respondent_id", "wave"], keep=[[g1]]).sum()
+      missing = df.isna().[[g2]]()
+    gaps:
+      g1: {accepted: ["False"]}
+      g2: {accepted: [mean]}
+    wrong_answers:
+      - answer: {g1: '"first"'}
+        feedback: "keep=\"first\" leaves one copy unmarked. keep=False marks all of them."
+      - answer: {g2: sum}
+        feedback: "sum() gives counts. The mean of a boolean column is the share."
+    hints:
+      - "Which keep value marks every copy?"
+      - "The mean of True/False is the share of True."
+      - "`False` and `mean`."
+    explanation: |
+      `keep=False` flags all copies. `isna().mean()` gives the missing share per column.
+
+  - id: B7-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Write `profile(df: pd.DataFrame) -> pd.DataFrame`. Return one row per input column, indexed by column name, with columns:
+
+      - `dtype`: the dtype as a string.
+      - `missing_share`: share of missing values.
+      - `n_unique`: distinct non-missing values.
+      - `min` and `max`: for numeric columns, the minimum and maximum. For other columns, missing (`None` or `NaN`).
+    starter: |
+      import pandas as pd
+
+
+      def profile(df):
+          return df.describe()
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        DF = pd.DataFrame({"id": ["a", "b", "b", None], "score": [3.0, None, 7.0, 99.0]})
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: profile
+          typed: true
+          docstring: true
+          message: "Give `profile` type hints and a docstring."
+      tests:
+        - id: shape
+          code: |
+            out = profile(DF)
+            assert list(out.index) == ["id", "score"]
+            assert list(out.columns) == ["dtype", "missing_share", "n_unique", "min", "max"]
+          message: "Return one row per column, with columns dtype, missing_share, n_unique, min, max."
+        - id: missing_unique
+          code: |
+            out = profile(DF)
+            assert out.loc["id", "missing_share"] == 0.25 and out.loc["score", "missing_share"] == 0.25
+            assert out.loc["id", "n_unique"] == 2 and out.loc["score", "n_unique"] == 3
+          message: "missing_share is isna().mean(). n_unique excludes missing values."
+        - id: ranges
+          code: |
+            out = profile(DF)
+            assert out.loc["score", "min"] == 3.0 and out.loc["score", "max"] == 99.0
+            assert pd.isna(out.loc["id", "min"]) and pd.isna(out.loc["id", "max"])
+          message: "Numeric columns get min and max. Text columns get a missing value."
+        - id: dtype
+          code: |
+            out = profile(DF)
+            assert out.loc["score", "dtype"] == "float64" and out.loc["id", "dtype"] == "str"
+          message: "dtype must be the column dtype as a string."
+    solution: |
+      import pandas as pd
+
+
+      def profile(df: pd.DataFrame) -> pd.DataFrame:
+          """Profile each column: dtype, missing share, distinct values, numeric range.
+
+          Args:
+              df: Any DataFrame.
+
+          Returns:
+              One row per input column.
+          """
+          rows = {}
+          for col in df.columns:
+              s = df[col]
+              numeric = pd.api.types.is_numeric_dtype(s)
+              rows[col] = {
+                  "dtype": str(s.dtype),
+                  "missing_share": float(s.isna().mean()),
+                  "n_unique": int(s.nunique()),
+                  "min": float(s.min()) if numeric else None,
+                  "max": float(s.max()) if numeric else None,
+              }
+          return pd.DataFrame.from_dict(rows, orient="index")
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def profile(df: pd.DataFrame) -> pd.DataFrame:
+            """Counts NaN as a value."""
+            rows = {}
+            for col in df.columns:
+                s = df[col]
+                numeric = pd.api.types.is_numeric_dtype(s)
+                rows[col] = {
+                    "dtype": str(s.dtype),
+                    "missing_share": float(s.isna().mean()),
+                    "n_unique": int(s.nunique(dropna=False)),
+                    "min": float(s.min()) if numeric else None,
+                    "max": float(s.max()) if numeric else None,
+                }
+            return pd.DataFrame.from_dict(rows, orient="index")
+      - |
+        import pandas as pd
+
+
+        def profile(df: pd.DataFrame) -> pd.DataFrame:
+            """Counts missing, not the share."""
+            rows = {}
+            for col in df.columns:
+                s = df[col]
+                numeric = pd.api.types.is_numeric_dtype(s)
+                rows[col] = {
+                    "dtype": str(s.dtype),
+                    "missing_share": float(s.isna().sum()),
+                    "n_unique": int(s.nunique()),
+                    "min": float(s.min()) if numeric else None,
+                    "max": float(s.max()) if numeric else None,
+                }
+            return pd.DataFrame.from_dict(rows, orient="index")
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def profile(df: pd.DataFrame) -> pd.DataFrame:
+              """Counts NaN as a value."""
+              rows = {}
+              for col in df.columns:
+                  s = df[col]
+                  numeric = pd.api.types.is_numeric_dtype(s)
+                  rows[col] = {
+                      "dtype": str(s.dtype),
+                      "missing_share": float(s.isna().mean()),
+                      "n_unique": int(s.nunique(dropna=False)),
+                      "min": float(s.min()) if numeric else None,
+                      "max": float(s.max()) if numeric else None,
+                  }
+              return pd.DataFrame.from_dict(rows, orient="index")
+        triggers: missing_unique
+    hints:
+      - "Loop over columns and build a dict per column."
+      - "`pd.api.types.is_numeric_dtype(s)` tells you whether min and max apply."
+      - "`pd.DataFrame.from_dict(rows, orient=\"index\")` builds the table."
+    explanation: |
+      A per-column table is easy to save and to compare with the next delivery's profile.
+
+  - id: B7-L1-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [pandas]
+    prompt: |
+      The QA report says 1 duplicated respondent row, but 2 rows in the file share the same ID, and both must be sent back to the supplier. Tap the line with the bug and fix it.
+    code: |
+      import pandas as pd
+
+
+      def rows_with_duplicate_ids(df: pd.DataFrame) -> pd.DataFrame:
+          """Every row whose respondent_id appears more than once."""
+          mask = df.duplicated(subset=["respondent_id"])
+          return df[mask]
+    bug_lines: [6]
+    fix_checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        DF = pd.DataFrame({"respondent_id": ["a", "b", "b", "c"], "x": [1, 2, 3, 4]})
+      tests:
+        - id: all_copies
+          code: |
+            assert list(rows_with_duplicate_ids(DF)["x"]) == [2, 3]
+          message: "Return every copy of a duplicated ID, not only the repeats."
+    fix_solution: |
+      import pandas as pd
+
+
+      def rows_with_duplicate_ids(df: pd.DataFrame) -> pd.DataFrame:
+          """Every row whose respondent_id appears more than once."""
+          mask = df.duplicated(subset=["respondent_id"], keep=False)
+          return df[mask]
+    wrong_answers:
+      - lines: [7]
+        feedback: "Filtering with the mask is right. The mask misses the first copy."
+    hints:
+      - "Which rows does duplicated() mark by default?"
+      - "Is the first b marked?"
+      - "keep=False."
+    explanation: |
+      The default `keep="first"` leaves the first copy unmarked. `keep=False` marks both.
+
+recap:
+  - front: "Five profiling questions"
+    back: "Shape and grain, dtypes, missingness, cardinality, ranges."
+  - front: "nunique() and missing values"
+    back: "Excluded by default. dropna=False counts NaN as a value."
+  - front: "Count every row in a duplicate group"
+    back: "df.duplicated(subset=key, keep=False).sum()."
+  - front: "Why save the profile?"
+    back: "Compare it with the next delivery to spot source changes early."
+
+claims:
+  - claim: "pandas nunique() excludes missing values by default and duplicated() defaults to keep=\"first\"."
+    status: verified
+    source: "pandas API reference; run on pandas 3.0.6 and 3.0.2 in this repository."

@@ -1,0 +1,332 @@
+id: B9-L2
+title: Analyse an A/B test the way it was randomised
+
+concept: |
+  An A/B test compares groups that differ only by chance and by the change you made. Keep that property in the analysis.
+
+  **1. Check the split first.** If you assigned 50/50 and got 50,600 against 49,400, something went wrong: a redirect lost users, a bot filter hit one arm, a crash hit one version. A chi-square test on the counts detects this **sample ratio mismatch** (SRM). For those counts, p = 0.00015. A very small p-value here, below 0.001 by common practice, means stop and find the cause. The treatment effect is not trustworthy until you do.
+
+  ```python
+  from scipy.stats import chisquare
+  chisquare([50_600, 49_400]).pvalue        # 0.000148, SciPy 1.17
+  ```
+
+  **2. Analyse as randomised.** Everyone assigned to B stays in B, even if they never saw the new page (intention to treat). Dropping "people who did not see it" from B, but not the matching people from A, breaks the randomisation.
+
+  **3. Analyse at the unit of randomisation.** If you randomised users, compute one outcome per user. Counting page views as independent inflates `n` and shrinks intervals.
+
+  **4. Report the difference with its interval.** For 1,150 of 10,000 in B against 1,000 of 10,000 in A, the lift is 1.5 points, with a 95% interval of 0.6 to 2.4 points. statsmodels 0.14:
+
+  ```python
+  from statsmodels.stats.proportion import confint_proportions_2indep
+  confint_proportions_2indep(1150, 10_000, 1000, 10_000)   # (0.0064, 0.0236)
+  ```
+
+  **5. Compare with the minimum effect you planned for** (lesson B9-L1). An interval that lies wholly above the MDE is a clear win. One that straddles it needs more data or a judgement call, stated as such.
+
+  Fix the primary metric, the analysis and the stopping rule in writing before launch. Secondary metrics are exploratory and are reported as such (lesson B8-L3).
+
+why_it_matters: |
+  A checkout test showed a 4% lift in conversion. Nobody checked the split. Arm B had 3% fewer users than arm A, because a slow script in B timed out on older phones, and those users were logged as never arriving. They were also the users least likely to buy. The "lift" came from losing low-converting users from B. When the script was fixed, the lift disappeared.
+
+  An SRM check on day one would have flagged the missing 3%.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      b_seen = b[b["saw_new_page"]]
+      rate_a = a["converted"].mean()
+      rate_b = b_seen["converted"].mean()
+      print("lift", rate_b - rate_a)
+    annotations:
+      - find: 'b_seen = b[b["saw_new_page"]]'
+        note: "Filters one arm on a post-assignment event: no longer a fair comparison."
+      - find: 'print("lift", rate_b - rate_a)'
+        note: "No split check, no interval, no comparison with the planned effect."
+  strong:
+    code: |
+      import math
+
+
+      def srm_p_value(n_a: int, n_b: int, expected_share_a: float = 0.5) -> float:
+          """Chi-square p-value (1 df) for the observed split against the planned one."""
+          n = n_a + n_b
+          e_a, e_b = n * expected_share_a, n * (1 - expected_share_a)
+          stat = (n_a - e_a) ** 2 / e_a + (n_b - e_b) ** 2 / e_b
+          return math.erfc(math.sqrt(stat / 2))
+
+
+      def lift_interval(x_a: int, n_a: int, x_b: int, n_b: int, z: float = 1.959964) -> tuple[float, float, float]:
+          """Difference in conversion (B minus A) with a Wald interval, for large samples."""
+          p_a, p_b = x_a / n_a, x_b / n_b
+          se = math.sqrt(p_a * (1 - p_a) / n_a + p_b * (1 - p_b) / n_b)
+          diff = p_b - p_a
+          return diff, diff - z * se, diff + z * se
+    annotations:
+      - find: "return math.erfc(math.sqrt(stat / 2))"
+        note: "Chi-square with 1 degree of freedom, in the standard library."
+      - find: "def lift_interval(x_a: int, n_a: int, x_b: int, n_b: int, z: float = 1.959964) -> tuple[float, float, float]:"
+        note: "Uses every assigned user, as randomised."
+  takeaway: |
+    Check the split, keep everyone in their assigned arm, analyse per randomised unit, and report the lift with its interval.
+
+exercises:
+  - id: B9-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A 50/50 test ends with 50,600 users in A and 49,400 in B. The SRM check gives p = 0.00015. What next?
+    options:
+      - {id: a, text: "Report the treatment effect. A 1% imbalance is small."}
+      - {id: b, text: "Stop and find why B lost users before trusting any result."}
+      - {id: c, text: "Reweight B up to 50,600 and continue."}
+      - {id: d, text: "Drop 1,200 random users from A to balance."}
+    answer: b
+    reasons:
+      - {id: r1, text: "A split that differs from the design means something removed users unevenly, and they may differ in outcome."}
+      - {id: r2, text: "Any p-value below 0.05 invalidates a test."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "With 100,000 users, a 1% gap is far beyond chance. The missing users may be the story."
+      - answer: c
+        feedback: "Reweighting assumes the missing users resemble the rest. They rarely do."
+      - answer: d
+        feedback: "Random deletion balances counts but not the kind of user lost from B."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The concern is a specific cause, not a p-value rule."
+    hints:
+      - "Is a 1% gap on 100,000 users chance?"
+      - "Which users went missing?"
+      - "Find the cause first."
+    explanation: |
+      SRM means the arms no longer differ only by chance. Find the cause, fix it, and rerun.
+
+  - id: B9-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      import math
+
+
+      def srm_p_value(n_a, n_b, expected_share_a=0.5):
+          n = n_a + n_b
+          e_a, e_b = n * expected_share_a, n * (1 - expected_share_a)
+          stat = (n_a - e_a) ** 2 / e_a + (n_b - e_b) ** 2 / e_b
+          return math.erfc(math.sqrt(stat / 2))
+
+
+      print(srm_p_value(5060, 4940) > 0.05, srm_p_value(50600, 49400) > 0.05)
+    answer: "True False"
+    wrong_answers:
+      - answer: "True True"
+        feedback: "The same 50.6% split is chance at 10,000 users (p = 0.23) but not at 100,000 (p = 0.00015)."
+      - answer: "False False"
+        feedback: "At 10,000 users, 60 either side of 5,000 is well within chance: p = 0.23."
+    hints:
+      - "Same proportions, ten times the users."
+      - "The statistic grows with n for the same share."
+      - "p = 0.23, then p = 0.00015."
+    explanation: |
+      The same imbalance in share becomes decisive as the sample grows. Check SRM on counts, not on how the percentages look.
+
+  - id: B9-L2-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the analysis of a finished A/B test.
+    items:
+      - {id: srm, text: "Check the split against the design"}
+      - {id: unit, text: "Aggregate to one outcome per randomised user"}
+      - {id: primary, text: "Estimate the primary metric's lift with its interval"}
+      - {id: mde, text: "Compare the interval with the planned minimum effect"}
+      - {id: secondary, text: "Report secondary metrics as exploratory"}
+    answer: [srm, unit, primary, mde, secondary]
+    wrong_answers:
+      - answer: [primary, srm, unit, mde, secondary]
+        feedback: "Checking the split after seeing the lift invites excuses. Check it first."
+      - answer: [srm, primary, unit, mde, secondary]
+        feedback: "Estimate on per-user outcomes, so aggregate before estimating."
+    hints:
+      - "Validity before results."
+      - "Units before estimates."
+      - "Primary before secondary."
+    explanation: |
+      Trust, then units, then the one planned answer, then everything else labelled as exploration.
+
+  - id: B9-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `srm_p_value(n_a: int, n_b: int, expected_share_a: float = 0.5) -> float`. Compute the chi-square statistic with expected counts `n * expected_share_a` and `n * (1 - expected_share_a)`, and return the 1-degree-of-freedom p-value `math.erfc(math.sqrt(stat / 2))`. Raise `ValueError` if either count is negative, the total is 0, or `expected_share_a` is not strictly between 0 and 1.
+    starter: |
+      def srm_p_value(n_a, n_b, expected_share_a=0.5):
+          return abs(n_a - n_b) / (n_a + n_b)
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: srm_p_value
+          typed: true
+          docstring: true
+          message: "Give `srm_p_value` type hints and a docstring."
+      tests:
+        - id: even
+          code: |
+            assert round(srm_p_value(50600, 49400), 6) == 0.000148
+            assert round(srm_p_value(5060, 4940), 3) == 0.230
+          message: "The 50/50 p-values must match chi-square with 1 df: 0.000148 and 0.230."
+        - id: uneven
+          code: |
+            assert round(srm_p_value(30500, 69500, 0.3), 5) == 0.00056
+          message: "Use expected_share_a for the expected counts."
+        - id: invalid
+          code: |
+            for args in [(0, 0, 0.5), (-1, 10, 0.5), (10, 10, 1.0), (10, 10, 0.0)]:
+                try:
+                    srm_p_value(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(args)
+          message: "Raise ValueError for a zero total, a negative count, or a share outside (0, 1)."
+    solution: |
+      import math
+
+
+      def srm_p_value(n_a: int, n_b: int, expected_share_a: float = 0.5) -> float:
+          """Sample ratio mismatch p-value: chi-square with 1 degree of freedom.
+
+          Args:
+              n_a: Users observed in arm A.
+              n_b: Users observed in arm B.
+              expected_share_a: Planned share of users in A.
+
+          Returns:
+              The p-value. Below 0.001 signals a mismatch to investigate.
+
+          Raises:
+              ValueError: On negative counts, a zero total or an invalid share.
+          """
+          if n_a < 0 or n_b < 0 or n_a + n_b == 0 or not 0 < expected_share_a < 1:
+              raise ValueError("counts must be non-negative with a positive total, share in (0, 1)")
+          n = n_a + n_b
+          e_a, e_b = n * expected_share_a, n * (1 - expected_share_a)
+          stat = (n_a - e_a) ** 2 / e_a + (n_b - e_b) ** 2 / e_b
+          return math.erfc(math.sqrt(stat / 2))
+    seeded_bugs:
+      - |
+        import math
+
+
+        def srm_p_value(n_a: int, n_b: int, expected_share_a: float = 0.5) -> float:
+            """Ignores the planned share."""
+            if n_a < 0 or n_b < 0 or n_a + n_b == 0 or not 0 < expected_share_a < 1:
+                raise ValueError("bad input")
+            n = n_a + n_b
+            e = n / 2
+            stat = (n_a - e) ** 2 / e + (n_b - e) ** 2 / e
+            return math.erfc(math.sqrt(stat / 2))
+      - |
+        import math
+
+
+        def srm_p_value(n_a: int, n_b: int, expected_share_a: float = 0.5) -> float:
+            """No input checks."""
+            n = n_a + n_b
+            e_a, e_b = n * expected_share_a, n * (1 - expected_share_a)
+            stat = (n_a - e_a) ** 2 / e_a + (n_b - e_b) ** 2 / e_b
+            return math.erfc(math.sqrt(stat / 2))
+    wrong_answers:
+      - answer: |
+          import math
+
+
+          def srm_p_value(n_a: int, n_b: int, expected_share_a: float = 0.5) -> float:
+              """Ignores the planned share."""
+              if n_a < 0 or n_b < 0 or n_a + n_b == 0 or not 0 < expected_share_a < 1:
+                  raise ValueError("bad input")
+              n = n_a + n_b
+              e = n / 2
+              stat = (n_a - e) ** 2 / e + (n_b - e) ** 2 / e
+              return math.erfc(math.sqrt(stat / 2))
+        triggers: uneven
+    hints:
+      - "Validate inputs first."
+      - "Expected counts: n * share and n * (1 - share)."
+      - "Sum (observed - expected)^2 / expected, then erfc(sqrt(stat / 2))."
+    explanation: |
+      The statistic compares observed with planned counts. For 1 degree of freedom the chi-square p-value equals `erfc(sqrt(stat / 2))`, so no SciPy is needed.
+
+  - id: B9-L2-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [pandas]
+    prompt: |
+      The analysis reports a larger lift than the product team expected. Tap the line that breaks the randomisation, and fix the function.
+    code: |
+      import pandas as pd
+
+
+      def conversion_by_arm(users: pd.DataFrame) -> dict[str, float]:
+          """Conversion rate per assigned arm. One row per randomised user."""
+          analysed = users[(users["arm"] == "A") | users["saw_new_page"]]
+          return analysed.groupby("arm")["converted"].mean().to_dict()
+    bug_lines: [6]
+    fix_checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        USERS = pd.DataFrame({
+            "arm": ["A", "A", "B", "B", "B", "B"],
+            "saw_new_page": [False, False, True, True, False, False],
+            "converted": [1, 0, 1, 1, 0, 0],
+        })
+      tests:
+        - id: itt
+          code: |
+            assert conversion_by_arm(USERS) == {"A": 0.5, "B": 0.5}
+          message: "Every assigned user stays in their arm. Do not filter one arm on what happened after assignment."
+    fix_solution: |
+      import pandas as pd
+
+
+      def conversion_by_arm(users: pd.DataFrame) -> dict[str, float]:
+          """Conversion rate per assigned arm. One row per randomised user."""
+          return users.groupby("arm")["converted"].mean().to_dict()
+    wrong_answers:
+      - lines: [7]
+        feedback: "Grouping by arm is right. The rows reaching it are the problem."
+    hints:
+      - "Which users does line 6 drop?"
+      - "Is the same rule applied to A?"
+      - "Keep everyone as assigned."
+    explanation: |
+      Filtering B on `saw_new_page` keeps its most engaged users and drops the rest, while A keeps everyone. The arms are no longer comparable. Analyse everyone as assigned.
+
+recap:
+  - front: "First step in any A/B analysis"
+    back: "Sample ratio mismatch check: chi-square on arm counts against the plan."
+  - front: "Intention to treat"
+    back: "Analyse everyone in the arm they were assigned to, whatever happened next."
+  - front: "Unit of analysis"
+    back: "The unit of randomisation, usually the user, not the page view."
+  - front: "Report a lift as"
+    back: "The difference with its interval, compared with the planned minimum effect."
+
+claims:
+  - claim: "chisquare([50600, 49400]).pvalue is 0.000148; for 5060 vs 4940 it is 0.230."
+    status: verified
+    source: "Run on SciPy 1.17.1 in this repository; matches math.erfc(sqrt(stat / 2))."
+  - claim: "confint_proportions_2indep(1150, 10000, 1000, 10000) gives (0.0064, 0.0236)."
+    status: verified
+    source: "Run on statsmodels 0.15.0 in this repository."
+  - claim: "An SRM p-value below 0.001 is a common threshold for investigation."
+    status: search-only
+    source: "Fabijan et al. (2019), Diagnosing Sample Ratio Mismatch in Online Controlled Experiments, KDD."
