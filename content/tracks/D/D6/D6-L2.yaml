@@ -1,0 +1,297 @@
+id: D6-L2
+title: Small data with a known answer, failing test first
+
+concept: |
+  After the read-through, run the code where you already know the right answer. That means small data you built by hand, and a test written **before** you accept the code.
+
+  **Build the known-answer data.** Five to ten rows, chosen so every rule in the requirement matters:
+
+  - a normal case you can compute in your head,
+  - a duplicate key, a null, a zero total, an empty group,
+  - a value exactly on a boundary, such as a weight equal to the cap.
+
+  Write the expected output by hand, next to the input. If you cannot work out the answer by hand, the requirement is not clear enough yet, and neither the assistant nor you should write code.
+
+  **Write the test first, and watch it fail.** The order matters:
+
+  1. Write the test with the hand-worked expected values.
+  2. Run it against the current code, or a stub. It must **fail**. A test that passes before the feature exists tests nothing.
+  3. Accept or write the code. Run the test. It passes.
+  4. Break the code on purpose, say change `>` to `>=`. The test must fail again. If it still passes, it does not cover that rule.
+
+  Step 4 is a quick form of mutation testing. It tells you whether your tests would catch the mistakes an assistant makes.
+
+  **For Spark code**, run the same idea on a local SparkSession. `pyspark.testing.assertDataFrameEqual(actual, expected)` compares two DataFrames. In PySpark 4.0 it ignores row order by default (`checkRowOrder=False`) and compares floats with `rtol=1e-05`. `assertSchemaEqual` compares schemas.
+
+  Keep the known-answer tests in the repository. They check every later change, including the next suggestion from an assistant.
+
+why_it_matters: |
+  An assistant wrote a deduplication step for silver and a test for it. The test passed. A reviewer changed the dedup key from `(respondent_id, wave_id)` to `respondent_id` alone, a real bug, and the test still passed. Its fixture had only one wave. Adding a respondent who appears in two waves made the test fail on the broken key, as it should.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def test_share():
+          result = share(30, 120)
+          assert result is not None
+          assert 0 <= result <= 1
+    annotations:
+      - find: "    assert result is not None"
+        note: "Passes for almost any implementation, including wrong ones."
+      - find: "    assert 0 <= result <= 1"
+        note: "A range, not an answer. 0.3 would pass as well as 0.25."
+  strong:
+    code: |
+      import pytest
+
+      @pytest.mark.parametrize(
+          ("part", "total", "expected"),
+          [
+              (30, 120, 0.25),   # normal case, worked by hand
+              (0, 50, 0.0),      # zero share is a real value
+              (5, 0, None),      # zero total has no share
+              (50, 50, 1.0),     # boundary
+          ],
+      )
+      def test_share(part: float, total: float, expected: float | None) -> None:
+          assert share(part, total) == expected
+    annotations:
+      - find: "(30, 120, 0.25),   # normal case, worked by hand"
+        note: "An exact answer you computed yourself."
+      - find: "(5, 0, None),      # zero total has no share"
+        note: "The edge case the requirement names."
+  takeaway: |
+    Hand-built data, hand-worked answers, a test that fails first, and a deliberate break to prove the test bites.
+
+exercises:
+  - id: D6-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You write a test for a feature that does not exist yet, and it passes. What does that tell you?
+    options:
+      - {id: a, text: "The test does not check the feature"}
+      - {id: b, text: "The feature already works"}
+      - {id: c, text: "The test is well written"}
+      - {id: d, text: "The code is fast"}
+    answer: a
+    reasons:
+      - {id: r1, text: "A test must fail when the behaviour it checks is missing. Passing without the feature means it asserts something else."}
+      - {id: r2, text: "Tests always fail the first time they run."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The feature does not exist. The test passed anyway, so it is not checking it."
+      - answer: c
+        feedback: "A test that cannot fail is not well written."
+      - answer: d
+        feedback: "Speed is unrelated."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Tests do not fail by default. This one should have."
+    hints:
+      - "What should a test do when the behaviour is missing?"
+      - "Fail."
+      - "This one did not."
+    explanation: |
+      Watch every new test fail once. Then you know it can.
+
+  - id: D6-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Your tests pass. You change `w > cap` to `w >= cap` in the code on purpose, and the tests still pass. What do you add?
+    options:
+      - {id: a, text: "A case with a weight exactly equal to the cap"}
+      - {id: b, text: "More cases with weights far above the cap"}
+      - {id: c, text: "A timeout on the test"}
+      - {id: d, text: "Nothing: the tests pass"}
+    answer: a
+    reasons:
+      - {id: r1, text: "> and >= differ only on the boundary, so only a boundary case can tell them apart."}
+      - {id: r2, text: "Mutations always need more data."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Both operators agree far from the cap. Those cases cannot catch this change."
+      - answer: c
+        feedback: "Timing has nothing to do with the comparison."
+      - answer: d
+        feedback: "They pass with a known bug, so they are incomplete."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. One well-chosen case is enough: the boundary."
+    hints:
+      - "Where do > and >= differ?"
+      - "Only at equality."
+      - "Add that case."
+    explanation: |
+      A deliberate break shows which rule your tests miss. Boundaries are the usual gap.
+
+  - id: D6-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Compare a Spark result with the expected rows in a local test, ignoring row order.
+    template: |
+      from pyspark.testing import [[g1]]
+
+      expected = spark.createDataFrame([("W01", 0.25)], "wave_id string, share double")
+      assertDataFrameEqual(result, expected, [[g2]]=False)
+    gaps:
+      g1: {accepted: [assertDataFrameEqual]}
+      g2: {accepted: [checkRowOrder]}
+    wrong_answers:
+      - answer: {g2: ignoreRowOrder}
+        feedback: "The parameter is checkRowOrder. It is False by default in PySpark 4.0."
+    hints:
+      - "The function you call on the last line."
+      - "The parameter about row order."
+      - "`assertDataFrameEqual` and `checkRowOrder`."
+    explanation: |
+      `checkRowOrder=False` is the default. Writing it out documents the intent.
+
+  - id: D6-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write the known-answer cases before the code. Write `share_cases() -> list[tuple[float, float, float | None]]` returning `(part, total, expected)` cases for `share(part, total)`, which returns `part / total`, or `None` when `total` is 0. Your cases must all pass against a correct `share`, and each of three wrong versions must fail at least one of them: one that raises on a zero total, one that returns 0.0 on a zero total, and one that returns a percentage (times 100).
+    starter: |
+      def share_cases():
+          return [(1.0, 2.0, 0.5)]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: share_cases
+          typed: true
+          docstring: true
+          message: "Give `share_cases` a return type and a docstring."
+      tests:
+        - id: correct_passes
+          code: |
+            def good(part, total):
+                return None if total == 0 else part / total
+            cases = share_cases()
+            assert len(cases) >= 2, "write at least two cases"
+            for part, total, expected in cases:
+                assert good(part, total) == expected, (part, total, expected)
+          message: "Every case must pass against a correct share. Work the expected values out by hand."
+        - id: catches_raise
+          code: |
+            def raises(part, total):
+                return part / total
+            def fails(fn):
+                for part, total, expected in share_cases():
+                    try:
+                        if fn(part, total) != expected:
+                            return True
+                    except Exception:
+                        return True
+                return False
+            assert fails(raises)
+          message: "Add a case with total 0, expecting None. A version that divides by zero must fail it."
+        - id: catches_zero
+          code: |
+            def zero(part, total):
+                return 0.0 if total == 0 else part / total
+            assert any(zero(p, t) != e for p, t, e in share_cases())
+          message: "Your zero-total case must expect None, not 0.0, so a version returning 0.0 fails."
+        - id: catches_percent
+          code: |
+            def pct(part, total):
+                return None if total == 0 else part / total * 100
+            assert any(pct(p, t) != e for p, t, e in share_cases())
+          message: "Add a normal case, such as (1, 4, 0.25). A version returning 25.0 must fail it."
+    solution: |
+      def share_cases() -> list[tuple[float, float, float | None]]:
+          """Known-answer cases for share(part, total), worked out by hand.
+
+          Returns:
+              (part, total, expected) tuples covering a normal share, a zero share and a zero total.
+          """
+          return [
+              (1.0, 4.0, 0.25),
+              (0.0, 10.0, 0.0),
+              (5.0, 0.0, None),
+          ]
+    seeded_bugs:
+      - |
+        def share_cases() -> list[tuple[float, float, float | None]]:
+            """Only the easy cases."""
+            return [(1.0, 1.0, 1.0), (0.0, 5.0, 0.0)]
+      - |
+        def share_cases() -> list[tuple[float, float, float | None]]:
+            """Wrong expected value for the zero total."""
+            return [(1.0, 4.0, 0.25), (5.0, 0.0, 0.0)]
+    wrong_answers:
+      - answer: |
+          def share_cases() -> list[tuple[float, float, float | None]]:
+              """Only the easy cases."""
+              return [(1.0, 1.0, 1.0), (0.0, 5.0, 0.0)]
+        triggers: catches_raise
+    hints:
+      - "A normal case whose share is not 0 or 1, so a percentage differs."
+      - "A zero total expecting None."
+      - "Work each expected value out by hand."
+    explanation: |
+      Good cases are chosen to break wrong code. A case where every version agrees, such as (1, 1, 1.0) for a percentage bug, adds nothing.
+
+  - id: D6-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      An assistant offers a silver deduplication step keyed on respondent and wave. Plan the known-answer test.
+    slots:
+      - id: fixture
+        label: "Fixture rows"
+        options:
+          - {id: designed, text: "A duplicate in one wave, the same respondent in two waves, a null key, an unchanged respondent"}
+          - {id: sample, text: "1,000 rows copied from production"}
+        answer: designed
+      - id: expected
+        label: "Expected output"
+        options:
+          - {id: hand, text: "Rows written by hand from the fixture"}
+          - {id: run, text: "Whatever the assistant's code returns the first time"}
+        answer: hand
+      - id: prove
+        label: "Proving the test bites"
+        options:
+          - {id: mutate, text: "Change the key to respondent_id only and confirm the test fails"}
+          - {id: rerun, text: "Run the test twice"}
+        answer: mutate
+    model_answer: |
+      - Each fixture row exercises one rule of the requirement.
+      - Expected rows come from you, not from the code under test.
+      - A deliberate wrong key must fail, or the fixture misses the multi-wave case.
+    wrong_answers:
+      - answer: {fixture: sample}
+        feedback: "You cannot work out 1,000 rows by hand, and production rarely has every edge case."
+      - answer: {expected: run}
+        feedback: "That makes the test self-confirming: it records the code's output, bugs included."
+      - answer: {prove: rerun}
+        feedback: "A rerun gives the same result. Only a deliberate break shows the test can fail."
+    hints:
+      - "Which rows exercise each rule?"
+      - "Who decides the right answer?"
+      - "How do you prove a test can fail?"
+    explanation: |
+      Designed rows, hand-written expectations, and a deliberate break.
+
+recap:
+  - front: "Known-answer data"
+    back: "5 to 10 hand-built rows: normal case, duplicate, null, zero total, empty group, boundary."
+  - front: "Test-first order"
+    back: "Write the test, watch it fail, accept the code, watch it pass, break the code on purpose, watch it fail."
+  - front: "assertDataFrameEqual defaults (PySpark 4.0)"
+    back: "checkRowOrder=False, rtol=1e-05, atol=1e-08."
+  - front: "Why break code on purpose"
+    back: "If the test still passes, it misses that rule. A quick form of mutation testing."
+
+claims:
+  - claim: "pyspark.testing.assertDataFrameEqual signature in 4.0.4 has checkRowOrder=False, rtol=1e-05, atol=1e-08; assertSchemaEqual exists."
+    status: verified
+    source: "inspect.signature on PySpark 4.0.4, September 2026."

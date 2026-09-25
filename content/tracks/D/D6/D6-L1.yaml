@@ -1,0 +1,295 @@
+id: D6-L1
+title: Read before you run, and check each API
+
+concept: |
+  Track D so far showed what goes wrong in AI-written code. Module D6 is the routine that catches it. Step one happens before the code runs at all.
+
+  **Why read first.** Running code is the fastest check for invented names, but running is not free. A suggested cell might overwrite a table, drop a column or read a whole year of data. Reading takes two minutes. Restoring a bronze table takes a morning, if you can do it at all.
+
+  **The read-through:**
+
+  1. **Restate the goal** in one sentence before you look at the code. "Append wave W14 deliveries to bronze with audit columns." You now have something to check against.
+  2. **List every external name**: imports, functions, methods, parameters, tables and columns. An `ast` walk lists the calls for you (exercise 4).
+  3. **Check each name** against the docs for your version and against the table schema. `DESCRIBE TABLE`, `df.columns`, `hasattr`, `inspect.signature` and `help()` answer most questions in seconds.
+  4. **Find side effects**: `mode("overwrite")`, `DROP`, `DELETE`, `TRUNCATE`, `VACUUM`, writes to production names. Each needs a reason that matches the goal.
+  5. **Check the scope**: filters on tracker and wave, no `collect()` on large data, no loop that calls `count()` per item.
+
+  Then run it, on development data first, in a dev schema: `research_dev`, not `research_bronze`.
+
+  **Where assistants go wrong most** in this course's work: the write mode, three-level table names, the filter keys, and parameters that exist but mean something else. `mode("overwrite")` on an append-only bronze table replaces every earlier delivery. It runs without error.
+
+  A read-through does not prove code correct. It removes the mistakes that are visible on the page, so testing (lesson D6-L2) can focus on the ones that are not.
+
+why_it_matters: |
+  An assistant rewrote a bronze ingestion cell to "simplify" it. The new cell used `mode("overwrite")`. It ran in production and succeeded, replacing 38 waves of append-only deliveries with one. Delta time travel recovered the table because retention had not yet expired. A two-minute read, looking for side effects, would have found the one word that mattered.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      # Suggested by an assistant: "load the new delivery"
+      delivery = spark.read.format("csv").option("header", True).load(path)
+      delivery.write.mode("overwrite").saveAsTable("research_bronze.nat_raw")
+    annotations:
+      - find: '# Suggested by an assistant: "load the new delivery"'
+        note: "No stated goal to check against."
+      - find: 'delivery.write.mode("overwrite").saveAsTable("research_bronze.nat_raw")'
+        note: "Overwrite on an append-only table replaces every earlier delivery. It runs cleanly."
+  strong:
+    code: |
+      # Goal: append the W14 delivery to bronze with audit columns. Bronze is append-only.
+      # Checked: format("csv").option("header", True) and saveAsTable (PySpark 4.0 API reference).
+      from pyspark.sql import functions as F
+
+      delivery = spark.read.format("csv").option("header", True).load(path)
+      delivery = delivery.withColumn("source_file", F.col("_metadata.file_path"))
+      delivery.write.mode("append").saveAsTable("research_dev.nat_raw")
+    annotations:
+      - find: "# Goal: append the W14 delivery to bronze with audit columns. Bronze is append-only."
+        note: "The goal, written first, makes the write mode checkable."
+      - find: 'delivery.write.mode("append").saveAsTable("research_dev.nat_raw")'
+        note: "Append, and into a dev schema until the run has been checked."
+  takeaway: |
+    Restate the goal, list and check every name, hunt for side effects, then run on development data.
+
+exercises:
+  - id: D6-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      An assistant gives you a cell that writes to `research_bronze.nat_raw`. What do you check first?
+    options:
+      - {id: a, text: "The write mode and the target, against the goal and the table's rules"}
+      - {id: b, text: "Whether the code is formatted with ruff"}
+      - {id: c, text: "How long it will take"}
+      - {id: d, text: "Nothing: run it and read the result"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Side effects on a production table cannot always be undone. Bronze is append-only."}
+      - {id: r2, text: "Assistants always pick the wrong write mode."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Formatting matters later. A destructive write matters now."
+      - answer: c
+        feedback: "Speed is secondary to what the cell changes."
+      - answer: d
+        feedback: "The result of an overwrite is a replaced table."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Often the mode is right. You check because the cost of a wrong one is high."
+    hints:
+      - "What can this cell change?"
+      - "The table."
+      - "Which rule does bronze follow?"
+    explanation: |
+      Side effects first: write mode, target name, DROP, DELETE. Then the rest.
+
+  - id: D6-L1-E2
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the read-through of an AI-written cell.
+    items:
+      - {id: goal, text: "Restate the goal in one sentence"}
+      - {id: names, text: "List every function, parameter, table and column"}
+      - {id: check, text: "Check each name against the docs for your version and the schema"}
+      - {id: effects, text: "Find side effects: write modes, DROP, DELETE"}
+      - {id: dev, text: "Run it on development data in a dev schema"}
+    answer: [goal, names, check, effects, dev]
+    wrong_answers:
+      - answer: [names, check, effects, dev, goal]
+        feedback: "Without a goal stated first, you have nothing to check the code against."
+      - answer: [goal, names, check, dev, effects]
+        feedback: "Find side effects before running, even on dev data."
+    hints:
+      - "What do you check the code against?"
+      - "Names before side effects."
+      - "Run last."
+    explanation: |
+      Goal, names, checks, side effects, then a dev run.
+
+  - id: D6-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      In a notebook, confirm that a suggested function and parameter exist.
+    template: |
+      import inspect
+      from pyspark.sql import functions as F
+
+      [[g1]](F, "try_divide")
+      "validate" in inspect.[[g2]](pd.DataFrame.merge).parameters
+    gaps:
+      g1: {accepted: [hasattr]}
+      g2: {accepted: [signature]}
+    wrong_answers:
+      - answer: {g1: getattr}
+        feedback: "getattr raises if the name is missing. hasattr returns True or False."
+    hints:
+      - "A built-in that returns True or False for an attribute."
+      - "inspect's function for parameters."
+      - "`hasattr` and `signature`."
+    explanation: |
+      `hasattr` checks a name. `inspect.signature(...).parameters` checks a parameter.
+
+  - id: D6-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `called_names(source: str) -> list[str]` that parses Python source with `ast` and returns the dotted names of every call, such as `spark.read.format` or `F.col`, unique and sorted. Ignore calls whose target is not a name or attribute chain (for example a call on a subscript). This gives you the checklist for step 2 of the read-through.
+    starter: |
+      def called_names(source):
+          return [line for line in source.splitlines() if "(" in line]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: called_names
+          typed: true
+          docstring: true
+          message: "Give `called_names` type hints and a docstring."
+        - id: uses_ast
+          kind: requires_call
+          name: ast.parse
+          message: "Parse the source with ast.parse."
+      tests:
+        - id: dotted
+          code: |
+            src = 'df = spark.read.format("csv").load(p)\nx = F.col("a")\nprint(x)\n'
+            assert called_names(src) == ["F.col", "print", "spark.read.format"], called_names(src)
+          message: "Return dotted names for name and attribute chains. A call on a call result (.load on format(...)) has no plain dotted name: skip it."
+        - id: unique
+          code: |
+            assert called_names("F.col('a')\nF.col('b')\n") == ["F.col"]
+          message: "Each name once, sorted."
+        - id: subscript
+          code: |
+            assert called_names("funcs[0]()\n") == []
+          message: "Skip calls on subscripts."
+    solution: |
+      import ast
+
+
+      def _dotted(node: ast.expr) -> str | None:
+          """Dotted name for a Name or Attribute chain, else None."""
+          if isinstance(node, ast.Name):
+              return node.id
+          if isinstance(node, ast.Attribute):
+              base = _dotted(node.value)
+              return None if base is None else f"{base}.{node.attr}"
+          return None
+
+
+      def called_names(source: str) -> list[str]:
+          """Sorted unique dotted names of every call in the source.
+
+          Args:
+              source: Python source code.
+
+          Returns:
+              Names such as "F.col" or "spark.read.format".
+          """
+          names = set()
+          for node in ast.walk(ast.parse(source)):
+              if isinstance(node, ast.Call):
+                  name = _dotted(node.func)
+                  if name is not None:
+                      names.add(name)
+          return sorted(names)
+    seeded_bugs:
+      - |
+        import ast
+
+
+        def called_names(source: str) -> list[str]:
+            """Only the last attribute."""
+            names = set()
+            for node in ast.walk(ast.parse(source)):
+                if isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Name):
+                        names.add(node.func.id)
+                    elif isinstance(node.func, ast.Attribute):
+                        names.add(node.func.attr)
+            return sorted(names)
+    wrong_answers:
+      - answer: |
+          import ast
+
+
+          def called_names(source: str) -> list[str]:
+              """Only the last attribute."""
+              names = set()
+              for node in ast.walk(ast.parse(source)):
+                  if isinstance(node, ast.Call):
+                      if isinstance(node.func, ast.Name):
+                          names.add(node.func.id)
+                      elif isinstance(node.func, ast.Attribute):
+                          names.add(node.func.attr)
+              return sorted(names)
+        triggers: dotted
+    hints:
+      - "Walk the tree with ast.walk and keep ast.Call nodes."
+      - "Build the dotted name recursively from Attribute.value down to a Name."
+      - "Return None when the chain hits anything else."
+    explanation: |
+      A list of every call is a checklist: each name gets a docs link or a question mark.
+
+  - id: D6-L1-E5
+    type: spot_bug
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      Goal: append this wave's delivery to bronze, which is append-only. Tap the line that breaks the goal, then fix it.
+    code: |
+      from pyspark.sql import functions as F
+
+      delivery = spark.read.format("csv").option("header", True).load(path)
+      delivery = delivery.withColumn("ingestion_timestamp", F.current_timestamp())
+      delivery.write.mode("overwrite").saveAsTable("research_bronze.nat_raw")
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: append
+          kind: requires_pattern
+          pattern: "mode\\(\\s*[\"']append[\"']\\s*\\)"
+          message: "Bronze is append-only: use mode(\"append\")."
+        - id: no_overwrite
+          kind: forbids_pattern
+          pattern: "overwrite"
+          message: "Overwrite replaces every earlier delivery."
+    fix_solution: |
+      from pyspark.sql import functions as F
+
+      delivery = spark.read.format("csv").option("header", True).load(path)
+      delivery = delivery.withColumn("ingestion_timestamp", F.current_timestamp())
+      delivery.write.mode("append").saveAsTable("research_bronze.nat_raw")
+    wrong_answers:
+      - lines: [4]
+        feedback: "Adding an ingestion timestamp is part of the bronze standard."
+      - lines: [3]
+        feedback: "The read is fine. The write replaces history."
+    hints:
+      - "Which line changes existing data?"
+      - "Look at the write mode."
+      - "Append."
+    explanation: |
+      One word, `overwrite`, turns an append into a replacement of all history.
+
+recap:
+  - front: "Five steps of the read-through"
+    back: "Restate the goal, list names, check each name, find side effects, run on dev data."
+  - front: "Side effects to hunt for"
+    back: "mode('overwrite'), DROP, DELETE, TRUNCATE, VACUUM, writes to production names."
+  - front: "Quick existence checks in a notebook"
+    back: "hasattr for names, inspect.signature(...).parameters for parameters, DESCRIBE TABLE or df.columns for columns."
+  - front: "What a read-through does not do"
+    back: "Prove correctness. It clears visible mistakes so tests can find the rest."
+
+claims:
+  - claim: "PySpark DataFrameReader.format/option/load, DataFrameWriter.mode and saveAsTable, and the _metadata.file_path column exist as used."
+    status: verified
+    source: "Local runs on PySpark 4.0.4 (see D1 and D5 claims); _metadata.file_path per Databricks Auto Loader docs (A8-L2)."

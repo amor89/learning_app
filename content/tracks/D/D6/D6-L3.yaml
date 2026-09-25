@@ -1,0 +1,319 @@
+id: D6-L3
+title: Ask for assumptions, then compare a second approach
+
+concept: |
+  Every piece of code assumes things about its input. Code from an assistant assumes things nobody wrote down. The last two steps of the verification routine bring them into the open.
+
+  **Ask for the assumptions.** After the assistant writes code, ask: "List every assumption this code makes about its input data, one per line." Typical answers for a pipeline step:
+
+  - `respondent_id` is unique within a wave.
+  - `final_weight` is never null and always positive.
+  - `wave_id` looks like `W` plus two digits.
+  - Timestamps are in UTC.
+  - The lookup table has one row per key.
+
+  Then **check each one against the real data**, and turn the important ones into checks that run with the pipeline. An assumption you have not checked is a bug waiting for the wave where it stops being true. The list is also a review aid: if an assumption surprises you, the code does something you did not ask for.
+
+  The assistant can miss assumptions too. Add your own from the D3 and D4 lessons: nulls in filters, duplicate keys in joins, empty groups, time zones.
+
+  **Compare a second approach.** Compute the same result by an independent route, and compare:
+
+  - Spark SQL against the PySpark DataFrame version.
+  - pandas on a small extract against Spark on the same rows.
+  - A total from the gold table against a direct aggregate of silver.
+
+  "Independent" matters. Asking the same assistant to rewrite the same logic tends to repeat the same mistake. Write the second version yourself, or derive it from a different table.
+
+  When the two disagree, do not pick the one you like. Run both on your known-answer data (lesson D6-L2). The one that matches the hand-worked answer is right, and the other has a bug worth understanding.
+
+why_it_matters: |
+  An assistant's gold aggregation and an analyst's hand-written SQL disagreed by 0.8 points of reach for one region. On the known-answer fixture, the SQL matched the hand calculation. The assistant's version used an inner join to the region lookup, which dropped 212 respondents with a region code missing from the lookup. Asked for its assumptions, the assistant had listed "every region code exists in the lookup". Nobody had checked it.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      # Assistant's code, accepted after it ran
+      gold = silver.join(regions, "region_code").groupBy("region").agg(F.sum("final_weight"))
+      gold.write.mode("overwrite").saveAsTable("research_gold.nat_region_totals")
+    annotations:
+      - find: 'gold = silver.join(regions, "region_code").groupBy("region").agg(F.sum("final_weight"))'
+        note: "An inner join assumes every code is in the lookup. Nobody listed or checked that."
+  strong:
+    code: |
+      # Assumption: every region_code in silver exists in regions. Checked:
+      missing = silver.join(regions, "region_code", "left_anti").count()
+      if missing:
+          raise ValueError(f"{missing} respondents have a region code missing from the lookup")
+
+      gold = silver.join(regions, "region_code", "left").groupBy("region").agg(F.sum("final_weight").alias("w"))
+      # Second approach: the grand total must equal silver's weight total.
+      gold_total = gold.agg(F.sum("w")).first()[0]
+      silver_total = silver.agg(F.sum("final_weight")).first()[0]
+      if abs(gold_total - silver_total) > 1e-6 * silver_total:
+          raise ValueError(f"gold {gold_total} != silver {silver_total}")
+    annotations:
+      - find: 'missing = silver.join(regions, "region_code", "left_anti").count()'
+        note: "The assumption, turned into a check that runs every time."
+      - find: 'if abs(gold_total - silver_total) > 1e-6 * silver_total:'
+        note: "An independent total. A dropped or duplicated row makes them disagree."
+  takeaway: |
+    Make the assistant state its assumptions, check them on real data, keep the important ones as checks, and confirm results by an independent route.
+
+exercises:
+  - id: D6-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      An assistant lists "respondent_id is unique within a wave" as an assumption of its code. What do you do?
+    options:
+      - {id: a, text: "Check it on the real data, and add a uniqueness check if it matters"}
+      - {id: b, text: "Accept it: the assistant knows the data"}
+      - {id: c, text: "Delete duplicates so the assumption holds"}
+      - {id: d, text: "Ignore it: assumptions are documentation only"}
+    answer: a
+    reasons:
+      - {id: r1, text: "An assumption is a claim about data. Only the data can confirm it, and it can stop holding in a later wave."}
+      - {id: r2, text: "Assistants list false assumptions on purpose."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The assistant has never seen your data. It guessed."
+      - answer: c
+        feedback: "Silently deleting rows hides a delivery problem. Check first, then decide."
+      - answer: d
+        feedback: "An unchecked assumption is a future bug."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. The assumptions are usually sensible guesses. You check because guesses can be wrong."
+    hints:
+      - "Who knows whether it is true?"
+      - "The data."
+      - "Check it, then keep the check."
+    explanation: |
+      Check each assumption with a query, then keep the important ones as pipeline checks.
+
+  - id: D6-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      Two methods compute a region's weighted total. What does this print?
+    code: |
+      method_a = 1250.0   # assistant's PySpark, inner join
+      method_b = 1310.0   # your SQL, left join
+      known_answer = 1310.0
+      print("a" if method_a == known_answer else "b")
+    answer: "b"
+    wrong_answers:
+      - answer: "a"
+        feedback: "Method a gives 1250, which does not match the hand-worked 1310."
+    hints:
+      - "Which method equals the known answer?"
+      - "1310."
+      - "Method b."
+    explanation: |
+      The known answer settles disagreements. Method a lost rows, most likely in its inner join.
+
+  - id: D6-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Check the assumption "every region_code in silver exists in regions".
+    template: |
+      missing = silver.join(regions, "region_code", "[[g1]]").[[g2]]()
+    gaps:
+      g1: {accepted: [left_anti, leftanti, anti]}
+      g2: {accepted: [count]}
+    wrong_answers:
+      - answer: {g1: inner}
+        feedback: "An inner join keeps the matches. You want the rows with no match."
+    hints:
+      - "Which join keeps left rows without a match?"
+      - "Then count them."
+      - "`left_anti` and `count`."
+    explanation: |
+      A left anti join returns silver rows with no match in regions. Zero means the assumption holds.
+
+  - id: D6-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `violated_assumptions(rows: list[dict[str, object]]) -> list[str]` that checks three assumptions and returns the names of those that fail, in this order: `"unique_respondent_per_wave"` (no two rows share `respondent_id` and `wave_id`), `"positive_weight"` (every `final_weight` is a number above 0, not None), `"wave_format"` (every `wave_id` is a string matching `W` followed by exactly two digits). An empty list of rows violates nothing.
+    starter: |
+      def violated_assumptions(rows):
+          return []
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: violated_assumptions
+          typed: true
+          docstring: true
+          message: "Give `violated_assumptions` type hints and a docstring."
+      tests:
+        - id: clean
+          code: |
+            rows = [
+                {"respondent_id": "R1", "wave_id": "W14", "final_weight": 1.2},
+                {"respondent_id": "R1", "wave_id": "W15", "final_weight": 0.8},
+            ]
+            assert violated_assumptions(rows) == []
+          message: "The same respondent in two waves is fine. Uniqueness is per wave."
+        - id: all_fail
+          code: |
+            rows = [
+                {"respondent_id": "R1", "wave_id": "W14", "final_weight": 1.0},
+                {"respondent_id": "R1", "wave_id": "W14", "final_weight": None},
+                {"respondent_id": "R2", "wave_id": "W1", "final_weight": 0.5},
+            ]
+            assert violated_assumptions(rows) == ["unique_respondent_per_wave", "positive_weight", "wave_format"]
+          message: "A duplicate key, a None weight and 'W1' violate all three, reported in order."
+        - id: zero_weight
+          code: |
+            rows = [{"respondent_id": "R1", "wave_id": "W14", "final_weight": 0.0}]
+            assert violated_assumptions(rows) == ["positive_weight"]
+          message: "A weight of 0.0 is not positive. Check with > 0, and None with is None."
+        - id: empty
+          code: |
+            assert violated_assumptions([]) == []
+          message: "No rows, no violations."
+    solution: |
+      import re
+
+      WAVE_PATTERN = re.compile(r"W\d{2}")
+
+
+      def violated_assumptions(rows: list[dict[str, object]]) -> list[str]:
+          """Names of data assumptions that the rows break.
+
+          Args:
+              rows: Records with respondent_id, wave_id and final_weight.
+
+          Returns:
+              Violated assumption names in a fixed order.
+          """
+          violated: list[str] = []
+          keys = [(r["respondent_id"], r["wave_id"]) for r in rows]
+          if len(keys) != len(set(keys)):
+              violated.append("unique_respondent_per_wave")
+          weights = [r["final_weight"] for r in rows]
+          if any(w is None or not isinstance(w, (int, float)) or w <= 0 for w in weights):
+              violated.append("positive_weight")
+          waves = [r["wave_id"] for r in rows]
+          if any(not isinstance(w, str) or WAVE_PATTERN.fullmatch(w) is None for w in waves):
+              violated.append("wave_format")
+          return violated
+    seeded_bugs:
+      - |
+        import re
+
+
+        def violated_assumptions(rows: list[dict[str, object]]) -> list[str]:
+            """Uniqueness on respondent only."""
+            violated: list[str] = []
+            ids = [r["respondent_id"] for r in rows]
+            if len(ids) != len(set(ids)):
+                violated.append("unique_respondent_per_wave")
+            if any(r["final_weight"] is None or r["final_weight"] <= 0 for r in rows):
+                violated.append("positive_weight")
+            if any(re.fullmatch(r"W\d{2}", str(r["wave_id"])) is None for r in rows):
+                violated.append("wave_format")
+            return violated
+      - |
+        import re
+
+
+        def violated_assumptions(rows: list[dict[str, object]]) -> list[str]:
+            """Checks weights for None only."""
+            violated: list[str] = []
+            keys = [(r["respondent_id"], r["wave_id"]) for r in rows]
+            if len(keys) != len(set(keys)):
+                violated.append("unique_respondent_per_wave")
+            if any(r["final_weight"] is None for r in rows):
+                violated.append("positive_weight")
+            if any(re.match(r"W\d{2}", str(r["wave_id"])) is None for r in rows):
+                violated.append("wave_format")
+            return violated
+    wrong_answers:
+      - answer: |
+          import re
+
+
+          def violated_assumptions(rows: list[dict[str, object]]) -> list[str]:
+              """Uniqueness on respondent only."""
+              violated: list[str] = []
+              ids = [r["respondent_id"] for r in rows]
+              if len(ids) != len(set(ids)):
+                  violated.append("unique_respondent_per_wave")
+              if any(r["final_weight"] is None or r["final_weight"] <= 0 for r in rows):
+                  violated.append("positive_weight")
+              if any(re.fullmatch(r"W\d{2}", str(r["wave_id"])) is None for r in rows):
+                  violated.append("wave_format")
+              return violated
+        triggers: clean
+    hints:
+      - "Uniqueness uses the pair (respondent_id, wave_id)."
+      - "Positive means > 0 and not None."
+      - "Use re.fullmatch so 'W145' does not pass."
+    explanation: |
+      Each assumption becomes one small check with a name. The names go into the run log, so a failure says which assumption broke.
+
+  - id: D6-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Choose the second approach for verifying an assistant's PySpark gold aggregation of weighted reach by region and wave.
+    slots:
+      - id: route
+        label: "Independent method"
+        options:
+          - {id: sql, text: "Your own Spark SQL query over silver, written without looking at the PySpark code"}
+          - {id: rewrite, text: "Ask the same assistant to rewrite it in SQL"}
+        answer: sql
+      - id: disagree
+        label: "The two results differ for one region"
+        options:
+          - {id: known, text: "Run both on the known-answer fixture and trust the one that matches"}
+          - {id: average, text: "Publish the average of the two"}
+        answer: known
+      - id: keep
+        label: "After the fix"
+        options:
+          - {id: check, text: "Keep a total check: sum of gold weighted base equals silver's weight total"}
+          - {id: drop_sql, text: "Remove the SQL; the PySpark is now correct"}
+        answer: check
+    model_answer: |
+      - Independent code avoids repeating the same reasoning, and the same mistake.
+      - Hand-worked answers decide disagreements.
+      - A cheap reconciliation total stays in the pipeline to catch the next regression.
+    wrong_answers:
+      - answer: {route: rewrite}
+        feedback: "The same assistant tends to repeat its own assumptions, such as the inner join."
+      - answer: {disagree: average}
+        feedback: "An average of a right and a wrong number is wrong."
+      - answer: {keep: drop_sql}
+        feedback: "The next change can break it again. Keep a cheap independent check."
+    hints:
+      - "What makes a second method independent?"
+      - "What decides who is right?"
+      - "What catches the next regression?"
+    explanation: |
+      Independent method, known answer as referee, and a lasting reconciliation check.
+
+recap:
+  - front: "Prompt for assumptions"
+    back: "'List every assumption this code makes about its input data, one per line.' Then check each on real data."
+  - front: "Common data assumptions to check"
+    back: "Unique keys per grain, non-null positive weights, id formats, UTC timestamps, one lookup row per key."
+  - front: "An independent second approach"
+    back: "SQL vs DataFrame code, pandas vs Spark on an extract, gold totals vs silver aggregates. Not the same assistant rewriting itself."
+  - front: "When two methods disagree"
+    back: "Run both on known-answer data. The one matching the hand-worked answer is right."
+
+claims:
+  - claim: "left_anti joins return left rows with no match; used here to check a lookup assumption."
+    status: verified
+    source: "Local run on PySpark 4.0.4 (see D3-L1 claims), September 2026."
