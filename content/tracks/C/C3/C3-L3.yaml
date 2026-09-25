@@ -1,0 +1,281 @@
+id: C3-L3
+title: Mirroring Azure Databricks Unity Catalog into Fabric
+
+concept: |
+  Your Track A pipelines write gold tables into Unity Catalog. **Mirroring Azure Databricks Unity Catalog** makes them readable in Fabric without copying them. Unlike database mirroring, **no data moves**. Fabric mirrors only the catalog structure (catalogs, schemas, tables) and reads the underlying Delta files through shortcuts.
+
+  You get a mirrored Azure Databricks item with a SQL analytics endpoint, and you can build Power BI reports on it in Direct Lake mode. By default, **Automatically sync future catalog changes for the selected schema** is on, so new tables appear. Propagation takes from seconds to several minutes.
+
+  Three rules decide whether it works and whether it is safe (Microsoft Learn, checked September 2026):
+
+  **1. Some table types do not mirror:** tables with row filters or column masks (RLS/CLM policies), Lakehouse federated tables, Delta Sharing tables, streaming tables, views and materialized views. The ADLS Gen2 account behind the Databricks workspace must also be reachable from Fabric.
+
+  **2. Unity Catalog permissions do not carry over.** Grants on catalogs, schemas and tables in Databricks do not apply in Fabric. You rebuild access with Fabric's model: workspace roles, item permissions, SQL permissions, OneLake security.
+
+  **3. One credential reads everything.** The credential used to create the connection is used for all data queries. Unity Catalog policies such as row filters, column masks or ABAC are not enforced at the storage layer, so they would not apply to direct storage access anyway.
+
+  Put together: mirror tables that are safe to share at the level you grant in Fabric. For data that needs row-level rules, publish a gold table without the policy that already contains only what the audience may see, or apply the rules again in Fabric.
+
+why_it_matters: |
+  A team mirrored their gold schema so that regional managers could build Power BI reports. In Databricks, a row filter limited each manager to their region (lesson A4-L3). The filtered table did not appear in Fabric at all, so the team created an unfiltered copy for the mirror, with a connection that could read every row. Every manager with Viewer access now saw every region. The rules had lived in Unity Catalog, and nothing had been rebuilt in Fabric.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Mirror: catalog gold_prod, schema sales, all tables, auto-sync on
+      Connection: service principal with SELECT on the whole catalog
+      Fabric workspace: regional managers as Viewers
+      Assumption: Unity Catalog row filters still apply
+    annotations:
+      - find: "Mirror: catalog gold_prod, schema sales, all tables, auto-sync on"
+        note: "Tables with row filters are not mirrored, and any new table appears automatically."
+      - find: "Connection: service principal with SELECT on the whole catalog"
+        note: "This credential reads every mirrored table for every user."
+      - find: "Assumption: Unity Catalog row filters still apply"
+        note: "Unity Catalog permissions and policies do not carry over to Fabric."
+  strong:
+    code: |
+      Mirror: catalog gold_prod, schema sales_shareable (tables approved for all managers)
+      Connection: service principal with SELECT on sales_shareable only
+      Regional detail: rebuilt in Fabric with row-level security on the semantic model
+      Check: row counts per mirrored table match Databricks after each release
+    annotations:
+      - find: "Mirror: catalog gold_prod, schema sales_shareable (tables approved for all managers)"
+        note: "A schema of tables that are safe for the whole Fabric audience."
+      - find: "Connection: service principal with SELECT on sales_shareable only"
+        note: "Least privilege on the one credential that reads everything."
+      - find: "Regional detail: rebuilt in Fabric with row-level security on the semantic model"
+        note: "Access rules recreated where the users are."
+  takeaway: |
+    Mirroring Unity Catalog copies no data and no permissions. Decide what is shareable, scope the connection, and rebuild access rules in Fabric.
+
+exercises:
+  - id: C3-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      When Fabric mirrors an Azure Databricks Unity Catalog, what moves into OneLake?
+    options:
+      - {id: a, text: "A full copy of every table's data"}
+      - {id: b, text: "Only the catalog structure. Data is read through shortcuts."}
+      - {id: c, text: "Nightly snapshots of changed partitions"}
+      - {id: d, text: "Nothing. Fabric queries Databricks SQL warehouses."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Unity Catalog tables are already open Delta files, so Fabric mirrors metadata and reads the files in place."}
+      - {id: r2, text: "Copying is blocked by Databricks licensing."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That is database mirroring for proprietary sources. Unity Catalog mirroring has no data movement."
+      - answer: c
+        feedback: "There are no snapshots. Fabric reads the current Delta files through shortcuts."
+      - answer: d
+        feedback: "Fabric engines read the Delta files directly. No Databricks compute runs the queries."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. It is about format: Delta can be read in place."
+    hints:
+      - "What format are Unity Catalog managed tables stored in?"
+      - "Can Fabric read that format directly?"
+      - "Metadata plus shortcuts."
+    explanation: |
+      Only the catalog structure is mirrored. The data stays in the Databricks storage account.
+
+  - id: C3-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A gold table in Unity Catalog has a row filter. You select its schema for mirroring. What happens to that table?
+    options:
+      - {id: a, text: "It is mirrored with the row filter enforced in Fabric."}
+      - {id: b, text: "It is mirrored without the filter."}
+      - {id: c, text: "It is not mirrored: tables with RLS or CLM policies are unsupported."}
+      - {id: d, text: "It is mirrored as a view."}
+    answer: c
+    reasons:
+      - {id: r1, text: "The limitations page lists tables with RLS/CLM policies as unsupported."}
+      - {id: r2, text: "Row filters make tables read-only."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Unity Catalog policies are not carried into Fabric, and such tables are not supported."
+      - answer: b
+        feedback: "Fabric does not quietly drop the filter. It does not mirror the table."
+      - answer: d
+        feedback: "Views are themselves unsupported for this mirroring."
+      - answer: c|r2
+        feedback: "Right answer, wrong reason. The table type is unsupported, not read-only."
+    hints:
+      - "Check the list of unsupported table types."
+      - "RLS/CLM policies."
+      - "The table is left out."
+    explanation: |
+      Filtered and masked tables are excluded. Decide what to publish for Fabric users instead.
+
+  - id: C3-L3-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the steps to publish Databricks gold tables to Fabric users safely.
+    items:
+      - {id: select, text: "Choose tables safe for the whole Fabric audience, in a dedicated schema"}
+      - {id: identity, text: "Create a connection identity with SELECT on that schema only"}
+      - {id: mirror, text: "Create the mirrored Azure Databricks item for that schema"}
+      - {id: access, text: "Grant Fabric access with workspace roles, SQL permissions or model RLS"}
+      - {id: verify, text: "Compare table lists and row counts with Databricks"}
+    answer: [select, identity, mirror, access, verify]
+    wrong_answers:
+      - answer: [mirror, select, identity, access, verify]
+        feedback: "Mirroring first exposes whatever the connection can read. Decide the scope first."
+      - answer: [select, identity, mirror, verify, access]
+        feedback: "Set up access before users arrive. Verification then confirms what they will see."
+    hints:
+      - "Scope before you connect."
+      - "The connection's rights cap what is readable."
+      - "Access, then verify."
+    explanation: |
+      Scope, least-privilege connection, mirror, Fabric access, then a data check.
+
+  - id: C3-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `mirror_eligible(tables: list[dict[str, object]]) -> list[str]`. Each dict has `name` (str), `table_type` (str) and `has_row_filter_or_mask` (bool). Return, sorted, the names that can be mirrored: `table_type` must be `"MANAGED"` or `"EXTERNAL"`, and the table must not have a row filter or column mask. Streaming tables, views, materialized views, federated and Delta Sharing tables arrive with other `table_type` values.
+    starter: |
+      def mirror_eligible(tables):
+          return [t["name"] for t in tables]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: mirror_eligible
+          typed: true
+          docstring: true
+          message: "Give `mirror_eligible` type hints and a docstring."
+      tests:
+        - id: types
+          code: |
+            tables = [
+                {"name": "orders", "table_type": "MANAGED", "has_row_filter_or_mask": False},
+                {"name": "v_orders", "table_type": "VIEW", "has_row_filter_or_mask": False},
+                {"name": "clicks", "table_type": "STREAMING_TABLE", "has_row_filter_or_mask": False},
+                {"name": "ext_rates", "table_type": "EXTERNAL", "has_row_filter_or_mask": False},
+            ]
+            assert mirror_eligible(tables) == ["ext_rates", "orders"]
+          message: "Only MANAGED and EXTERNAL tables qualify, returned sorted."
+        - id: policies
+          code: |
+            tables = [{"name": "regional_sales", "table_type": "MANAGED", "has_row_filter_or_mask": True}]
+            assert mirror_eligible(tables) == []
+          message: "Tables with row filters or column masks are not mirrored."
+    solution: |
+      MIRRORABLE_TYPES = frozenset({"MANAGED", "EXTERNAL"})
+
+
+      def mirror_eligible(tables: list[dict[str, object]]) -> list[str]:
+          """Unity Catalog tables that Fabric can mirror.
+
+          Args:
+              tables: Dicts with name, table_type and has_row_filter_or_mask.
+
+          Returns:
+              Sorted names of eligible tables.
+          """
+          return sorted(
+              str(t["name"])
+              for t in tables
+              if t["table_type"] in MIRRORABLE_TYPES and not t["has_row_filter_or_mask"]
+          )
+    seeded_bugs:
+      - |
+        def mirror_eligible(tables: list[dict[str, object]]) -> list[str]:
+            """Ignores policies."""
+            return sorted(str(t["name"]) for t in tables if t["table_type"] in {"MANAGED", "EXTERNAL"})
+      - |
+        def mirror_eligible(tables: list[dict[str, object]]) -> list[str]:
+            """Excludes only views."""
+            return sorted(
+                str(t["name"]) for t in tables
+                if t["table_type"] != "VIEW" and not t["has_row_filter_or_mask"]
+            )
+    wrong_answers:
+      - answer: |
+          def mirror_eligible(tables: list[dict[str, object]]) -> list[str]:
+              """Ignores policies."""
+              return sorted(str(t["name"]) for t in tables if t["table_type"] in {"MANAGED", "EXTERNAL"})
+        triggers: policies
+    hints:
+      - "Allow a fixed set of table types rather than excluding a list."
+      - "Also exclude tables with policies."
+      - "Sort the names."
+    explanation: |
+      An allowlist of table types plus the policy check predicts which tables will appear, so a missing table is expected rather than a surprise.
+
+  - id: C3-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Regional managers must each see only their region's sales in Power BI. The data is a Unity Catalog gold table with a row filter. Choose the design.
+    slots:
+      - id: source
+        label: "What Fabric mirrors"
+        options:
+          - {id: unfiltered_all, text: "An unfiltered copy of the table, for all managers"}
+          - {id: unfiltered_rls, text: "An unfiltered table, with row-level security rebuilt in the Fabric semantic model"}
+        answer: unfiltered_rls
+      - id: connection
+        label: "Connection identity"
+        options:
+          - {id: scoped, text: "SELECT on the mirrored schema only"}
+          - {id: broad, text: "SELECT on the whole catalog"}
+        answer: scoped
+      - id: users
+        label: "Manager access to the mirror's SQL endpoint"
+        options:
+          - {id: report_only, text: "None: managers use the report, where RLS applies"}
+          - {id: viewer, text: "Viewer on the workspace, so they can query freely"}
+        answer: report_only
+    model_answer: |
+      - The filtered table cannot be mirrored, so rebuild the regional rule where users consume the data.
+      - Scope the connection, because it reads every mirrored table for everyone.
+      - Keep managers on the report. Direct endpoint access would bypass the model's RLS.
+    wrong_answers:
+      - answer: {source: unfiltered_all}
+        feedback: "Every manager would see every region. The rule must be rebuilt in Fabric."
+      - answer: {connection: broad}
+        feedback: "The connection's credential serves all queries. Grant it only what the mirror needs."
+      - answer: {users: viewer}
+        feedback: "Viewers can query the endpoint with T-SQL and read rows the model's RLS would hide."
+    hints:
+      - "Where do Unity Catalog rules stop applying?"
+      - "Whose credential reads the data?"
+      - "Where does the RLS live?"
+    explanation: |
+      Rebuild the rule where users are, scope the credential, and keep users on the governed path.
+
+recap:
+  - front: "What mirroring Unity Catalog moves"
+    back: "Only catalog metadata. Data is read in place through shortcuts."
+  - front: "Unity Catalog tables that do not mirror"
+    back: "Tables with row filters or column masks, federated, Delta Sharing and streaming tables, views and materialized views."
+  - front: "Unity Catalog permissions in Fabric"
+    back: "Not carried over. Rebuild access with Fabric's permission model."
+  - front: "Which identity reads mirrored data?"
+    back: "The connection's credential, for all queries. Scope it tightly."
+
+claims:
+  - claim: "Only the Azure Databricks catalog structure is mirrored and data is accessed through shortcuts, with no data movement; auto-sync of future catalog changes is on by default; propagation takes seconds to several minutes."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/mirroring/azure-databricks (updated 2025-10-24)"
+  - claim: "Unsupported table types: RLS/CLM tables, Lakehouse federated tables, Delta Sharing tables, streaming tables, views and materialized views; the Databricks ADLS account must be accessible to Fabric."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/mirroring/azure-databricks-limitations (updated 2025-12-19)"
+  - claim: "Unity Catalog permissions are not mirrored; the connection credential is used for all data queries; UC policies are not enforced at the storage layer."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/mirroring/azure-databricks-security (updated 2026-05-01)"
+  - claim: "Unity Catalog information_schema.tables reports table_type values including MANAGED, EXTERNAL, VIEW, MATERIALIZED_VIEW, STREAMING_TABLE and FOREIGN."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/sql/language-manual/information-schema/tables"

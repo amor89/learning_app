@@ -1,0 +1,334 @@
+id: C1-L3
+title: Workspace roles, granted to groups
+
+concept: |
+  A workspace has four roles: **Admin**, **Member**, **Contributor** and **Viewer**. Each role includes the rights of the ones below it, with a few rights reserved for the top.
+
+  From Microsoft Learn's role table (checked September 2026):
+
+  | Right | Admin | Member | Contributor | Viewer |
+  |---|---|---|---|---|
+  | Update or delete the workspace, add or remove admins | yes | | | |
+  | Connect the workspace to Git, create a workspace identity | yes | | | |
+  | Add members or lower roles, allow resharing | yes | yes | | |
+  | Create and change items, run notebooks and pipelines | yes | yes | yes | |
+  | Read lakehouse and warehouse data through Spark and OneLake APIs (ReadAll) | yes | yes | yes | |
+  | Read lakehouse and warehouse data with T-SQL (ReadData) | yes | yes | yes | yes |
+
+  Two consequences surprise people coming from Databricks:
+
+  - A **Viewer** can query a lakehouse through its SQL analytics endpoint, but cannot read the same tables from a Spark notebook or through OneLake APIs.
+  - A **Contributor** can change and delete every item in the workspace, including production lakehouse tables. Contributor in production is powerful.
+
+  Rules that keep access manageable:
+
+  - **Assign roles to Microsoft Entra security groups**, not to individuals (as in lesson A4-L2). People join and leave groups. Role assignments stay the same.
+  - **Least privilege per environment.** Engineers are Contributors in dev. In production, deployment runs under an automation identity, and people are Viewers unless they are on call.
+  - **Keep at least two admins**, as groups or named people, so a departure does not lock the workspace.
+  - Workspace roles are coarse. For finer control inside an item, use item sharing, SQL permissions, or OneLake security (lesson C9-L2).
+
+why_it_matters: |
+  A contractor was added to a production workspace as Contributor "to look at a notebook". Two weeks later they ran a clean-up notebook against the wrong lakehouse and dropped three tables that reports depended on. Viewer would have let them read the notebook and query the data with T-SQL, and would not have let them change anything.
+
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      workspace: sales_prod
+      roles:
+        Admin: [sam@contoso.com]
+        Contributor: [grp-sales-analysts, contractor@partner.com]
+        Viewer: []
+    annotations:
+      - find: "Admin: [sam@contoso.com]"
+        note: "One named admin: if Sam leaves, nobody can manage the workspace."
+      - find: "Contributor: [grp-sales-analysts, contractor@partner.com]"
+        note: "Write access to production for people who need to read, including an external individual."
+  strong:
+    code: |
+      workspace: sales_prod
+      roles:
+        Admin: [grp-fabric-platform-admins]
+        Member: [grp-sales-data-leads]
+        Contributor: [sp-sales-deployment]
+        Viewer: [grp-sales-analysts, grp-sales-contractors]
+    annotations:
+      - find: "Admin: [grp-fabric-platform-admins]"
+        note: "A group of admins: no single point of failure."
+      - find: "Contributor: [sp-sales-deployment]"
+        note: "Only the deployment identity writes to production."
+      - find: "Viewer: [grp-sales-analysts, grp-sales-contractors]"
+        note: "Readers query with T-SQL and reports, and cannot change items."
+  takeaway: |
+    Roles go to groups, write access in production goes to automation, and people read.
+
+exercises:
+  - id: C1-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which workspace role can connect a workspace to a Git repository?
+    options:
+      - {id: a, text: "Admin only"}
+      - {id: b, text: "Admin and Member"}
+      - {id: c, text: "Any role except Viewer"}
+      - {id: d, text: "Any role"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Connecting Git, like deleting the workspace or creating a workspace identity, is reserved for Admins."}
+      - {id: r2, text: "Git is a paid feature for Admins."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Members can add people and reshare, but connecting Git is an Admin right."
+      - answer: c
+        feedback: "Contributors create and change items, but cannot connect the workspace to Git."
+      - answer: d
+        feedback: "Viewers cannot change anything in the workspace."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. It is a permission boundary, not a licence."
+    hints:
+      - "Which rights sit only at the top of the role table?"
+      - "Workspace-level settings."
+      - "Admin."
+    explanation: |
+      Only Admins connect a workspace to Git, create a workspace identity, and update or delete the workspace.
+
+  - id: C1-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      An analyst with the Viewer role runs `spark.read.table("lh_sales.orders")` in a notebook in that workspace. What happens?
+    options:
+      - {id: a, text: "It works: Viewers read everything."}
+      - {id: b, text: "It fails: Viewers read lakehouse data with T-SQL, not through Spark or OneLake APIs."}
+      - {id: c, text: "It works, but returns only the first 1,000 rows."}
+      - {id: d, text: "It fails because Viewers cannot see notebooks at all."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Viewer includes ReadData (T-SQL) but not ReadAll (Spark and OneLake APIs)."}
+      - {id: r2, text: "Spark is disabled for all users in production workspaces."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Viewer grants T-SQL reads only. Spark reads need ReadAll, which starts at Contributor."
+      - answer: c
+        feedback: "There is no row limit tied to the role. The read is refused."
+      - answer: d
+        feedback: "Viewers can open and read notebooks. They cannot run them or read data through Spark."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Spark is available. The Viewer role lacks ReadAll."
+    hints:
+      - "Which two read rights does the role table list?"
+      - "Which one does Viewer have?"
+      - "ReadData, the T-SQL one."
+    explanation: |
+      Point Viewers to the SQL analytics endpoint, or grant ReadAll on the item if Spark access is really needed.
+
+  - id: C1-L3-E3
+    type: design
+    difficulty: 2
+    prompt: |
+      Assign roles in the production workspace `sales_prod`.
+    slots:
+      - id: platform
+        label: "Fabric platform team (group)"
+        options: &roles
+          - {id: admin, text: "Admin"}
+          - {id: member, text: "Member"}
+          - {id: contributor, text: "Contributor"}
+          - {id: viewer, text: "Viewer"}
+        answer: admin
+      - id: deploy
+        label: "Deployment service principal"
+        options: *roles
+        answer: contributor
+      - id: analysts
+        label: "Sales analysts (group)"
+        options: *roles
+        answer: viewer
+    model_answer: |
+      - Platform team: Admin, as a group, so management does not depend on one person.
+      - Deployment identity: Contributor, the only writer in production.
+      - Analysts: Viewer. They query with T-SQL and use reports.
+    wrong_answers:
+      - answer: {analysts: contributor}
+        feedback: "Contributors can change and delete every item in production. Analysts need to read."
+      - answer: {deploy: admin}
+        feedback: "Deployment needs to write items, not manage people or delete the workspace. Contributor is enough."
+      - answer: {platform: viewer}
+        feedback: "Someone must be able to manage the workspace. Give that right to a group."
+    hints:
+      - "Who manages, who writes, who reads?"
+      - "Least privilege."
+      - "Groups, not individuals."
+    explanation: |
+      One managing group, one automated writer, and readers as Viewers.
+
+  - id: C1-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `min_role(action: str) -> str` returning the lowest workspace role that allows the action. Use these actions from the role table:
+
+      - `"connect_git"`, `"delete_workspace"`: Admin
+      - `"add_members"`: Member
+      - `"run_notebook"`, `"spark_read"`: Contributor
+      - `"tsql_read"`: Viewer
+
+      Raise `KeyError` for any other action.
+    starter: |
+      def min_role(action):
+          return "Viewer"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: min_role
+          typed: true
+          docstring: true
+          message: "Give `min_role` type hints and a docstring."
+      tests:
+        - id: mapping
+          code: |
+            expected = {
+                "connect_git": "Admin", "delete_workspace": "Admin", "add_members": "Member",
+                "run_notebook": "Contributor", "spark_read": "Contributor", "tsql_read": "Viewer",
+            }
+            for action, role in expected.items():
+                assert min_role(action) == role, action
+          message: "Map each action to the lowest role in the table. Spark reads need Contributor. T-SQL reads need Viewer."
+        - id: unknown
+          code: |
+            try:
+                min_role("make_coffee")
+            except KeyError:
+                pass
+            else:
+                raise AssertionError("unknown action accepted")
+          message: "Unknown actions must raise KeyError."
+    solution: |
+      MIN_ROLE: dict[str, str] = {
+          "connect_git": "Admin",
+          "delete_workspace": "Admin",
+          "add_members": "Member",
+          "run_notebook": "Contributor",
+          "spark_read": "Contributor",
+          "tsql_read": "Viewer",
+      }
+
+
+      def min_role(action: str) -> str:
+          """Lowest Fabric workspace role that allows an action.
+
+          Raises:
+              KeyError: For an action not in the table.
+          """
+          return MIN_ROLE[action]
+    seeded_bugs:
+      - |
+        MIN_ROLE: dict[str, str] = {
+            "connect_git": "Admin", "delete_workspace": "Admin", "add_members": "Member",
+            "run_notebook": "Contributor", "spark_read": "Viewer", "tsql_read": "Viewer",
+        }
+
+
+        def min_role(action: str) -> str:
+            """Spark reads as Viewer."""
+            return MIN_ROLE[action]
+      - |
+        MIN_ROLE: dict[str, str] = {
+            "connect_git": "Admin", "delete_workspace": "Admin", "add_members": "Member",
+            "run_notebook": "Contributor", "spark_read": "Contributor", "tsql_read": "Viewer",
+        }
+
+
+        def min_role(action: str) -> str:
+            """Defaults unknown actions to Viewer."""
+            return MIN_ROLE.get(action, "Viewer")
+    wrong_answers:
+      - answer: |
+          MIN_ROLE: dict[str, str] = {
+              "connect_git": "Admin", "delete_workspace": "Admin", "add_members": "Member",
+              "run_notebook": "Contributor", "spark_read": "Viewer", "tsql_read": "Viewer",
+          }
+
+
+          def min_role(action: str) -> str:
+              """Spark reads as Viewer."""
+              return MIN_ROLE[action]
+        triggers: mapping
+    hints:
+      - "A dictionary from action to role."
+      - "Spark and OneLake reads (ReadAll) start at Contributor."
+      - "Indexing a dict raises KeyError for unknown keys."
+    explanation: |
+      Encoding the role table as data lets access requests be checked automatically, and an unknown action fails loudly instead of defaulting to a guess.
+
+  - id: C1-L3-E5
+    type: spot_bug
+    difficulty: 4
+    language: yaml
+    prompt: |
+      This role file for the production workspace breaks two rules of the lesson. Tap the line with the more dangerous one, then rewrite the file.
+    code: |
+      workspace: sales_prod
+      roles:
+        Admin: [grp-fabric-platform-admins]
+        Contributor: [sp-sales-deployment, grp-sales-analysts]
+        Viewer: [jo.bloggs@contoso.com]
+    bug_lines: [4]
+    fix_checker:
+      kind: text
+      comments: none
+      rules:
+        - id: analysts_not_writers
+          type: forbidden
+          pattern: "Contributor:\\s*\\[[^\\]]*grp-sales-analysts"
+          message: "Analysts should not have write access to production. Make them Viewers."
+        - id: no_individuals
+          type: forbidden
+          pattern: "@"
+          message: "Assign roles to groups, not to individual email addresses."
+        - id: analysts_view
+          type: required
+          pattern: "Viewer:\\s*\\[[^\\]]*grp-sales-analysts"
+          message: "Give grp-sales-analysts the Viewer role."
+        - id: deploy_writes
+          type: required
+          pattern: "Contributor:\\s*\\[\\s*sp-sales-deployment\\s*\\]"
+          message: "Keep the deployment identity as the only Contributor."
+    fix_solution: |
+      workspace: sales_prod
+      roles:
+        Admin: [grp-fabric-platform-admins]
+        Contributor: [sp-sales-deployment]
+        Viewer: [grp-sales-analysts, grp-sales-readers]
+    wrong_answers:
+      - lines: [5]
+        feedback: "An individual assignment breaks the groups rule, but it only grants read access. Line 4 gives write access to production."
+      - lines: [3]
+        feedback: "An admin group is the right pattern."
+    hints:
+      - "Which line grants write access?"
+      - "Do analysts need to change production items?"
+      - "Also replace the individual with a group."
+    explanation: |
+      Analysts as Contributors can change or delete production items. Make them Viewers, keep automation as the only writer, and replace the individual with a group.
+
+recap:
+  - front: "Fabric workspace roles"
+    back: "Admin, Member, Contributor, Viewer."
+  - front: "Admin-only rights"
+    back: "Update or delete the workspace, manage admins, connect Git, create a workspace identity."
+  - front: "Viewer and lakehouse data"
+    back: "Reads with T-SQL (ReadData). Not through Spark or OneLake APIs (ReadAll starts at Contributor)."
+  - front: "Who writes to production?"
+    back: "An automation identity as Contributor. People get Viewer, through groups."
+
+claims:
+  - claim: "The four workspace roles and their rights, including Admin-only Git connection and Viewer having ReadData but not ReadAll."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/roles-workspaces (updated 2026-04-24)"

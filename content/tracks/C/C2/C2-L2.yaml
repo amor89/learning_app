@@ -1,0 +1,302 @@
+id: C2-L2
+title: Warehouse T-SQL, and where it differs from SQL Server
+
+concept: |
+  Fabric Warehouse speaks T-SQL, and most SQL Server habits carry over: `CREATE TABLE`, `INSERT`, `UPDATE`, `DELETE`, stored procedures, views, `TRUNCATE TABLE`, identity columns and explicit transactions. `MERGE` is generally available. Its tables are Delta tables in OneLake, so Spark and Power BI read them too.
+
+  The differences cause real bugs. Microsoft Learn, checked September 2026:
+
+  **Keys are not enforced.** `PRIMARY KEY` is supported only as `NONCLUSTERED NOT ENFORCED`. `UNIQUE` likewise, and `FOREIGN KEY` only `NOT ENFORCED`. The engine uses them as hints for query plans. It does **not** stop duplicates or orphans. Deduplicate and check keys yourself (lesson A3-L1 for MERGE sources, lesson A6-L1 for contracts).
+
+  **Some data types are missing**, with documented alternatives:
+
+  | Not supported | Use |
+  |---|---|
+  | `nchar`, `nvarchar` | `char`, `varchar` (UTF-8 collation) |
+  | `money`, `smallmoney` | `decimal` |
+  | `datetime`, `smalldatetime` | `datetime2` (up to 6 fractional digits) |
+  | `tinyint` | `smallint` |
+  | `text`, `ntext`, `json` | `varchar` |
+
+  `varchar(max)` is limited to 16 MB per value.
+
+  **Some features are absent or in preview.** Triggers are not supported. `ALTER COLUMN` and nested CTEs are in preview. Check the T-SQL surface area page before you port a procedure that relies on them.
+
+  Porting a SQL Server script is usually a type-mapping job plus one design change: replace constraint enforcement with explicit checks.
+
+why_it_matters: |
+  A team ported a customer dimension from SQL Server, where `PRIMARY KEY` had rejected duplicate loads for years. In Fabric the same key was created `NOT ENFORCED`, so a pipeline that ran twice on the same file loaded every customer twice. Sales per customer halved in the joined reports for a week before anyone traced it. A duplicate check after each load would have failed the run on the first rerun.
+
+worked_example:
+  language: tsql
+  weak:
+    code: |
+      CREATE TABLE dbo.dim_customer (
+          customer_id INT PRIMARY KEY,
+          name NVARCHAR(200),
+          credit_limit MONEY,
+          created_at DATETIME
+      );
+    annotations:
+      - find: "customer_id INT PRIMARY KEY,"
+        note: "An enforced clustered primary key is not supported in Fabric Warehouse."
+      - find: "name NVARCHAR(200),"
+        note: "nvarchar is not supported. Use varchar with the UTF-8 collation."
+      - find: "credit_limit MONEY,"
+        note: "money is not supported. Use decimal."
+      - find: "created_at DATETIME"
+        note: "datetime is not supported. Use datetime2."
+  strong:
+    code: |
+      CREATE TABLE dbo.dim_customer (
+          customer_id INT NOT NULL,
+          name VARCHAR(200),
+          credit_limit DECIMAL(19, 4),
+          created_at DATETIME2(6)
+      );
+      ALTER TABLE dbo.dim_customer
+          ADD CONSTRAINT pk_dim_customer PRIMARY KEY NONCLUSTERED (customer_id) NOT ENFORCED;
+
+      -- The key is a hint, so check it after every load.
+      SELECT customer_id, COUNT(*) AS n
+      FROM dbo.dim_customer
+      GROUP BY customer_id
+      HAVING COUNT(*) > 1;
+    annotations:
+      - find: "credit_limit DECIMAL(19, 4),"
+        note: "decimal replaces money, with the scale stated."
+      - find: "ADD CONSTRAINT pk_dim_customer PRIMARY KEY NONCLUSTERED (customer_id) NOT ENFORCED;"
+        note: "The only supported form of primary key: a hint for the optimiser, not a guard."
+      - find: "HAVING COUNT(*) > 1;"
+        note: "The duplicate check the key no longer performs. Any row returned fails the load."
+  takeaway: |
+    Map the types, declare keys as NOT ENFORCED hints, and check uniqueness yourself after every load.
+
+exercises:
+  - id: C2-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A Fabric Warehouse table has `PRIMARY KEY NONCLUSTERED (customer_id) NOT ENFORCED`. You insert two rows with `customer_id = 7`. What happens?
+    options:
+      - {id: a, text: "The second insert fails with a key violation."}
+      - {id: b, text: "Both rows are stored. The key is not enforced."}
+      - {id: c, text: "The second row replaces the first."}
+      - {id: d, text: "The table is locked until you remove a duplicate."}
+    answer: b
+    reasons:
+      - {id: r1, text: "NOT ENFORCED keys are optimiser hints. The engine does not check them."}
+      - {id: r2, text: "Fabric deduplicates later in a background job."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That is SQL Server behaviour for enforced keys. Fabric Warehouse keys are NOT ENFORCED."
+      - answer: c
+        feedback: "INSERT never replaces rows. You would need MERGE for upsert behaviour."
+      - answer: d
+        feedback: "Nothing locks. Both rows are simply stored."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. No background job removes duplicates. You must check."
+    hints:
+      - "What does NOT ENFORCED mean?"
+      - "Does the engine check the key on insert?"
+      - "No."
+    explanation: |
+      Both rows land. Check uniqueness after each load with a GROUP BY ... HAVING COUNT(*) > 1 query.
+
+  - id: C2-L2-E2
+    type: fill_gap
+    difficulty: 2
+    language: tsql
+    prompt: |
+      Add the only supported form of primary key to `dbo.dim_customer`.
+    template: |
+      ALTER TABLE dbo.dim_customer
+          ADD CONSTRAINT pk_dim_customer PRIMARY KEY [[g1]] (customer_id) [[g2]];
+    gaps:
+      g1: {accepted: [NONCLUSTERED], case_sensitive: false}
+      g2: {accepted: [NOT ENFORCED], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: CLUSTERED}
+        feedback: "Fabric Warehouse supports primary keys only as NONCLUSTERED."
+    hints:
+      - "Not clustered."
+      - "Not checked by the engine."
+      - "`NONCLUSTERED` and `NOT ENFORCED`."
+    explanation: |
+      `PRIMARY KEY NONCLUSTERED (...) NOT ENFORCED` is the only accepted form.
+
+  - id: C2-L2-E3
+    type: spot_bug
+    difficulty: 3
+    language: tsql
+    prompt: |
+      This table definition, ported from SQL Server, fails in Fabric Warehouse. Tap one failing line, then rewrite the definition with supported types.
+    code: |
+      CREATE TABLE dbo.fact_payment (
+          payment_id BIGINT NOT NULL,
+          customer_id INT NOT NULL,
+          amount MONEY NOT NULL,
+          note NVARCHAR(500),
+          paid_at DATETIME2(6) NOT NULL
+      );
+    bug_lines: [4, 5]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: no_money
+          type: forbidden
+          pattern: "\\bMONEY\\b"
+          message: "money is not supported. Use DECIMAL, for example DECIMAL(19, 4)."
+        - id: no_nvarchar
+          type: forbidden
+          pattern: "\\bNVARCHAR\\b|\\bNCHAR\\b"
+          message: "nvarchar is not supported. Use VARCHAR."
+        - id: decimal_amount
+          type: required
+          pattern: "amount\\s+DECIMAL\\s*\\("
+          message: "Store amount as DECIMAL(precision, scale)."
+        - id: varchar_note
+          type: required
+          pattern: "note\\s+VARCHAR\\s*\\(\\s*500\\s*\\)"
+          message: "Store note as VARCHAR(500)."
+    fix_solution: |
+      CREATE TABLE dbo.fact_payment (
+          payment_id BIGINT NOT NULL,
+          customer_id INT NOT NULL,
+          amount DECIMAL(19, 4) NOT NULL,
+          note VARCHAR(500),
+          paid_at DATETIME2(6) NOT NULL
+      );
+    wrong_answers:
+      - lines: [6]
+        feedback: "datetime2 with up to 6 fractional digits is supported."
+      - lines: [2]
+        feedback: "BIGINT is supported."
+    hints:
+      - "Two SQL Server types have no Fabric Warehouse equivalent."
+      - "One for money, one for Unicode text."
+      - "decimal and varchar replace them."
+    explanation: |
+      `money` and `nvarchar` are not supported. Use `DECIMAL(19, 4)` and `VARCHAR(500)`. Varchar uses a UTF-8 collation, so it stores Unicode text.
+
+  - id: C2-L2-E4
+    type: write_function
+    difficulty: 3
+    language: tsql
+    prompt: |
+      Write a query that returns every `customer_id` appearing more than once in `dbo.dim_customer`, with its count as `n`. The load job fails if it returns any row.
+    starter: |
+      SELECT DISTINCT customer_id FROM dbo.dim_customer;
+    checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: from_table
+          type: required
+          pattern: "FROM\\s+dbo\\.dim_customer"
+          message: "Query dbo.dim_customer."
+        - id: group
+          type: required
+          pattern: "GROUP\\s+BY\\s+customer_id"
+          message: "Group by customer_id to count rows per key."
+        - id: having
+          type: required
+          pattern: "HAVING\\s+COUNT\\s*\\(\\s*\\*\\s*\\)\\s*>\\s*1"
+          message: "Keep only keys with more than one row: HAVING COUNT(*) > 1."
+        - id: alias
+          type: required
+          pattern: "COUNT\\s*\\(\\s*\\*\\s*\\)\\s+AS\\s+n\\b"
+          message: "Return the count as n."
+        - id: no_distinct
+          type: forbidden
+          pattern: "\\bDISTINCT\\b"
+          message: "DISTINCT hides duplicates. You need to find them."
+    solution: |
+      SELECT customer_id, COUNT(*) AS n
+      FROM dbo.dim_customer
+      GROUP BY customer_id
+      HAVING COUNT(*) > 1;
+    seeded_bugs:
+      - |
+        SELECT customer_id, COUNT(*) AS n
+        FROM dbo.dim_customer
+        GROUP BY customer_id;
+      - |
+        SELECT DISTINCT customer_id, 1 AS n FROM dbo.dim_customer;
+    wrong_answers:
+      - answer: |
+          SELECT customer_id, COUNT(*) AS n
+          FROM dbo.dim_customer
+          GROUP BY customer_id;
+        triggers: having
+    hints:
+      - "Count rows per customer_id."
+      - "Filter groups, not rows."
+      - "HAVING COUNT(*) > 1."
+    explanation: |
+      With keys unenforced, this query is the guard. Any row it returns means a duplicate got in.
+
+  - id: C2-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      You port a SQL Server data mart to Fabric Warehouse. Decide how to handle each feature.
+    slots:
+      - id: pk
+        label: "Primary keys that used to block duplicates"
+        options:
+          - {id: hint_check, text: "NOT ENFORCED keys plus an explicit duplicate check after each load"}
+          - {id: trust, text: "NOT ENFORCED keys, trusting the source"}
+        answer: hint_check
+      - id: trigger
+        label: "An audit trigger on the orders table"
+        options:
+          - {id: in_proc, text: "Move the audit write into the loading stored procedure"}
+          - {id: keep, text: "Keep the trigger"}
+        answer: in_proc
+      - id: types
+        label: "nvarchar and money columns"
+        options:
+          - {id: map, text: "Map to varchar and decimal"}
+          - {id: string, text: "Store everything as varchar(max)"}
+        answer: map
+    model_answer: |
+      - Keys become hints, so add a duplicate check that fails the load.
+      - Triggers are not supported. Do the audit write explicitly in the loading procedure.
+      - Map each type to its documented alternative, keeping precision and scale.
+    wrong_answers:
+      - answer: {pk: trust}
+        feedback: "Sources resend files and pipelines rerun. Without a check, duplicates load silently."
+      - answer: {trigger: keep}
+        feedback: "Fabric Warehouse does not support triggers. The CREATE TRIGGER statement fails."
+      - answer: {types: string}
+        feedback: "Strings lose numeric semantics and cost storage. Use decimal for amounts."
+    hints:
+      - "What no longer enforces uniqueness?"
+      - "Which feature is not supported at all?"
+      - "Use the documented alternatives."
+    explanation: |
+      A port succeeds when every lost guarantee is replaced by an explicit step.
+
+recap:
+  - front: "Primary keys in Fabric Warehouse"
+    back: "Only PRIMARY KEY NONCLUSTERED ... NOT ENFORCED. Duplicates are not blocked."
+  - front: "nvarchar, money, datetime in Fabric Warehouse"
+    back: "Not supported. Use varchar, decimal, datetime2."
+  - front: "MERGE and TRUNCATE in Fabric Warehouse"
+    back: "Both supported. MERGE is generally available."
+  - front: "Triggers in Fabric Warehouse"
+    back: "Not supported. Put the logic in the loading procedure."
+
+claims:
+  - claim: "Identity columns, TRUNCATE TABLE and MERGE (GA) are supported; triggers are not; ALTER COLUMN and nested CTEs are in preview."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-warehouse/tsql-surface-area (updated 2026-08-26)"
+  - claim: "PRIMARY KEY and UNIQUE are supported only as NONCLUSTERED NOT ENFORCED, FOREIGN KEY only as NOT ENFORCED."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-warehouse/table-constraints (updated 2026-09-08)"
+  - claim: "Unsupported types and alternatives: nchar/nvarchar to char/varchar, money to decimal, datetime to datetime2, tinyint to smallint; varchar(max) limited to 16 MB; datetime2 limited to 6 fractional digits."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-warehouse/data-types (updated 2026-06-11)"

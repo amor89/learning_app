@@ -326,20 +326,23 @@ recap:
 
 claims:
   - claim: "The SQL analytics endpoint is read-only for Delta table data. No INSERT, UPDATE or DELETE."
-    status: search-only
-    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/lakehouse-sql-analytics-endpoint"
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/lakehouse-sql-analytics-endpoint (updated 2026-05-19)"
   - claim: "You can create views, functions and stored procedures in the SQL analytics endpoint."
-    status: search-only
-    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/lakehouse-sql-analytics-endpoint"
-  - claim: "Fabric Warehouse supports full DML, DDL and multi-table transactions."
-    status: search-only
-    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/decision-guide-lakehouse-warehouse"
-  - claim: "Metadata sync lag is usually under one minute, and you can refresh it from the portal, the REST API or sys.sp_dw_refresh_ext_table."
-    status: search-only
-    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/sql-analytics-endpoint-metadata-sync"
-  - claim: "A warehouse reads lakehouse tables in the same workspace with three-part names."
-    status: unverified
-    source: "Check Microsoft Learn: cross-database queries in Fabric Data Warehouse."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/lakehouse-sql-analytics-endpoint (updated 2026-05-19)"
+  - claim: "Fabric Warehouse supports explicit multi-table transactions with BEGIN TRAN, COMMIT TRAN and ROLLBACK TRAN."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-warehouse/transactions (updated 2026-06-03)"
+  - claim: "Metadata sync runs in the background, and you can refresh it from the portal, the REST API or sys.sp_dw_refresh_ext_table."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/sql-analytics-endpoint-metadata-sync (updated 2026-05-29)"
+  - claim: "A warehouse reads lakehouse tables in the same workspace with three-part names, and transactions can span them."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-warehouse/query-warehouse and .../transactions"
+  - claim: "Under normal conditions the lag between a lakehouse and its SQL analytics endpoint is under one minute; the background sync stops after 15 minutes without query activity."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/sql-analytics-endpoint-performance (updated 2026-08-07)"
 
 practical:
   platform: fabric
@@ -352,5 +355,5 @@ practical:
     - "Switch the lakehouse view to its SQL analytics endpoint. Wait for `nat_metrics` to appear. Note how long it takes."
     - "Open a new SQL query on the endpoint and create the `dbo.v_wave_reach` view from exercise 4. Query it. Wave W02 returns NULL."
     - "In the same query window, run `UPDATE dbo.nat_metrics SET weighted_reach = 0 WHERE wave_id = 'W01';` and read the error message."
-    - "Create a warehouse named `wh_finance`. In a new query, run `SELECT * FROM lh_research.dbo.nat_metrics;`. If it fails, record the error, since this lesson marks cross-item queries as unverified."
+    - "Create a warehouse named `wh_finance`. In a new query, run `SELECT * FROM lh_research.dbo.nat_metrics;`. It returns the rows without a copy."
     - "Write down what you saw in each step. Compare it with the recap card."

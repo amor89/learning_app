@@ -1,0 +1,312 @@
+id: C1-L2
+title: OneLake, one lake per tenant
+
+concept: |
+  Every Fabric tenant has exactly **one OneLake**. You cannot create a second one or delete it. It is built on Azure Data Lake Storage and stores tables in open formats: **Delta Parquet** or **Iceberg**. Every Fabric engine (Spark, the SQL engines, Power BI's Direct Lake, KQL) reads the same files, so one copy of the data serves them all.
+
+  OneLake mirrors the Fabric hierarchy: a folder per **workspace**, and inside it a folder per **item**, named with its type. A lakehouse holds two areas: `Tables` for managed Delta tables and `Files` for anything else.
+
+  You address data with an ADLS-style path:
+
+  ```text
+  https://onelake.dfs.fabric.microsoft.com/<workspace>/<item>.<itemtype>/<path>
+  abfss://<workspace>@onelake.dfs.fabric.microsoft.com/<item>.<itemtype>/<path>
+  ```
+
+  For example `abfss://sales_prod@onelake.dfs.fabric.microsoft.com/lh_sales.lakehouse/Tables/orders`. The item type is lower case: `.lakehouse`, `.warehouse`.
+
+  Names change. **GUIDs do not.** OneLake accepts the workspace and item GUIDs in place of names, and they stay fixed when someone renames the workspace or item. With GUIDs you give both the workspace and the item as GUIDs, and you drop the item type. You find them in the item's URL in the Fabric portal.
+
+  Use GUIDs in pipelines, jobs and code that other people will run. Two more reasons from Microsoft Learn:
+
+  - The `abfs` driver URI does not allow special characters such as spaces in the workspace name. GUIDs avoid the problem.
+  - The global endpoint `onelake.dfs.fabric.microsoft.com` can route through another region. If data residency matters, use your workspace's regional endpoint, `https://<region>-onelake.dfs.fabric.microsoft.com`.
+
+  Because tools that speak ADLS APIs can read OneLake, Azure Databricks, Azure Storage Explorer or Python's Azure SDK can read Fabric data with the right permissions.
+
+why_it_matters: |
+  A Databricks job read a Fabric lakehouse through `abfss://Sales Analytics@onelake.dfs.fabric.microsoft.com/...`. It failed on the first run, because the workspace name held a space. The engineer renamed the workspace to `SalesAnalytics`. The job worked, and four Power BI dataflows and two pipelines that referred to the old name broke that night. Using the workspace and item GUIDs would have avoided both failures.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      path = "abfss://Sales Analytics@onelake.dfs.fabric.microsoft.com/Sales LH.Lakehouse/Tables/orders"
+      df = spark.read.format("delta").load(path)
+    annotations:
+      - find: 'path = "abfss://Sales Analytics@onelake.dfs.fabric.microsoft.com/Sales LH.Lakehouse/Tables/orders"'
+        note: "Spaces break the abfs URI, the item type is not lower case, and a rename breaks the path."
+  strong:
+    code: |
+      ONELAKE_HOST = "onelake.dfs.fabric.microsoft.com"
+
+
+      def onelake_table_path(workspace_id: str, item_id: str, table: str) -> str:
+          """abfss path to a lakehouse table, by GUID, stable across renames."""
+          return f"abfss://{workspace_id}@{ONELAKE_HOST}/{item_id}/Tables/{table}"
+
+
+      path = onelake_table_path(CONFIG["workspace_id"], CONFIG["lakehouse_id"], "orders")
+      df = spark.read.format("delta").load(path)
+    annotations:
+      - find: 'return f"abfss://{workspace_id}@{ONELAKE_HOST}/{item_id}/Tables/{table}"'
+        note: "With GUIDs, both workspace and item are IDs and the item type is dropped."
+      - find: 'path = onelake_table_path(CONFIG["workspace_id"], CONFIG["lakehouse_id"], "orders")'
+        note: "IDs come from config, not from code (lesson A1-L3)."
+  takeaway: |
+    One lake, one copy, many engines. Address data by GUID in anything automated.
+
+exercises:
+  - id: C1-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Your company has three business units in one Fabric tenant. How many OneLakes are there?
+    options:
+      - {id: a, text: "One per business unit"}
+      - {id: b, text: "One for the whole tenant"}
+      - {id: c, text: "One per capacity"}
+      - {id: d, text: "One per workspace"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Every tenant has a single OneLake. Workspaces organise it; they do not create new lakes."}
+      - {id: r2, text: "OneLake licences are sold per tenant."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "You cannot create more OneLakes. Business units get workspaces and domains inside the one lake."
+      - answer: c
+        feedback: "Capacities provide compute. Storage lives in the tenant's single OneLake."
+      - answer: d
+        feedback: "Each workspace is a folder in OneLake, not a separate lake."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. It is a platform design, not a licensing unit."
+    hints:
+      - "Can you create a second OneLake?"
+      - "What is a workspace in OneLake terms?"
+      - "A folder."
+    explanation: |
+      One tenant, one OneLake. Workspaces and items are folders inside it.
+
+  - id: C1-L2-E2
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the path to table `orders` in lakehouse `lh_sales`, workspace `sales_prod`.
+    template: |
+      abfss://[[g1]]@onelake.dfs.fabric.microsoft.com/lh_sales.[[g2]]/[[g3]]/orders
+    gaps:
+      g1: {accepted: [sales_prod]}
+      g2: {accepted: [lakehouse]}
+      g3: {accepted: [Tables]}
+    wrong_answers:
+      - answer: {g3: Files}
+        feedback: "Files holds unmanaged files. Managed Delta tables live under Tables."
+      - answer: {g1: lh_sales}
+        feedback: "The part before @ is the workspace, not the item."
+    hints:
+      - "The workspace goes before the @."
+      - "The item name carries its type in lower case."
+      - "Tables for managed Delta tables."
+    explanation: |
+      Workspace before `@`, then `item.itemtype`, then `Tables/<table>`.
+
+  - id: C1-L2-E3
+    type: spot_bug
+    difficulty: 3
+    language: python
+    prompt: |
+      This path fails with an invalid URI error. Tap the line with the problem and rewrite the path so it survives renames too.
+    code: |
+      WORKSPACE = "Sales Analytics"
+      LAKEHOUSE = "lh_sales"
+      path = f"abfss://{WORKSPACE}@onelake.dfs.fabric.microsoft.com/{LAKEHOUSE}.lakehouse/Tables/orders"
+    bug_lines: [1]
+    fix_checker:
+      kind: text
+      comments: none
+      rules:
+        - id: no_space_name
+          type: forbidden
+          pattern: "Sales Analytics"
+          message: "A workspace name with a space breaks the abfs URI. Use the workspace GUID."
+        - id: uses_ids
+          type: required
+          pattern: "workspace_id|WORKSPACE_ID"
+          message: "Reference the workspace by its GUID, for example WORKSPACE_ID from config."
+        - id: abfss
+          type: required
+          pattern: "abfss://\\{[A-Za-z_]+\\}@onelake\\.dfs\\.fabric\\.microsoft\\.com/\\{[A-Za-z_]+\\}/Tables/orders"
+          message: "With GUIDs, use abfss://{WORKSPACE_ID}@onelake.dfs.fabric.microsoft.com/{LAKEHOUSE_ID}/Tables/orders, without the item type."
+    fix_solution: |
+      WORKSPACE_ID = CONFIG["workspace_id"]
+      LAKEHOUSE_ID = CONFIG["lakehouse_id"]
+      path = f"abfss://{WORKSPACE_ID}@onelake.dfs.fabric.microsoft.com/{LAKEHOUSE_ID}/Tables/orders"
+    wrong_answers:
+      - lines: [3]
+        feedback: "The format of line 3 is right for names. The value it receives on line 1 is the problem."
+    hints:
+      - "What character does the workspace name contain?"
+      - "The abfs URI does not allow it."
+      - "Use the GUIDs, which never change."
+    explanation: |
+      The space in the workspace name breaks the abfs URI. Renaming the workspace would fix this job and break everything else that uses the old name. GUIDs fix both.
+
+  - id: C1-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `onelake_path(workspace: str, item: str, item_type: str, relative: str) -> str` returning `abfss://<workspace>@onelake.dfs.fabric.microsoft.com/<item>.<item_type>/<relative>`.
+
+      - `item_type` must be `"lakehouse"` or `"warehouse"`. Otherwise raise `ValueError`.
+      - Raise `ValueError` if `workspace` or `item` contains a space.
+      - Strip leading slashes from `relative`.
+    starter: |
+      def onelake_path(workspace, item, item_type, relative):
+          return f"abfss://{workspace}@onelake.dfs.fabric.microsoft.com/{item}.{item_type}/{relative}"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: onelake_path
+          typed: true
+          docstring: true
+          message: "Give `onelake_path` type hints and a docstring."
+      tests:
+        - id: builds
+          code: |
+            assert onelake_path("sales_prod", "lh_sales", "lakehouse", "/Tables/orders") == (
+                "abfss://sales_prod@onelake.dfs.fabric.microsoft.com/lh_sales.lakehouse/Tables/orders"
+            )
+          message: "Build the path in the given format, without a double slash."
+        - id: item_type
+          code: |
+            for bad in ("Lakehouse", "notebook", ""):
+                try:
+                    onelake_path("w", "i", bad, "Tables/t")
+                except ValueError:
+                    continue
+                raise AssertionError(bad)
+          message: "Only lower-case lakehouse or warehouse are allowed."
+        - id: spaces
+          code: |
+            for ws, item in (("Sales Analytics", "lh"), ("w", "Sales LH")):
+                try:
+                    onelake_path(ws, item, "lakehouse", "Tables/t")
+                except ValueError:
+                    continue
+                raise AssertionError((ws, item))
+          message: "Names with spaces break the abfs URI. Raise ValueError."
+    solution: |
+      ONELAKE_HOST = "onelake.dfs.fabric.microsoft.com"
+      ITEM_TYPES = frozenset({"lakehouse", "warehouse"})
+
+
+      def onelake_path(workspace: str, item: str, item_type: str, relative: str) -> str:
+          """abfss path to data in a OneLake item, addressed by name.
+
+          Args:
+              workspace: Workspace name, without spaces.
+              item: Item name, without spaces.
+              item_type: "lakehouse" or "warehouse".
+              relative: Path inside the item, such as Tables/orders.
+
+          Returns:
+              The abfss URI.
+
+          Raises:
+              ValueError: For an unknown item type or names with spaces.
+          """
+          if item_type not in ITEM_TYPES:
+              raise ValueError(f"unsupported item type: {item_type!r}")
+          if " " in workspace or " " in item:
+              raise ValueError("abfs URIs do not allow spaces; use GUIDs instead")
+          return f"abfss://{workspace}@{ONELAKE_HOST}/{item}.{item_type}/{relative.lstrip('/')}"
+    seeded_bugs:
+      - |
+        def onelake_path(workspace: str, item: str, item_type: str, relative: str) -> str:
+            """No validation."""
+            return f"abfss://{workspace}@onelake.dfs.fabric.microsoft.com/{item}.{item_type}/{relative.lstrip('/')}"
+      - |
+        def onelake_path(workspace: str, item: str, item_type: str, relative: str) -> str:
+            """Keeps the leading slash."""
+            if item_type not in {"lakehouse", "warehouse"} or " " in workspace or " " in item:
+                raise ValueError("bad input")
+            return f"abfss://{workspace}@onelake.dfs.fabric.microsoft.com/{item}.{item_type}/{relative}"
+    wrong_answers:
+      - answer: |
+          def onelake_path(workspace: str, item: str, item_type: str, relative: str) -> str:
+              """Keeps the leading slash."""
+              if item_type not in {"lakehouse", "warehouse"} or " " in workspace or " " in item:
+                  raise ValueError("bad input")
+              return f"abfss://{workspace}@onelake.dfs.fabric.microsoft.com/{item}.{item_type}/{relative}"
+        triggers: builds
+    hints:
+      - "Check the item type against a fixed set."
+      - "Reject spaces in workspace and item names."
+      - "relative.lstrip('/') avoids a double slash."
+    explanation: |
+      Validating inputs turns a confusing URI error at read time into a clear message at build time.
+
+  - id: C1-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      An Azure Databricks job in the UK will read a Fabric lakehouse in a UK South workspace every night. Data must stay in the UK. Choose the set-up.
+    slots:
+      - id: address
+        label: "How the job refers to workspace and lakehouse"
+        options:
+          - {id: guids, text: "GUIDs from config"}
+          - {id: names, text: "Display names in the code"}
+        answer: guids
+      - id: endpoint
+        label: "Endpoint"
+        options:
+          - {id: regional, text: "The workspace's regional OneLake endpoint"}
+          - {id: global, text: "The global onelake.dfs.fabric.microsoft.com endpoint"}
+        answer: regional
+      - id: copy
+        label: "Data movement"
+        options:
+          - {id: read_in_place, text: "Read the Delta tables in place"}
+          - {id: copy_nightly, text: "Copy the tables to Databricks storage first"}
+        answer: read_in_place
+    model_answer: |
+      - GUIDs survive renames and avoid URI problems with special characters.
+      - The regional endpoint keeps requests in the workspace's region, which the residency rule needs.
+      - OneLake speaks ADLS APIs and stores open Delta tables, so the job reads them without a second copy.
+    wrong_answers:
+      - answer: {address: names}
+        feedback: "Names change, and names with spaces break abfs URIs."
+      - answer: {endpoint: global}
+        feedback: "Microsoft Learn warns that the global endpoint can route data out of your region."
+      - answer: {copy: copy_nightly}
+        feedback: "A nightly copy is a second dataset to govern and keep in sync. Read the Delta tables where they are."
+    hints:
+      - "What changes and what does not?"
+      - "Which endpoint guarantees the region?"
+      - "Does Databricks need a copy to read Delta?"
+    explanation: |
+      Stable identifiers, a regional endpoint, and no copies.
+
+recap:
+  - front: "How many OneLakes per tenant?"
+    back: "Exactly one. You cannot create or delete OneLakes."
+  - front: "OneLake table formats"
+    back: "Delta Parquet or Iceberg, open formats every Fabric engine reads."
+  - front: "OneLake path by name"
+    back: "abfss://<workspace>@onelake.dfs.fabric.microsoft.com/<item>.<itemtype>/Tables/<table>."
+  - front: "Why GUIDs in automation"
+    back: "They survive renames, avoid special-character problems in abfs URIs, and drop the item type."
+
+claims:
+  - claim: "Every tenant has a single OneLake, built on ADLS, storing tables in Delta Parquet or Iceberg; you cannot create multiple OneLakes."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/onelake/onelake-overview (updated 2026-03-09)"
+  - claim: "OneLake URI formats by name and by GUID; GUIDs do not change on rename; abfs URIs do not allow special characters such as spaces in the workspace name; the global endpoint may route data out of region, and regional endpoints avoid this."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/onelake/onelake-access-api (updated 2026-05-18)"

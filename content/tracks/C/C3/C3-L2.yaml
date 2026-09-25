@@ -1,0 +1,261 @@
+id: C3-L2
+title: Mirroring operational databases into OneLake
+
+concept: |
+  **Mirroring** brings an external database into Fabric as a unit. For sources that store data in their own formats, such as Azure SQL Database, Azure SQL Managed Instance, Azure Cosmos DB, Snowflake or Google BigQuery, Fabric **continuously replicates** the chosen tables into OneLake as Delta tables, in near real time. You get a mirrored database item and a **SQL analytics endpoint** over it, read-only, like a lakehouse's.
+
+  Shortcut or mirroring? Microsoft Learn's rule:
+
+  - **Shortcut** when you want specific data, already in an open format, in your OneLake view without copying it.
+  - **Mirroring** when you want an external database or catalog, and the data behind it, in Fabric as a unit. It replicates when the source uses a proprietary format.
+
+  **Cost.** For database mirroring and open mirroring, the background compute that replicates data does not consume capacity. Mirrored storage is free up to **1 TB per capacity unit**: an F64 includes 64 TB of mirroring storage. Queries on the mirrored data (Spark, SQL, Power BI) use capacity as usual.
+
+  **Limits come per source.** For Azure SQL Database, checked September 2026:
+
+  - at most 1,000 mirrored tables per database,
+  - tables whose primary key uses `datetime2(7)`, `datetimeoffset(7)` or `time(7)` cannot be mirrored,
+  - since April 2025 tables without a primary key can be mirrored, but existing ones are not added automatically, even with "Automatically mirror future tables" turned on.
+
+  **Status varies too.** Most sources are generally available. Some, such as Azure Database for MySQL, Dremio and SharePoint List, were in preview in September 2026. Check the mirroring overview page before you build on a source.
+
+  After you set up a mirror, compare row counts per table between source and mirror (lesson A6-L3). The limits above fail quietly: an ineligible table is simply not there.
+
+why_it_matters: |
+  A team mirrored an Azure SQL order database and built a dashboard on it. Weeks later, finance noticed that returns were missing. The returns table's primary key included a `datetime2(7)` column, so it had never been mirrored. Nothing errored. A per-table row-count check between source and mirror on the first day would have listed it as absent.
+
+worked_example:
+  language: sql
+  weak:
+    code: |
+      -- Mirror set up for all tables. Dashboard built on the mirror.
+      SELECT COUNT(*) FROM mirror_orders.dbo.orders;
+    annotations:
+      - find: "-- Mirror set up for all tables. Dashboard built on the mirror."
+        note: "Assumes every table was eligible and replicated."
+  strong:
+    code: |
+      -- Run in the source database: tables and row counts
+      SELECT s.name AS schema_name, t.name AS table_name, SUM(p.rows) AS source_rows
+      FROM sys.tables AS t
+      JOIN sys.schemas AS s ON s.schema_id = t.schema_id
+      JOIN sys.partitions AS p ON p.object_id = t.object_id AND p.index_id IN (0, 1)
+      GROUP BY s.name, t.name;
+
+      -- Run on the mirror's SQL analytics endpoint: which tables arrived
+      SELECT TABLE_SCHEMA, TABLE_NAME
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_TYPE = 'BASE TABLE';
+    annotations:
+      - find: "SELECT s.name AS schema_name, t.name AS table_name, SUM(p.rows) AS source_rows"
+        note: "The expected list and sizes, from the source."
+      - find: "FROM INFORMATION_SCHEMA.TABLES"
+        note: "The actual list in the mirror. Any table missing here was not mirrored."
+  takeaway: |
+    Mirroring replicates operational databases for free compute and generous storage, within per-source limits. Reconcile the table list after setup.
+
+exercises:
+  - id: C3-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You need an Azure SQL Database's tables in Fabric, kept up to date, for reporting. Shortcut or mirroring?
+    options:
+      - {id: a, text: "Shortcut: shortcuts connect to Azure SQL Database."}
+      - {id: b, text: "Mirroring: it replicates the database into OneLake continuously."}
+      - {id: c, text: "Neither: export CSV files nightly."}
+      - {id: d, text: "A shortcut under Tables."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Azure SQL stores data in a proprietary format, so Fabric must replicate it, which is what mirroring does."}
+      - {id: r2, text: "Mirroring is always cheaper than shortcuts."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Shortcuts point at storage (OneLake, ADLS, S3 and similar), not at database engines."
+      - answer: c
+        feedback: "A nightly export is a hand-built copy with lag and maintenance. Mirroring does it continuously."
+      - answer: d
+        feedback: "There is no storage folder of Delta files to point at. The database must be replicated."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Shortcuts copy nothing. Mirroring is needed because the source is a database."
+    hints:
+      - "What do shortcuts point at?"
+      - "Is an Azure SQL database a folder of Delta files?"
+      - "It must be replicated."
+    explanation: |
+      Databases in proprietary formats come in through mirroring. Open-format data in storage comes in through shortcuts.
+
+  - id: C3-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      Using the documented rule of 1 TB of free mirroring storage per capacity unit, what does this print?
+    code: |
+      capacity_units = 32
+      mirrored_tb = 45
+      free_tb = capacity_units * 1
+      print(free_tb, max(0, mirrored_tb - free_tb))
+    answer: "32 13"
+    wrong_answers:
+      - answer: "64 0"
+        feedback: "The example on Learn uses F64. This capacity has 32 CUs, so 32 TB are free."
+    hints:
+      - "How many CUs does the capacity have?"
+      - "1 TB free per CU."
+      - "45 - 32."
+    explanation: |
+      32 TB are free on an F32. The remaining 13 TB of mirrored storage is billed as OneLake storage.
+
+  - id: C3-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: sql
+    prompt: |
+      List the base tables that arrived in the mirror, on its SQL analytics endpoint.
+    template: |
+      SELECT TABLE_SCHEMA, TABLE_NAME
+      FROM [[g1]].TABLES
+      WHERE TABLE_TYPE = '[[g2]]';
+    gaps:
+      g1: {accepted: [INFORMATION_SCHEMA], case_sensitive: false}
+      g2: {accepted: [BASE TABLE], case_sensitive: false}
+    wrong_answers:
+      - answer: {g2: VIEW}
+        feedback: "Views are not mirrored tables. Filter on BASE TABLE."
+    hints:
+      - "The standard catalog views schema."
+      - "Tables, not views."
+      - "`INFORMATION_SCHEMA` and `BASE TABLE`."
+    explanation: |
+      `INFORMATION_SCHEMA.TABLES` lists the tables the endpoint exposes. Compare it with the source list.
+
+  - id: C3-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `missing_from_mirror(source: dict[str, int], mirror: dict[str, int]) -> list[str]` for a reconciliation job. Both map `schema.table` to a row count. Return, sorted, the tables that are absent from the mirror, or whose mirror count differs from the source count.
+    starter: |
+      def missing_from_mirror(source, mirror):
+          return [t for t in source if t not in mirror]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: missing_from_mirror
+          typed: true
+          docstring: true
+          message: "Give `missing_from_mirror` type hints and a docstring."
+      tests:
+        - id: absent
+          code: |
+            assert missing_from_mirror({"dbo.orders": 10, "dbo.returns": 3}, {"dbo.orders": 10}) == ["dbo.returns"]
+          message: "Tables missing from the mirror must be listed."
+        - id: count_diff
+          code: |
+            assert missing_from_mirror({"dbo.orders": 10, "dbo.lines": 50}, {"dbo.orders": 9, "dbo.lines": 50}) == ["dbo.orders"]
+          message: "Tables whose counts differ must be listed too."
+        - id: sorted_clean
+          code: |
+            assert missing_from_mirror({"b.x": 1, "a.y": 2}, {}) == ["a.y", "b.x"]
+            assert missing_from_mirror({"a.y": 2}, {"a.y": 2, "extra.t": 5}) == []
+          message: "Return a sorted list, and ignore tables that exist only in the mirror."
+    solution: |
+      def missing_from_mirror(source: dict[str, int], mirror: dict[str, int]) -> list[str]:
+          """Source tables that are absent from the mirror or differ in row count.
+
+          Args:
+              source: schema.table to row count in the source database.
+              mirror: schema.table to row count on the mirror's endpoint.
+
+          Returns:
+              Sorted table names that need attention.
+          """
+          return sorted(t for t, n in source.items() if mirror.get(t) != n)
+    seeded_bugs:
+      - |
+        def missing_from_mirror(source: dict[str, int], mirror: dict[str, int]) -> list[str]:
+            """Only checks presence."""
+            return sorted(t for t in source if t not in mirror)
+      - |
+        def missing_from_mirror(source: dict[str, int], mirror: dict[str, int]) -> list[str]:
+            """Unsorted."""
+            return [t for t, n in source.items() if mirror.get(t) != n]
+    wrong_answers:
+      - answer: |
+          def missing_from_mirror(source: dict[str, int], mirror: dict[str, int]) -> list[str]:
+              """Only checks presence."""
+              return sorted(t for t in source if t not in mirror)
+        triggers: count_diff
+    hints:
+      - "Loop over the source tables."
+      - "mirror.get(table) is None when absent, so one comparison covers both cases."
+      - "Sort the result."
+    explanation: |
+      One comparison, `mirror.get(t) != n`, catches both missing tables and partial replication.
+
+  - id: C3-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Plan mirroring for an Azure SQL order database with 1,400 tables. Some primary keys use `datetime2(7)`.
+    slots:
+      - id: scope
+        label: "Which tables to mirror"
+        options:
+          - {id: selected, text: "The tables reporting needs, under the 1,000-table limit"}
+          - {id: all, text: "All 1,400"}
+        answer: selected
+      - id: keys
+        label: "Tables with datetime2(7) primary keys"
+        options:
+          - {id: plan, text: "List them and agree a fix, such as a supported key type in the source, before relying on the mirror"}
+          - {id: ignore, text: "Assume they will mirror"}
+        answer: plan
+      - id: check
+        label: "After setup"
+        options:
+          - {id: reconcile, text: "Reconcile table lists and row counts daily"}
+          - {id: trust, text: "Trust the mirror's status page"}
+        answer: reconcile
+    model_answer: |
+      - Mirror what reporting needs, within the 1,000-table limit.
+      - Tables with datetime2(7) keys cannot be mirrored. Plan for them explicitly.
+      - Reconcile daily, because ineligible tables fail quietly.
+    wrong_answers:
+      - answer: {scope: all}
+        feedback: "Azure SQL Database mirroring supports at most 1,000 tables."
+      - answer: {keys: ignore}
+        feedback: "Those tables are not eligible. They will simply be missing."
+      - answer: {check: trust}
+        feedback: "A table that was never eligible does not show as failing. Compare lists and counts."
+    hints:
+      - "Is there a table limit?"
+      - "Which key types block mirroring?"
+      - "How would you notice a missing table?"
+    explanation: |
+      Plan within the documented limits, then verify with data, not with status pages.
+
+recap:
+  - front: "Shortcut or mirroring?"
+    back: "Shortcut for open-format data in storage. Mirroring for databases and catalogs, replicated when proprietary."
+  - front: "Mirroring cost"
+    back: "Replication compute is free. Storage is free up to 1 TB per CU. Queries use capacity."
+  - front: "Azure SQL Database mirroring limits"
+    back: "Up to 1,000 tables. Primary keys on datetime2(7), datetimeoffset(7) or time(7) block a table."
+  - front: "After setting up a mirror"
+    back: "Reconcile table lists and row counts with the source."
+
+claims:
+  - claim: "Shortcuts vs mirroring guidance, and mirroring replicates when the source stores data in a proprietary format."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/onelake/unify-data (updated 2026-07-15)"
+  - claim: "Replication compute is free and does not consume capacity; mirroring storage is free at 1 TB per CU; MySQL, Dremio and SharePoint List sources are in preview; BigQuery is GA."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/mirroring/overview (updated 2026-08-28)"
+  - claim: "Azure SQL Database mirroring: 1,000 tables maximum, datetime2(7)/datetimeoffset(7)/time(7) primary keys unsupported, tables without primary keys supported since April 2025 but not added automatically."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/mirroring/azure-sql-database-limitations (updated 2026-02-26)"

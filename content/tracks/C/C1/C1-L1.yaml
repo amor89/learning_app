@@ -1,0 +1,291 @@
+id: C1-L1
+title: Tenant, capacity, workspace and item
+
+concept: |
+  Everything in Fabric sits in one hierarchy. Learn it first, because cost, access and deployment all follow it.
+
+  - **Tenant.** Your organisation's Microsoft Entra ID tenant. Tenant settings, set by Fabric administrators, apply to everything below.
+  - **Capacity.** A pool of compute you buy. Every Fabric workload, from Spark to Power BI, draws from the capacity its workspace is assigned to.
+  - **Workspace.** A container where a team creates and shares items. Access is granted per workspace, through roles (lesson C1-L3).
+  - **Item.** A lakehouse, warehouse, notebook, pipeline, semantic model, report, eventhouse and so on. Items hold or process the data.
+
+  **Capacities come as SKUs.** F SKUs are the recommended Fabric capacities. The number is the compute in **capacity units** (CUs): an F2 has 2 CUs, an F64 has 64, up to F2048. A trial capacity has 64 CUs. Microsoft 365 P SKUs also run Fabric if Fabric is enabled on them.
+
+  Size affects licensing, not only speed. On **F64 or larger** (or a P capacity), users with a free Fabric license can view Power BI content. On smaller F SKUs, each viewer needs a Pro, Premium Per User or individual trial licence.
+
+  **Pausing** a capacity stops compute billing while it is paused. It is not free of consequences: when you pause, any smoothed and overage usage still owed is added to your Azure bill at once, and items on that capacity stop working until you resume.
+
+  Two practical rules follow from the hierarchy:
+
+  - Put dev, test and production in **separate workspaces**, and assign production to a capacity that experiments cannot exhaust.
+  - Before you design anything, find out which capacity SKU you have. It decides what users need to pay for and how much work runs at once.
+
+  Facts in this lesson come from Microsoft Learn's licensing and capacity pages, checked September 2026.
+
+why_it_matters: |
+  A team built a Power BI report for 300 frontline managers on an F32 capacity, assuming that managers with free licences could view it, as they had on the old Premium P1. Launch day produced 300 "You need a license" messages. The fix was either 300 Pro licences or a move to F64. Neither was in the budget, and the launch slipped a quarter.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Workspace: Analytics (all projects)
+      Capacity: F32 shared with the data science sandbox
+      Viewers: 300 managers with free licences
+      Environments: dev and prod items in the same workspace
+    annotations:
+      - find: "Capacity: F32 shared with the data science sandbox"
+        note: "Production shares compute with experiments. One heavy notebook throttles the reports."
+      - find: "Viewers: 300 managers with free licences"
+        note: "Below F64, every viewer needs a Pro, PPU or trial licence."
+      - find: "Environments: dev and prod items in the same workspace"
+        note: "No separation: a change to a dev item can break production."
+  strong:
+    code: |
+      Workspace: sales_reporting_prod   -> capacity: F64 (production only)
+      Workspace: sales_reporting_test   -> capacity: F8
+      Workspace: sales_reporting_dev    -> capacity: F8
+      Viewers: 300 managers with free licences, reading the prod workspace's app
+      Sandbox workspaces               -> capacity: F4, paused out of hours
+    annotations:
+      - find: "Workspace: sales_reporting_prod   -> capacity: F64 (production only)"
+        note: "F64 lets free-licence users view Power BI content, and production has its own compute."
+      - find: "Sandbox workspaces               -> capacity: F4, paused out of hours"
+        note: "Experiments cannot starve production, and pausing saves money when nobody works."
+  takeaway: |
+    The capacity decides who can view, how much runs at once and what it costs. Separate environments into workspaces, and give production its own capacity.
+
+exercises:
+  - id: C1-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      What does the number in the SKU name F32 tell you?
+    options:
+      - {id: a, text: "32 users can use the capacity."}
+      - {id: b, text: "The capacity has 32 capacity units (CUs) of compute."}
+      - {id: c, text: "32 GB of OneLake storage is included."}
+      - {id: d, text: "32 workspaces can be assigned to it."}
+    answer: b
+    reasons:
+      - {id: r1, text: "For F SKUs the number equals the capacity units: F2 is 2 CUs, F64 is 64."}
+      - {id: r2, text: "SKU numbers are marketing names with no meaning."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Capacities are not sized by user count. The number is compute in CUs."
+      - answer: c
+        feedback: "OneLake storage is billed separately from capacity compute."
+      - answer: d
+        feedback: "The SKU does not cap workspaces in this way. It measures compute."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The number is exactly the CU count."
+    hints:
+      - "What does a capacity provide?"
+      - "Compute, measured in a unit."
+      - "Capacity units."
+    explanation: |
+      F SKUs are named by their capacity units. F32 provides 32 CUs.
+
+  - id: C1-L1-E2
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the Fabric hierarchy from the broadest to the most specific.
+    items:
+      - {id: tenant, text: "Tenant"}
+      - {id: capacity, text: "Capacity"}
+      - {id: workspace, text: "Workspace"}
+      - {id: item, text: "Item, such as a lakehouse"}
+    answer: [tenant, capacity, workspace, item]
+    wrong_answers:
+      - answer: [tenant, workspace, capacity, item]
+        feedback: "A workspace is assigned to a capacity, which provides its compute. Capacity sits above workspace."
+      - answer: [capacity, tenant, workspace, item]
+        feedback: "Capacities belong to a tenant, where tenant settings apply to everything."
+    hints:
+      - "Which level holds organisation-wide settings?"
+      - "Which level provides compute to workspaces?"
+      - "Items live in workspaces."
+    explanation: |
+      Tenant settings apply to all capacities. Each workspace draws compute from its capacity. Items live in workspaces.
+
+  - id: C1-L1-E3
+    type: design
+    difficulty: 2
+    prompt: |
+      A report will serve 200 viewers who have only free Fabric licences. Choose the set-up.
+    slots:
+      - id: sku
+        label: "Capacity for the production workspace"
+        options:
+          - {id: f64, text: "F64 or larger"}
+          - {id: f16, text: "F16, cheaper, same features"}
+        answer: f64
+      - id: share
+        label: "What else runs on that capacity"
+        options:
+          - {id: prod_only, text: "Production items only"}
+          - {id: sandbox, text: "The data science sandbox as well"}
+        answer: prod_only
+    model_answer: |
+      - F64 or larger, because smaller F SKUs require each viewer to hold a Pro, PPU or trial licence.
+      - Production only, so experiments cannot use up the compute the report needs.
+    wrong_answers:
+      - answer: {sku: f16}
+        feedback: "Below F64, viewers need Pro, Premium Per User or trial licences. 200 free-licence users could not open the report."
+      - answer: {share: sandbox}
+        feedback: "A heavy notebook in the sandbox consumes the same CUs and can slow or throttle the report."
+    hints:
+      - "Which SKU lets free-licence users view Power BI content?"
+      - "What happens when two workloads share one pool of CUs?"
+      - "Size and isolation."
+    explanation: |
+      Licensing and isolation both point to a dedicated F64 or larger for this report.
+
+  - id: C1-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `cu_hours(sku: str, hours: float) -> float` for a cost estimate. The SKU is a string such as `"F64"`. Return the capacity units multiplied by the hours running. Accept only the F SKUs F2, F4, F8, F16, F32, F64, F128, F256, F512, F1024 and F2048, and raise `ValueError` for any other SKU or for negative hours.
+    starter: |
+      def cu_hours(sku, hours):
+          return int(sku[1:]) * hours
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: cu_hours
+          typed: true
+          docstring: true
+          message: "Give `cu_hours` type hints and a docstring."
+      tests:
+        - id: values
+          code: |
+            assert cu_hours("F64", 24) == 1536.0
+            assert cu_hours("F2", 0.5) == 1.0
+          message: "Multiply the SKU's CUs by hours: F64 for 24 hours is 1,536 CU hours."
+        - id: invalid_sku
+          code: |
+            for sku in ("F3", "P1", "f64", "F4096", "64"):
+                try:
+                    cu_hours(sku, 1)
+                except ValueError:
+                    continue
+                raise AssertionError(sku)
+          message: "Only the listed F SKUs are valid. F3, P1, lower-case f64, F4096 and 64 must raise ValueError."
+        - id: negative
+          code: |
+            try:
+                cu_hours("F8", -1)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("negative hours accepted")
+          message: "Negative hours must raise ValueError."
+    solution: |
+      F_SKUS: dict[str, int] = {f"F{n}": n for n in (2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048)}
+
+
+      def cu_hours(sku: str, hours: float) -> float:
+          """Capacity-unit hours for running an F SKU capacity.
+
+          Args:
+              sku: F SKU name such as "F64".
+              hours: Hours the capacity runs.
+
+          Returns:
+              CUs multiplied by hours.
+
+          Raises:
+              ValueError: For an unknown SKU or negative hours.
+          """
+          if sku not in F_SKUS:
+              raise ValueError(f"unknown F SKU: {sku!r}")
+          if hours < 0:
+              raise ValueError("hours must not be negative")
+          return float(F_SKUS[sku] * hours)
+    seeded_bugs:
+      - |
+        def cu_hours(sku: str, hours: float) -> float:
+            """Parses any F number."""
+            if not sku.startswith("F") or hours < 0:
+                raise ValueError(sku)
+            return float(int(sku[1:]) * hours)
+      - |
+        F_SKUS: dict[str, int] = {f"F{n}": n for n in (2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048)}
+
+
+        def cu_hours(sku: str, hours: float) -> float:
+            """No hours check."""
+            if sku not in F_SKUS:
+                raise ValueError(sku)
+            return float(F_SKUS[sku] * hours)
+    wrong_answers:
+      - answer: |
+          def cu_hours(sku: str, hours: float) -> float:
+              """Parses any F number."""
+              if not sku.startswith("F") or hours < 0:
+                  raise ValueError(sku)
+              return float(int(sku[1:]) * hours)
+        triggers: invalid_sku
+    hints:
+      - "Build a mapping from each valid SKU name to its CUs."
+      - "Check membership in the mapping, then the hours."
+      - "Multiply and return a float."
+    explanation: |
+      An explicit list of SKUs rejects typos such as F3 or f64 instead of pricing a capacity that does not exist.
+
+  - id: C1-L1-E5
+    type: mcq
+    difficulty: 4
+    prompt: |
+      A team pauses its F64 capacity at 18:00 to save money after a heavy afternoon of Spark jobs. What happens?
+    options:
+      - {id: a, text: "Nothing is billed for the afternoon's work, because the capacity is paused."}
+      - {id: b, text: "Smoothed and overage usage still owed is added to the Azure bill at once, and items on the capacity stop working until it resumes."}
+      - {id: c, text: "The capacity keeps running reports but stops Spark."}
+      - {id: d, text: "OneLake data on the capacity is deleted after 24 hours."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Fabric smooths usage over time. Pausing settles what is still owed and makes the capacity's items unavailable."}
+      - {id: r2, text: "Paused capacities are billed at double rate."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The work already happened. Pausing settles the remaining smoothed and overage usage on the bill."
+      - answer: c
+        feedback: "A paused capacity is not operational. Its items stop until you resume it."
+      - answer: d
+        feedback: "Pausing affects compute. It does not delete OneLake data."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. There is no double rate. Pausing settles usage already incurred."
+    hints:
+      - "Was the afternoon's compute already used?"
+      - "What happens to usage Fabric smoothed over the coming hours?"
+      - "It is settled at pause."
+    explanation: |
+      Pausing saves money from then on, but the usage already smoothed forward is billed at once, and every item on the capacity stops until it resumes.
+
+recap:
+  - front: "Fabric hierarchy"
+    back: "Tenant, capacity, workspace, item."
+  - front: "What F64 means"
+    back: "An F SKU with 64 capacity units. F SKUs run from F2 to F2048."
+  - front: "Free-licence viewers of Power BI content"
+    back: "Need an F64 or larger (or P) capacity. Smaller F SKUs need Pro, PPU or trial licences for viewers."
+  - front: "Pausing a capacity"
+    back: "Stops compute billing from then on, bills remaining smoothed and overage usage at once, and stops its items."
+
+claims:
+  - claim: "F SKUs from F2 to F2048, where the number equals capacity units; a trial capacity has 64 CUs."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/enterprise/licenses (updated 2026-06-15)"
+  - claim: "F64+ or P capacities support viewing Power BI content by users with a free Fabric licence; smaller F SKUs require Pro, PPU or trial licences for viewers."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/enterprise/licenses (updated 2026-06-15)"
+  - claim: "When a capacity is paused, remaining cumulative overages and smoothed operations are added to the Azure bill."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/enterprise/pause-resume (updated 2026-04-20): pausing can prevent content from being available until resumed"
