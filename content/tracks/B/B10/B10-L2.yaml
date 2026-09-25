@@ -1,0 +1,370 @@
+id: B10-L2
+title: Fit on training data only
+
+concept: |
+  Every step that **learns from data** must learn from the training rows only: imputation means, scaling parameters, category lists, target encodings, feature selection, even the choice of outliers to drop. If a step sees the test rows, information about them flows into the model, and the test score becomes optimistic. This is **train/test contamination**.
+
+  A demonstration from this course's build, with scikit-learn 1.8. Take 100 rows of pure noise: 5,000 random features and a random 0/1 target. Nothing can be predicted.
+
+  - Select the 20 features most correlated with the target **on all 100 rows**, then cross-validate a logistic regression on them: accuracy **0.85**.
+  - Put the same selection **inside** each cross-validation fold: accuracy **0.48**, the chance level it should be.
+
+  The first model did not learn anything real. The selection step had already looked at every test fold's labels and picked the features that happened to fit them.
+
+  The rule for manual preprocessing:
+
+  ```python
+  params = fit_preprocessing(train)          # learn from train only
+  train_ready = apply_preprocessing(train, params)
+  test_ready = apply_preprocessing(test, params)   # reuse, never refit
+  ```
+
+  Split **first**, before any step that learns. In cross-validation, that means refitting the preprocessing inside every fold. Doing that by hand is error-prone. scikit-learn's `Pipeline` does it for you (lesson B11-L2).
+
+  Steps that do **not** learn are safe on the full data: fixed recodes from a codebook, unit conversions, parsing dates. Steps that learn include anything with `fit`, anything that computes a mean, a quantile, a list of categories or a correlation with the target.
+
+why_it_matters: |
+  A propensity model imputed missing income with the median of the full dataset and scaled every feature on the full dataset before the train/test split. It then selected features by their correlation with the target, also on the full data. The validation AUC was 0.79. On the next month's customers it was 0.66. Most of the gap came from the feature selection: it had fitted the noise in the test rows.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      df["income"] = df["income"].fillna(df["income"].median())
+      df["income"] = (df["income"] - df["income"].mean()) / df["income"].std()
+      train, test = train_test_split(df, test_size=0.2, random_state=1)
+    annotations:
+      - find: 'df["income"] = df["income"].fillna(df["income"].median())'
+        note: "The median includes test rows."
+      - find: 'df["income"] = (df["income"] - df["income"].mean()) / df["income"].std()'
+        note: "Scaling parameters learned from test rows too."
+      - find: "train, test = train_test_split(df, test_size=0.2, random_state=1)"
+        note: "The split comes after the learning, too late."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def fit_income_prep(train: pd.DataFrame) -> dict[str, float]:
+          """Learn median, mean and sd of income from training rows only."""
+          filled = train["income"].fillna(train["income"].median())
+          return {"median": float(train["income"].median()), "mean": float(filled.mean()), "sd": float(filled.std())}
+
+
+      def apply_income_prep(df: pd.DataFrame, params: dict[str, float]) -> pd.DataFrame:
+          """Impute and scale income with parameters learned elsewhere."""
+          filled = df["income"].fillna(params["median"])
+          return df.assign(income=(filled - params["mean"]) / params["sd"])
+    annotations:
+      - find: "def fit_income_prep(train: pd.DataFrame) -> dict[str, float]:"
+        note: "Learning happens in one place, on training rows."
+      - find: 'filled = df["income"].fillna(params["median"])'
+        note: "Applying reuses the learned values, for train and test alike."
+  takeaway: |
+    Split first. Fit every learning step on training rows. Apply the fitted parameters to everything else.
+
+exercises:
+  - id: B10-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which step is safe to run on the full dataset before the split?
+    options:
+      - {id: a, text: "Filling missing income with the median"}
+      - {id: b, text: "Converting height from inches to centimetres"}
+      - {id: c, text: "Selecting the 20 features most correlated with the target"}
+      - {id: d, text: "Standardising features to mean 0 and sd 1"}
+    answer: b
+    reasons:
+      - {id: r1, text: "A unit conversion uses a fixed constant. It learns nothing from the rows."}
+      - {id: r2, text: "Conversions happen before any modelling."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The median is learned from the rows, including test rows."
+      - answer: c
+        feedback: "Selection by target correlation learns from test labels. It is the strongest leak of the four."
+      - answer: d
+        feedback: "Mean and sd are learned from the rows."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Timing does not make a step safe. Learning nothing from the data does."
+    hints:
+      - "Which step computes something from the data?"
+      - "Which uses only a fixed constant?"
+      - "2.54 cm per inch."
+    explanation: |
+      Fixed transformations are safe anywhere. Anything that computes a statistic from rows must be fitted on training rows only.
+
+  - id: B10-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      Pure noise: 100 rows, 5,000 random features, random labels. The 20 best features are selected on all rows, then 5-fold CV is run. Roughly what accuracy does it print? (scikit-learn 1.8, seed 0)
+    code: |
+      import numpy as np
+      from sklearn.feature_selection import SelectKBest, f_classif
+      from sklearn.linear_model import LogisticRegression
+      from sklearn.model_selection import cross_val_score
+
+      rng = np.random.default_rng(0)
+      X = rng.normal(size=(100, 5000))
+      y = rng.integers(0, 2, 100)
+      X_sel = SelectKBest(f_classif, k=20).fit_transform(X, y)
+      print(round(cross_val_score(LogisticRegression(), X_sel, y, cv=5).mean(), 2))
+    answer: "0.85"
+    wrong_answers:
+      - answer: "0.5"
+        feedback: "That is the honest answer for noise. Selection on all rows has seen the test labels, so CV reports 0.85."
+    hints:
+      - "Did the selection see the rows used for testing?"
+      - "Can it pick features that fit those labels by chance?"
+      - "Far above 0.5."
+    explanation: |
+      With 5,000 features, 20 fit any 100 labels by chance. Selecting them on all rows leaks the test labels. Inside the folds, the same code scores 0.48.
+
+  - id: B10-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Fit the scaler on training rows, then apply it to both sets.
+    template: |
+      scaler = StandardScaler().fit([[g1]])
+      X_train_s = scaler.transform(X_train)
+      X_test_s = scaler.[[g2]](X_test)
+    gaps:
+      g1: {accepted: [X_train]}
+      g2: {accepted: [transform]}
+    wrong_answers:
+      - answer: {g2: fit_transform}
+        feedback: "fit_transform on the test set refits the scaler on test rows."
+      - answer: {g1: X}
+        feedback: "Fitting on all rows leaks test statistics into training."
+    hints:
+      - "Which rows does the scaler learn from?"
+      - "What must the test set not do?"
+      - "`X_train` and `transform`."
+    explanation: |
+      Fit once on training rows. Transform everything with the same fitted object.
+
+  - id: B10-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Write `fit_prep(train) -> dict[str, float]` and `apply_prep(df, params) -> pd.DataFrame` for the column `income`.
+
+      - `fit_prep` learns `median` of income, then fills missing values with it and learns `mean` and `sd` of the filled column. Training rows only.
+      - `apply_prep` fills missing income with `params["median"]` and returns a new frame with `income` scaled as `(filled - mean) / sd`. If `sd` is 0, set scaled income to 0.0.
+    starter: |
+      import pandas as pd
+
+
+      def fit_prep(train):
+          return {}
+
+
+      def apply_prep(df, params):
+          filled = df["income"].fillna(df["income"].median())
+          return df.assign(income=(filled - filled.mean()) / filled.std())
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        TRAIN = pd.DataFrame({"income": [10.0, 20.0, None, 30.0]})
+        TEST = pd.DataFrame({"income": [100.0, None]})
+      ast_rules:
+        - id: fit_typed
+          kind: requires_function
+          name: fit_prep
+          typed: true
+          docstring: true
+          message: "Give `fit_prep` type hints and a docstring."
+        - id: apply_typed
+          kind: requires_function
+          name: apply_prep
+          typed: true
+          docstring: true
+          message: "Give `apply_prep` type hints and a docstring."
+      tests:
+        - id: params
+          code: |
+            p = fit_prep(TRAIN)
+            assert p["median"] == 20.0 and p["mean"] == 20.0
+            assert round(p["sd"], 4) == 8.1650
+          message: "Learn the median, then mean and sd of income after filling with that median."
+        - id: uses_train_params
+          code: |
+            out = apply_prep(TEST, fit_prep(TRAIN))
+            assert round(out["income"].iloc[0], 4) == 9.798
+            assert out["income"].iloc[1] == 0.0
+          message: "Test rows must use the training median, mean and sd, not their own."
+        - id: zero_sd
+          code: |
+            p = fit_prep(pd.DataFrame({"income": [5.0, 5.0]}))
+            out = apply_prep(pd.DataFrame({"income": [5.0, 7.0]}), p)
+            assert out["income"].tolist() == [0.0, 0.0]
+          message: "When sd is 0, scaled income must be 0.0."
+        - id: pure
+          code: |
+            apply_prep(TEST, fit_prep(TRAIN))
+            assert TEST["income"].isna().sum() == 1
+          message: "The input frame changed. Return a new one."
+    solution: |
+      import pandas as pd
+
+
+      def fit_prep(train: pd.DataFrame) -> dict[str, float]:
+          """Learn imputation and scaling parameters for income from training rows.
+
+          Returns:
+              median, mean and sd of income after median imputation.
+          """
+          median = float(train["income"].median())
+          filled = train["income"].fillna(median)
+          return {"median": median, "mean": float(filled.mean()), "sd": float(filled.std())}
+
+
+      def apply_prep(df: pd.DataFrame, params: dict[str, float]) -> pd.DataFrame:
+          """Impute and scale income with parameters learned from training rows."""
+          filled = df["income"].fillna(params["median"])
+          if params["sd"] == 0:
+              return df.assign(income=0.0)
+          return df.assign(income=(filled - params["mean"]) / params["sd"])
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def fit_prep(train: pd.DataFrame) -> dict[str, float]:
+            """Learns."""
+            median = float(train["income"].median())
+            filled = train["income"].fillna(median)
+            return {"median": median, "mean": float(filled.mean()), "sd": float(filled.std())}
+
+
+        def apply_prep(df: pd.DataFrame, params: dict[str, float]) -> pd.DataFrame:
+            """Refits on whatever it receives."""
+            filled = df["income"].fillna(df["income"].median())
+            sd = filled.std()
+            if sd == 0:
+                return df.assign(income=0.0)
+            return df.assign(income=(filled - filled.mean()) / sd)
+      - |
+        import pandas as pd
+
+
+        def fit_prep(train: pd.DataFrame) -> dict[str, float]:
+            """Learns."""
+            median = float(train["income"].median())
+            filled = train["income"].fillna(median)
+            return {"median": median, "mean": float(filled.mean()), "sd": float(filled.std())}
+
+
+        def apply_prep(df: pd.DataFrame, params: dict[str, float]) -> pd.DataFrame:
+            """No zero guard."""
+            filled = df["income"].fillna(params["median"])
+            return df.assign(income=(filled - params["mean"]) / params["sd"])
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def fit_prep(train: pd.DataFrame) -> dict[str, float]:
+              """Learns."""
+              median = float(train["income"].median())
+              filled = train["income"].fillna(median)
+              return {"median": median, "mean": float(filled.mean()), "sd": float(filled.std())}
+
+
+          def apply_prep(df: pd.DataFrame, params: dict[str, float]) -> pd.DataFrame:
+              """Refits on whatever it receives."""
+              filled = df["income"].fillna(df["income"].median())
+              sd = filled.std()
+              if sd == 0:
+                  return df.assign(income=0.0)
+              return df.assign(income=(filled - filled.mean()) / sd)
+        triggers: uses_train_params
+    hints:
+      - "fit_prep: median first, then fill, then mean and std."
+      - "apply_prep reads only from params."
+      - "Guard `params[\"sd\"] == 0`."
+    explanation: |
+      All learning sits in `fit_prep`. `apply_prep` is a pure function of the data and the learned parameters, so test rows can never influence them.
+
+  - id: B10-L2-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [pandas]
+    prompt: |
+      Target encoding replaces each region with its churn rate. The model's test AUC is far above its production AUC. Tap the line that leaks, and fix the function so the rates come from training rows only.
+    code: |
+      import pandas as pd
+
+
+      def encode_region(train: pd.DataFrame, test: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+          """Replace region with its churn rate."""
+          both = pd.concat([train, test])
+          rates = both.groupby("region")["churned"].mean()
+          return train.assign(region=train["region"].map(rates)), test.assign(region=test["region"].map(rates))
+    bug_lines: [6, 7]
+    fix_checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        TRAIN = pd.DataFrame({"region": ["n", "n", "s", "s"], "churned": [1, 0, 0, 0]})
+        TEST = pd.DataFrame({"region": ["n", "s", "e"], "churned": [1, 1, 1]})
+      tests:
+        - id: train_only
+          code: |
+            tr, te = encode_region(TRAIN, TEST)
+            assert tr["region"].tolist() == [0.5, 0.5, 0.0, 0.0]
+            assert te["region"].tolist()[:2] == [0.5, 0.0]
+          message: "Rates must come from training rows only: n = 0.5, s = 0.0."
+        - id: unseen
+          code: |
+            tr, te = encode_region(TRAIN, TEST)
+            assert te["region"].tolist()[2] == 0.25
+          message: "A region not seen in training must get the overall training churn rate (0.25)."
+    fix_solution: |
+      import pandas as pd
+
+
+      def encode_region(train: pd.DataFrame, test: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+          """Replace region with its training churn rate. Unseen regions get the training mean."""
+          rates = train.groupby("region")["churned"].mean()
+          prior = float(train["churned"].mean())
+          return (
+              train.assign(region=train["region"].map(rates)),
+              test.assign(region=test["region"].map(rates).fillna(prior)),
+          )
+    wrong_answers:
+      - lines: [8]
+        feedback: "Mapping both sets with one table is right. The table was built from test labels."
+    hints:
+      - "Which rows does `both` contain?"
+      - "Whose labels feed the rates?"
+      - "Group the training rows only, and give unseen regions the training mean."
+    explanation: |
+      Concatenating before grouping puts test labels into the encoding. Learn rates from training rows, and fall back to the training mean for regions the training data never saw. Inside training, cross-fitted encodings reduce the remaining leak, as scikit-learn's TargetEncoder does.
+
+recap:
+  - front: "Train/test contamination"
+    back: "A learning step saw test rows: imputation, scaling, encoding, selection."
+  - front: "Selection on all rows, noise data"
+    back: "CV accuracy 0.85. Inside the folds: 0.48. The first number is a leak."
+  - front: "The manual rule"
+    back: "Split first, fit on train, apply the fitted parameters to train and test."
+  - front: "Safe before the split"
+    back: "Steps that learn nothing from the rows: fixed recodes, unit conversions, parsing."
+
+claims:
+  - claim: "SelectKBest(k=20) on all rows of 100 x 5,000 noise gives 0.85 CV accuracy; inside a Pipeline, 0.48."
+    status: verified
+    source: "Run on scikit-learn 1.8.0 and 1.9.1 with NumPy 2.4.6 in this repository (seed 0)."
+  - claim: "scikit-learn provides TargetEncoder with internal cross fitting."
+    status: verified
+    source: "scikit-learn 1.8 API reference; sklearn.preprocessing.TargetEncoder imported in this repository."

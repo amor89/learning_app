@@ -1,0 +1,373 @@
+id: B11-L2
+title: Pipeline and ColumnTransformer
+
+concept: |
+  Lesson B10-L2 fitted preprocessing on training rows by hand. scikit-learn's **`Pipeline`** does it for you, every time, including inside each cross-validation fold. Examples use scikit-learn 1.8.
+
+  A `Pipeline` chains steps. Calling `fit` fits each step on the training rows and passes its output to the next. Calling `predict` runs the fitted steps on new rows **without refitting**. Cross-validation, grid search and `cross_val_score` all refit the whole pipeline per fold, so no fold's test rows leak into its preprocessing.
+
+  A **`ColumnTransformer`** applies different preprocessing to different columns:
+
+  ```python
+  prep = ColumnTransformer([
+      ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()), NUMERIC),
+      ("cat", make_pipeline(SimpleImputer(strategy="most_frequent"),
+                            OneHotEncoder(handle_unknown="ignore")), CATEGORICAL),
+  ])
+  model = Pipeline([("prep", prep), ("clf", LogisticRegression(max_iter=1000))])
+  ```
+
+  Three defaults to know:
+
+  - `OneHotEncoder(handle_unknown="error")` is the default. A region that did not appear in training raises `ValueError` at prediction time. Set `handle_unknown="ignore"` to encode it as all zeros.
+  - `ColumnTransformer(remainder="drop")` is the default. Columns you do not list are **silently dropped**. List every column you mean to use, or set `remainder="passthrough"` on purpose.
+  - Output feature names come from `get_feature_names_out()`, prefixed with the step name: `num__age`, `cat__region_n`.
+
+  Keep the column lists in config (lesson A1-L3), and have one function build the pipeline. The same fitted object is what you save, test and deploy, so preprocessing in production is exactly what was validated.
+
+why_it_matters: |
+  A lead-scoring model was trained in a notebook. Preprocessing ran in a separate cell: median imputation and scaling by hand. The deployment team rewrote the preprocessing from the notebook for production and imputed with the **mean**. Income was skewed, so the mean was 40% above the median. Scores for every lead with missing income shifted, and the sales team's call list changed without anyone noticing.
+
+  A single fitted `Pipeline`, saved and deployed as one object, leaves no second copy of the preprocessing to get wrong.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      X["age"] = X["age"].fillna(X["age"].median())
+      X = pd.get_dummies(X, columns=["region"])
+      scores = cross_val_score(LogisticRegression(), X, y, cv=5)
+    annotations:
+      - find: 'X["age"] = X["age"].fillna(X["age"].median())'
+        note: "Imputation on all rows, before CV: every fold's test rows shape the median."
+      - find: 'X = pd.get_dummies(X, columns=["region"])'
+        note: "Dummy columns depend on the data seen. A new region in production changes the columns."
+  strong:
+    code: |
+      from sklearn.compose import ColumnTransformer
+      from sklearn.impute import SimpleImputer
+      from sklearn.linear_model import LogisticRegression
+      from sklearn.pipeline import Pipeline, make_pipeline
+      from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+
+      def build_pipeline(numeric: list[str], categorical: list[str]) -> Pipeline:
+          """Preprocessing and model as one object, fitted per fold by CV."""
+          prep = ColumnTransformer(
+              [
+                  ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()), numeric),
+                  (
+                      "cat",
+                      make_pipeline(SimpleImputer(strategy="most_frequent"), OneHotEncoder(handle_unknown="ignore")),
+                      categorical,
+                  ),
+              ]
+          )
+          return Pipeline([("prep", prep), ("clf", LogisticRegression(max_iter=1000))])
+    annotations:
+      - find: 'OneHotEncoder(handle_unknown="ignore")'
+        note: "An unseen category becomes all zeros instead of an error."
+      - find: 'return Pipeline([("prep", prep), ("clf", LogisticRegression(max_iter=1000))])'
+        note: "One object to cross-validate, save and deploy."
+  takeaway: |
+    Put every learning step in one Pipeline, split columns with a ColumnTransformer, and deploy the fitted object itself.
+
+exercises:
+  - id: B11-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Why does putting a scaler inside a Pipeline prevent leakage in `cross_val_score`?
+    options:
+      - {id: a, text: "The Pipeline refits the scaler on each fold's training rows only."}
+      - {id: b, text: "Pipelines do not scale test data."}
+      - {id: c, text: "The scaler is fitted once on all rows, but faster."}
+      - {id: d, text: "Pipelines remove outliers automatically."}
+    answer: a
+    reasons:
+      - {id: r1, text: "cross_val_score clones and fits the whole pipeline per fold."}
+      - {id: r2, text: "Scalers inside pipelines have no parameters."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Test rows are scaled, with the parameters learned from that fold's training rows."
+      - answer: c
+        feedback: "Fitting once on all rows is exactly the leak the pipeline avoids."
+      - answer: d
+        feedback: "Pipelines only run the steps you put in them."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. The scaler learns mean and scale, per fold."
+    hints:
+      - "What does cross_val_score do with the estimator in each fold?"
+      - "Which rows does the scaler see when fitted?"
+      - "Only that fold's training rows."
+    explanation: |
+      Each fold gets a fresh copy of the pipeline, fitted on that fold's training rows. The test rows are only transformed.
+
+  - id: B11-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (scikit-learn 1.8)
+    code: |
+      import pandas as pd
+      from sklearn.preprocessing import OneHotEncoder
+
+      enc = OneHotEncoder().fit(pd.DataFrame({"region": ["n", "s"]}))
+      try:
+          enc.transform(pd.DataFrame({"region": ["e"]}))
+          print("encoded")
+      except ValueError:
+          print("ValueError")
+    answer: "ValueError"
+    wrong_answers:
+      - answer: "encoded"
+        feedback: "The default handle_unknown is \"error\". An unseen category raises ValueError."
+    hints:
+      - "Was region e seen in fit?"
+      - "What is the default handle_unknown?"
+      - "\"error\"."
+    explanation: |
+      The default raises on unseen categories. Use `handle_unknown="ignore"` for production inputs.
+
+  - id: B11-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Keep unlisted columns instead of dropping them, and encode unseen categories as zeros.
+    template: |
+      prep = ColumnTransformer(
+          [("cat", OneHotEncoder(handle_unknown="[[g1]]"), ["region"])],
+          remainder="[[g2]]",
+      )
+    gaps:
+      g1: {accepted: [ignore]}
+      g2: {accepted: [passthrough]}
+    wrong_answers:
+      - answer: {g2: drop}
+        feedback: "drop is the default, and it discards every unlisted column."
+    hints:
+      - "The handle_unknown value that does not raise."
+      - "The remainder value that keeps columns."
+      - "`ignore` and `passthrough`."
+    explanation: |
+      `handle_unknown="ignore"` avoids errors on new categories. `remainder="passthrough"` keeps other columns. Use it on purpose, not by accident.
+
+  - id: B11-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas, scikit-learn]
+    prompt: |
+      Write `build_pipeline(numeric, categorical) -> Pipeline` with two named steps:
+
+      - `"prep"`: a `ColumnTransformer` with `"num"` (median `SimpleImputer`, then `StandardScaler`) on `numeric`, and `"cat"` (most-frequent `SimpleImputer`, then `OneHotEncoder(handle_unknown="ignore")`) on `categorical`.
+      - `"clf"`: `LogisticRegression(max_iter=1000)`.
+    starter: |
+      from sklearn.linear_model import LogisticRegression
+      from sklearn.pipeline import Pipeline
+
+
+      def build_pipeline(numeric, categorical):
+          return Pipeline([("clf", LogisticRegression())])
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        TRAIN = pd.DataFrame({"age": [20, 30, None, 50, 60, 25], "region": ["n", "s", "n", None, "s", "n"]})
+        Y = pd.Series([0, 1, 0, 1, 1, 0])
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: build_pipeline
+          typed: true
+          docstring: true
+          message: "Give `build_pipeline` type hints and a docstring."
+      tests:
+        - id: steps
+          code: |
+            p = build_pipeline(["age"], ["region"])
+            assert list(p.named_steps) == ["prep", "clf"]
+          message: "The pipeline needs steps named prep and clf, in that order."
+        - id: fits_missing
+          code: |
+            p = build_pipeline(["age"], ["region"]).fit(TRAIN, Y)
+            imp = p.named_steps["prep"].named_transformers_["num"].steps[0][1]
+            assert list(imp.statistics_) == [30.0]
+          message: "Numeric columns need median imputation before scaling: the median of training age is 30."
+        - id: unseen
+          code: |
+            p = build_pipeline(["age"], ["region"]).fit(TRAIN, Y)
+            p.predict(pd.DataFrame({"age": [40], "region": ["e"]}))
+          message: "An unseen region must not raise. Use OneHotEncoder(handle_unknown=\"ignore\")."
+        - id: names
+          code: |
+            p = build_pipeline(["age"], ["region"]).fit(TRAIN, Y)
+            assert p.named_steps["prep"].get_feature_names_out().tolist() == ["num__age", "cat__region_n", "cat__region_s"]
+          message: "Name the ColumnTransformer parts num and cat."
+    solution: |
+      from sklearn.compose import ColumnTransformer
+      from sklearn.impute import SimpleImputer
+      from sklearn.linear_model import LogisticRegression
+      from sklearn.pipeline import Pipeline, make_pipeline
+      from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+
+      def build_pipeline(numeric: list[str], categorical: list[str]) -> Pipeline:
+          """Preprocessing and classifier as one estimator.
+
+          Args:
+              numeric: Numeric feature columns.
+              categorical: Categorical feature columns.
+
+          Returns:
+              An unfitted Pipeline with steps prep and clf.
+          """
+          prep = ColumnTransformer(
+              [
+                  ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()), numeric),
+                  (
+                      "cat",
+                      make_pipeline(SimpleImputer(strategy="most_frequent"), OneHotEncoder(handle_unknown="ignore")),
+                      categorical,
+                  ),
+              ]
+          )
+          return Pipeline([("prep", prep), ("clf", LogisticRegression(max_iter=1000))])
+    seeded_bugs:
+      - |
+        from sklearn.compose import ColumnTransformer
+        from sklearn.impute import SimpleImputer
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.pipeline import Pipeline, make_pipeline
+        from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+
+        def build_pipeline(numeric: list[str], categorical: list[str]) -> Pipeline:
+            """Default encoder: raises on unseen categories."""
+            prep = ColumnTransformer(
+                [
+                    ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()), numeric),
+                    ("cat", make_pipeline(SimpleImputer(strategy="most_frequent"), OneHotEncoder()), categorical),
+                ]
+            )
+            return Pipeline([("prep", prep), ("clf", LogisticRegression(max_iter=1000))])
+      - |
+        from sklearn.compose import ColumnTransformer
+        from sklearn.impute import SimpleImputer
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.pipeline import Pipeline, make_pipeline
+        from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+
+        def build_pipeline(numeric: list[str], categorical: list[str]) -> Pipeline:
+            """Mean imputation."""
+            prep = ColumnTransformer(
+                [
+                    ("num", make_pipeline(SimpleImputer(strategy="mean"), StandardScaler()), numeric),
+                    (
+                        "cat",
+                        make_pipeline(SimpleImputer(strategy="most_frequent"), OneHotEncoder(handle_unknown="ignore")),
+                        categorical,
+                    ),
+                ]
+            )
+            return Pipeline([("prep", prep), ("clf", LogisticRegression(max_iter=1000))])
+    wrong_answers:
+      - answer: |
+          from sklearn.compose import ColumnTransformer
+          from sklearn.impute import SimpleImputer
+          from sklearn.linear_model import LogisticRegression
+          from sklearn.pipeline import Pipeline, make_pipeline
+          from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+
+          def build_pipeline(numeric: list[str], categorical: list[str]) -> Pipeline:
+              """Default encoder: raises on unseen categories."""
+              prep = ColumnTransformer(
+                  [
+                      ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()), numeric),
+                      ("cat", make_pipeline(SimpleImputer(strategy="most_frequent"), OneHotEncoder()), categorical),
+                  ]
+              )
+              return Pipeline([("prep", prep), ("clf", LogisticRegression(max_iter=1000))])
+        triggers: unseen
+    hints:
+      - "`make_pipeline(SimpleImputer(strategy=\"median\"), StandardScaler())` for numbers."
+      - "`make_pipeline(SimpleImputer(strategy=\"most_frequent\"), OneHotEncoder(handle_unknown=\"ignore\"))` for categories."
+      - "`Pipeline([(\"prep\", prep), (\"clf\", LogisticRegression(max_iter=1000))])`."
+    explanation: |
+      One estimator holds every learned step. Cross-validation refits it per fold, and production runs exactly what was validated.
+
+  - id: B11-L2-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [pandas, scikit-learn]
+    prompt: |
+      The model ignores `tenure`, although it is the strongest predictor in exploration. Tap the line that causes it, and fix the function.
+    code: |
+      from sklearn.compose import ColumnTransformer
+      from sklearn.linear_model import LogisticRegression
+      from sklearn.pipeline import Pipeline
+      from sklearn.preprocessing import OneHotEncoder
+
+
+      def build(categorical: list[str]) -> Pipeline:
+          """Encode categorical columns and fit a classifier on every feature."""
+          prep = ColumnTransformer([("cat", OneHotEncoder(handle_unknown="ignore"), categorical)])
+          return Pipeline([("prep", prep), ("clf", LogisticRegression(max_iter=1000))])
+    bug_lines: [9]
+    fix_checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        X = pd.DataFrame({"tenure": [1, 2, 30, 40], "region": ["n", "s", "n", "s"]})
+        y = [0, 0, 1, 1]
+      tests:
+        - id: keeps_tenure
+          code: |
+            p = build(["region"]).fit(X, y)
+            names = p.named_steps["prep"].get_feature_names_out().tolist()
+            assert any(n.endswith("tenure") for n in names), names
+          message: "tenure must reach the model. Unlisted columns are dropped by default."
+    fix_solution: |
+      from sklearn.compose import ColumnTransformer
+      from sklearn.linear_model import LogisticRegression
+      from sklearn.pipeline import Pipeline
+      from sklearn.preprocessing import OneHotEncoder
+
+
+      def build(categorical: list[str]) -> Pipeline:
+          """Encode categorical columns and fit a classifier on every feature."""
+          prep = ColumnTransformer(
+              [("cat", OneHotEncoder(handle_unknown="ignore"), categorical)],
+              remainder="passthrough",
+          )
+          return Pipeline([("prep", prep), ("clf", LogisticRegression(max_iter=1000))])
+    wrong_answers:
+      - lines: [10]
+        feedback: "The classifier uses whatever prep outputs. prep never outputs tenure."
+    hints:
+      - "Which columns does the ColumnTransformer list?"
+      - "What happens to the others by default?"
+      - "remainder=\"drop\"."
+    explanation: |
+      `ColumnTransformer` drops unlisted columns by default. Pass them through on purpose, or better, list and preprocess them explicitly.
+
+recap:
+  - front: "Why Pipeline"
+    back: "Every learning step refits per CV fold, and one fitted object goes to production."
+  - front: "OneHotEncoder default for unseen categories"
+    back: "handle_unknown=\"error\": raises ValueError. Use \"ignore\" for production."
+  - front: "ColumnTransformer default for unlisted columns"
+    back: "remainder=\"drop\": silently dropped."
+  - front: "Feature names after preprocessing"
+    back: "get_feature_names_out(), prefixed with step names such as num__age."
+
+claims:
+  - claim: "In scikit-learn 1.8, OneHotEncoder defaults to handle_unknown=\"error\" and ColumnTransformer to remainder=\"drop\"."
+    status: verified
+    source: "scikit-learn 1.8 API reference; signatures checked on 1.8.0 and 1.9.1 in this repository."

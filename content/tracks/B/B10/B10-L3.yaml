@@ -1,0 +1,337 @@
+id: B10-L3
+title: Time-safe features and point-in-time joins
+
+concept: |
+  When rows have dates, every feature must be computed **as of** the row's own date, using only earlier data. Three tools in pandas 3.0 cover most cases.
+
+  **Prior-only aggregates.** "Total spend before this order" must exclude the current order. Take the running total and subtract the current value, or shift first:
+
+  ```python
+  orders = orders.sort_values(["customer", "ordered_at"])
+  prior = orders.groupby("customer")["spend"].cumsum() - orders["spend"]
+  ```
+
+  **Point-in-time joins.** To attach the latest satisfaction score **before** each prediction date, use `pd.merge_asof`. It matches each left row with the last right row whose key is at or before it, within the same `by` group. Both frames must be sorted on the key.
+
+  ```python
+  pd.merge_asof(preds.sort_values("as_of"), scores.sort_values("scored_at"),
+                left_on="as_of", right_on="scored_at", by="customer",
+                allow_exact_matches=False)
+  ```
+
+  The default `allow_exact_matches=True` also matches a score recorded **at the same timestamp** as the prediction. If that score could only be known after the prediction was made, set it to `False`. A plain `merge` on customer followed by "take the latest" silently uses scores from the future.
+
+  **Time-based splits.** Random splits put next month's rows in training and last month's in test. For anything you will use forward in time, split by date: train on data up to a cut-off, test on data after it. scikit-learn's `TimeSeriesSplit` gives expanding windows for cross-validation.
+
+  Build a small **as-of test** for every time feature: a customer with events before and after the prediction date, and an assertion that only the earlier events count. It catches most mistakes in a few lines.
+
+why_it_matters: |
+  A next-purchase model used "customer's total orders" as a feature, computed once over the full order table. For each training row, the count included orders placed after the row's date, including the very purchase the model was trying to predict. Validation AUC was 0.91. In production, where the future does not exist yet, it was 0.68.
+
+  Recomputing the count as prior orders only brought validation down to 0.70. That was the model's true performance, and the team finally had an honest number to improve.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      totals = orders.groupby("customer")["spend"].sum().rename("total_spend")
+      rows = orders.merge(totals, on="customer")
+      train, test = train_test_split(rows, test_size=0.2)
+    annotations:
+      - find: 'totals = orders.groupby("customer")["spend"].sum().rename("total_spend")'
+        note: "One total per customer across all time: every row sees its own future."
+      - find: "train, test = train_test_split(rows, test_size=0.2)"
+        note: "Random split: training rows come from after test rows."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def add_prior_spend(orders: pd.DataFrame) -> pd.DataFrame:
+          """Spend and order count before each order, per customer. Grain: one row per order."""
+          o = orders.sort_values(["customer", "ordered_at"])
+          grp = o.groupby("customer")["spend"]
+          return o.assign(
+              prior_spend=grp.cumsum() - o["spend"],
+              prior_orders=o.groupby("customer").cumcount(),
+          )
+
+
+      def time_split(df: pd.DataFrame, date_col: str, cutoff: pd.Timestamp) -> tuple[pd.DataFrame, pd.DataFrame]:
+          """Train on rows before cutoff, test on rows at or after it."""
+          before = df[date_col] < cutoff
+          return df[before], df[~before]
+    annotations:
+      - find: 'prior_spend=grp.cumsum() - o["spend"],'
+        note: "Running total minus the current order: only earlier orders count."
+      - find: 'prior_orders=o.groupby("customer").cumcount(),'
+        note: "cumcount starts at 0, so it counts earlier orders only."
+      - find: "before = df[date_col] < cutoff"
+        note: "A time split: the test set is the future, as in production."
+  takeaway: |
+    Compute every feature as of the row's date, join with merge_asof, and split by time.
+
+exercises:
+  - id: B10-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A model will score customers each month, going forward. How should you split the historical data for validation?
+    options:
+      - {id: a, text: "Random 80/20 split"}
+      - {id: b, text: "Train on months up to a cut-off, test on later months"}
+      - {id: c, text: "Test on the earliest months, train on later ones"}
+      - {id: d, text: "No split: use training accuracy"}
+    answer: b
+    reasons:
+      - {id: r1, text: "It matches production, where the model predicts a future it has not seen."}
+      - {id: r2, text: "Recent data is always more accurate."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "A random split trains on rows from after the test rows, which production never allows."
+      - answer: c
+        feedback: "Backwards in time: the model would learn from the future of its test set."
+      - answer: d
+        feedback: "Training accuracy rewards memorising and says nothing about new data."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The point is mirroring the direction of time, not data quality."
+    hints:
+      - "How will the model be used?"
+      - "Can it see the future in production?"
+      - "Then not in validation either."
+    explanation: |
+      A time split reproduces the production situation: learn from the past, predict the future.
+
+  - id: B10-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (pandas 3.0)
+    code: |
+      import pandas as pd
+
+      preds = pd.DataFrame({"customer": ["c1"], "as_of": pd.to_datetime(["2026-04-01"])})
+      scores = pd.DataFrame({
+          "customer": ["c1", "c1"],
+          "scored_at": pd.to_datetime(["2026-02-15", "2026-04-01"]),
+          "nps": [3, 9],
+      })
+      out = pd.merge_asof(preds, scores, left_on="as_of", right_on="scored_at", by="customer")
+      print(out["nps"].iloc[0])
+    answer: "9"
+    wrong_answers:
+      - answer: "3"
+        feedback: "allow_exact_matches defaults to True, so the score from the same day matches. Set it to False to exclude it."
+    hints:
+      - "Is there a score on the prediction date itself?"
+      - "What is the default of allow_exact_matches?"
+      - "True."
+    explanation: |
+      The same-day score matches by default. If it was recorded after the prediction was made, it leaks. Use `allow_exact_matches=False`.
+
+  - id: B10-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Attach the latest earlier score to each prediction row, excluding same-timestamp scores.
+    template: |
+      pd.[[g1]](preds, scores, left_on="as_of", right_on="scored_at", by="customer", allow_exact_matches=[[g2]])
+    gaps:
+      g1: {accepted: [merge_asof]}
+      g2: {accepted: ["False"]}
+    wrong_answers:
+      - answer: {g1: merge}
+        feedback: "A plain merge joins every score for the customer, past and future."
+    hints:
+      - "The pandas join for 'last value before'."
+      - "Exclude exact timestamp matches."
+      - "`merge_asof` and `False`."
+    explanation: |
+      `merge_asof` takes the last earlier match per `by` group. `allow_exact_matches=False` makes "earlier" strict.
+
+  - id: B10-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Write `add_prior_spend(orders) -> pd.DataFrame`. `orders` has `customer`, `ordered_at` and `spend`, in any row order. Return the orders sorted by `customer` then `ordered_at`, with two new columns:
+
+      - `prior_spend`: total spend by the same customer on **earlier** orders (0 for the first).
+      - `prior_orders`: number of earlier orders by the same customer (0 for the first).
+    starter: |
+      import pandas as pd
+
+
+      def add_prior_spend(orders):
+          totals = orders.groupby("customer")["spend"].transform("sum")
+          return orders.assign(prior_spend=totals)
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        ORDERS = pd.DataFrame({
+            "customer": ["a", "b", "a", "a"],
+            "ordered_at": pd.to_datetime(["2026-03-01", "2026-01-05", "2026-01-01", "2026-02-01"]),
+            "spend": [5.0, 7.0, 10.0, 20.0],
+        })
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: add_prior_spend
+          typed: true
+          docstring: true
+          message: "Give `add_prior_spend` type hints and a docstring."
+      tests:
+        - id: prior_spend
+          code: |
+            out = add_prior_spend(ORDERS)
+            assert out["prior_spend"].tolist() == [0.0, 10.0, 30.0, 0.0]
+          message: "prior_spend must sum earlier orders only, per customer, in date order."
+        - id: prior_orders
+          code: |
+            out = add_prior_spend(ORDERS)
+            assert out["prior_orders"].tolist() == [0, 1, 2, 0]
+          message: "prior_orders must count earlier orders only, starting at 0."
+        - id: pure
+          code: |
+            add_prior_spend(ORDERS)
+            assert ORDERS["customer"].tolist() == ["a", "b", "a", "a"]
+            assert "prior_spend" not in ORDERS.columns
+          message: "The input frame changed. Return a new one."
+    solution: |
+      import pandas as pd
+
+
+      def add_prior_spend(orders: pd.DataFrame) -> pd.DataFrame:
+          """Spend and order count before each order, per customer.
+
+          Args:
+              orders: Columns customer, ordered_at, spend.
+
+          Returns:
+              Orders sorted by customer and date, with prior_spend and prior_orders.
+          """
+          o = orders.sort_values(["customer", "ordered_at"])
+          return o.assign(
+              prior_spend=o.groupby("customer")["spend"].cumsum() - o["spend"],
+              prior_orders=o.groupby("customer").cumcount(),
+          )
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def add_prior_spend(orders: pd.DataFrame) -> pd.DataFrame:
+            """Includes the current order."""
+            o = orders.sort_values(["customer", "ordered_at"])
+            return o.assign(
+                prior_spend=o.groupby("customer")["spend"].cumsum(),
+                prior_orders=o.groupby("customer").cumcount(),
+            )
+      - |
+        import pandas as pd
+
+
+        def add_prior_spend(orders: pd.DataFrame) -> pd.DataFrame:
+            """Does not sort by date."""
+            o = orders.sort_values("customer", kind="stable")
+            return o.assign(
+                prior_spend=o.groupby("customer")["spend"].cumsum() - o["spend"],
+                prior_orders=o.groupby("customer").cumcount(),
+            )
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def add_prior_spend(orders: pd.DataFrame) -> pd.DataFrame:
+              """Includes the current order."""
+              o = orders.sort_values(["customer", "ordered_at"])
+              return o.assign(
+                  prior_spend=o.groupby("customer")["spend"].cumsum(),
+                  prior_orders=o.groupby("customer").cumcount(),
+              )
+        triggers: prior_spend
+    hints:
+      - "Sort by customer and date first."
+      - "Running total with groupby(...).cumsum(), minus the current spend."
+      - "groupby(...).cumcount() counts earlier rows from 0."
+    explanation: |
+      Sorting fixes the time order. Subtracting the current spend and counting from 0 make both features strictly prior.
+
+  - id: B10-L3-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [pandas]
+    prompt: |
+      For each prediction, the feature should be the customer's most recent NPS score strictly **before** `as_of`. Validation looks too good. Tap the line that leaks and fix it.
+    code: |
+      import pandas as pd
+
+
+      def latest_nps(preds: pd.DataFrame, scores: pd.DataFrame) -> pd.DataFrame:
+          """Most recent NPS strictly before each prediction date."""
+          joined = preds.merge(scores, on="customer")
+          joined = joined.sort_values("scored_at").groupby(["customer", "as_of"]).tail(1)
+          return joined[["customer", "as_of", "nps"]].sort_values(["customer", "as_of"]).reset_index(drop=True)
+    bug_lines: [6, 7]
+    fix_checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        PREDS = pd.DataFrame({"customer": ["c1", "c1"], "as_of": pd.to_datetime(["2026-03-01", "2026-04-01"])})
+        SCORES = pd.DataFrame({
+            "customer": ["c1", "c1", "c1"],
+            "scored_at": pd.to_datetime(["2026-02-15", "2026-04-01", "2026-05-01"]),
+            "nps": [3, 9, 10],
+        })
+      tests:
+        - id: prior_only
+          code: |
+            out = latest_nps(PREDS, SCORES)
+            assert out["nps"].tolist() == [3, 3]
+          message: "Only scores strictly before as_of may be used: 3 for both dates."
+    fix_solution: |
+      import pandas as pd
+
+
+      def latest_nps(preds: pd.DataFrame, scores: pd.DataFrame) -> pd.DataFrame:
+          """Most recent NPS strictly before each prediction date."""
+          joined = pd.merge_asof(
+              preds.sort_values("as_of"),
+              scores.sort_values("scored_at"),
+              left_on="as_of",
+              right_on="scored_at",
+              by="customer",
+              allow_exact_matches=False,
+          )
+          return joined[["customer", "as_of", "nps"]].sort_values(["customer", "as_of"]).reset_index(drop=True)
+    wrong_answers:
+      - lines: [8]
+        feedback: "Selecting and sorting columns is fine. The rows chosen before it include future scores."
+    hints:
+      - "Does the merge filter scores by date?"
+      - "Which score does tail(1) pick?"
+      - "The latest overall, even from the future. Use merge_asof."
+    explanation: |
+      A merge on customer followed by "latest" picks scores from after the prediction date. `merge_asof` with `allow_exact_matches=False` picks the last strictly earlier score.
+
+recap:
+  - front: "Prior-only running total"
+    back: "groupby(key)[col].cumsum() - col, after sorting by key and date."
+  - front: "Point-in-time join in pandas"
+    back: "pd.merge_asof(left, right, left_on, right_on, by=..., allow_exact_matches=False), both sorted."
+  - front: "merge_asof default for equal timestamps"
+    back: "allow_exact_matches=True: same-time rows match. Set False when they would not be known yet."
+  - front: "Split for forward-looking models"
+    back: "By time: train before a cut-off, test after. TimeSeriesSplit for CV."
+
+claims:
+  - claim: "pd.merge_asof defaults to direction=\"backward\" and allow_exact_matches=True."
+    status: verified
+    source: "pandas API reference; run on pandas 3.0.6 in this repository."

@@ -1,0 +1,311 @@
+id: B11-L1
+title: Train, validation and test, split by the right unit
+
+concept: |
+  Three sets, three jobs:
+
+  - **Training** rows fit the model.
+  - **Validation** rows, or cross-validation folds within training, choose between models and settings.
+  - **Test** rows measure the final choice, **once**. Every extra look at the test set turns it into a second validation set, and its score stops being an honest estimate.
+
+  Split so the test set looks like the data the model will meet.
+
+  **Stratify** on the target when a class is rare. `train_test_split(X, y, stratify=y)` keeps a 3% positive rate at 3% in both sets. Without it, a small test set can end up with very few positives.
+
+  **Group** when rows are not independent. A panel respondent answering five waves appears in five rows. A random row split puts some of their waves in training and others in test. The model then recognises the **person** instead of learning the pattern, and the test score measures memory.
+
+  A demonstration from this course's build (scikit-learn 1.8, random forest): 200 simulated respondents, 5 waves each, a label that depends only on the person and is unrelated to the features. Random 5-fold CV reported accuracy **0.995**. `GroupKFold` by respondent reported **0.468**: chance, which is the truth.
+
+  ```python
+  from sklearn.model_selection import GroupKFold, GroupShuffleSplit
+
+  splitter = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=7)
+  train_idx, test_idx = next(splitter.split(df, groups=df["respondent_id"]))
+  ```
+
+  The group is whatever repeats: respondent, household, store, patient, device. If it will be **new** in production, keep it out of training in validation too. For time-ordered use, split by time as well (lesson B10-L3).
+
+  Record the split: the seed, the group column, and the resulting row counts, in the run manifest (lesson B6-L2).
+
+why_it_matters: |
+  A model predicting survey drop-out was validated with a random row split over a panel dataset. It scored AUC 0.93. Deployed on a newly recruited panel, where every respondent was new, it scored 0.61. Each respondent's answering style had let the model match test rows to the same person's training rows. A group split would have shown 0.61 before deployment.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      train, test = train_test_split(panel, test_size=0.2)
+      for params in grid:
+          score = evaluate(fit(train, params), test)
+    annotations:
+      - find: "train, test = train_test_split(panel, test_size=0.2)"
+        note: "Random rows: the same respondent sits on both sides."
+      - find: "score = evaluate(fit(train, params), test)"
+        note: "Tuning on the test set: its score is no longer an estimate of anything."
+  strong:
+    code: |
+      import pandas as pd
+      from sklearn.model_selection import GroupShuffleSplit
+
+
+      def split_by_group(
+          df: pd.DataFrame, group_col: str, test_size: float, seed: int
+      ) -> tuple[pd.DataFrame, pd.DataFrame]:
+          """Split so that no group appears in both train and test."""
+          splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
+          train_idx, test_idx = next(splitter.split(df, groups=df[group_col]))
+          return df.iloc[train_idx], df.iloc[test_idx]
+    annotations:
+      - find: "splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)"
+        note: "test_size is the share of groups, not rows. The seed makes the split reproducible."
+      - find: "train_idx, test_idx = next(splitter.split(df, groups=df[group_col]))"
+        note: "Every row of a respondent lands on the same side."
+  takeaway: |
+    Tune on validation, measure once on test, and split by the unit that will be new in production.
+
+exercises:
+  - id: B11-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You tried 40 model settings and picked the one with the best test score. What is that test score now?
+    options:
+      - {id: a, text: "An unbiased estimate of performance on new data."}
+      - {id: b, text: "An optimistic estimate, because the test set chose the model."}
+      - {id: c, text: "A pessimistic estimate."}
+      - {id: d, text: "The same as the training score."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Picking the best of 40 on the same data selects for luck on that data."}
+      - {id: r2, text: "Test sets always overstate performance."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "It would be, if the test set were used once. Selection on it adds optimism."
+      - answer: c
+        feedback: "Selection favours settings that got lucky on this data, so the bias is upwards."
+      - answer: d
+        feedback: "Test rows were not used for fitting, so it differs from the training score."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Used once, a test set is unbiased."
+    hints:
+      - "What did the test set do here?"
+      - "Is the best of 40 lucky?"
+      - "Use validation for choosing."
+    explanation: |
+      Choose with validation or CV. Keep the test set for one final measurement.
+
+  - id: B11-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (scikit-learn 1.8)
+    code: |
+      import pandas as pd
+      from sklearn.model_selection import GroupShuffleSplit
+
+      df = pd.DataFrame({"rid": ["a", "a", "b", "b", "c", "c", "d", "d"], "x": range(8)})
+      splitter = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=0)
+      train_idx, test_idx = next(splitter.split(df, groups=df["rid"]))
+      print(len(test_idx), df.iloc[test_idx]["rid"].nunique())
+    answer: "2 1"
+    wrong_answers:
+      - answer: "2 2"
+        feedback: "A group split moves whole groups. 25% of 4 respondents is 1 respondent, with both of their rows."
+      - answer: "1 1"
+        feedback: "The test respondent brings every row: 2 rows."
+    hints:
+      - "test_size counts groups, not rows."
+      - "How many respondents is 25% of 4?"
+      - "Each has 2 rows."
+    explanation: |
+      One of four respondents goes to test, with both rows. No respondent is split across sets.
+
+  - id: B11-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Keep the rare positive class at the same rate in train and test.
+    template: |
+      X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, [[g1]]=y, [[g2]]=42)
+    gaps:
+      g1: {accepted: [stratify]}
+      g2: {accepted: [random_state]}
+    wrong_answers:
+      - answer: {g1: shuffle}
+        feedback: "shuffle controls whether rows are shuffled. stratify keeps class shares."
+    hints:
+      - "The argument that preserves class proportions."
+      - "The argument that fixes the seed."
+      - "`stratify` and `random_state`."
+    explanation: |
+      `stratify=y` preserves the class balance. A fixed `random_state` makes the split repeatable.
+
+  - id: B11-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas, scikit-learn]
+    prompt: |
+      Write `split_by_group(df, group_col, test_size, seed) -> tuple[pd.DataFrame, pd.DataFrame]` with `GroupShuffleSplit`, so that no value of `group_col` appears in both returned frames. The same seed must give the same split.
+    starter: |
+      import pandas as pd
+      from sklearn.model_selection import train_test_split
+
+
+      def split_by_group(df, group_col, test_size, seed):
+          return train_test_split(df, test_size=test_size, random_state=seed)
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        DF = pd.DataFrame({"rid": [f"r{i // 5}" for i in range(100)], "x": range(100)})
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: split_by_group
+          typed: true
+          docstring: true
+          message: "Give `split_by_group` type hints and a docstring."
+        - id: seeded
+          kind: requires_pattern
+          pattern: "random_state\\s*=\\s*seed"
+          message: "Pass random_state=seed so the split is reproducible."
+      tests:
+        - id: disjoint
+          code: |
+            tr, te = split_by_group(DF, "rid", 0.2, 3)
+            assert set(tr["rid"]).isdisjoint(set(te["rid"]))
+          message: "No respondent may appear in both train and test."
+        - id: complete
+          code: |
+            tr, te = split_by_group(DF, "rid", 0.2, 3)
+            assert len(tr) + len(te) == 100 and te["rid"].nunique() == 4
+          message: "Every row must land in one set, and 20% of the 20 respondents go to test."
+        - id: reproducible
+          code: |
+            a = split_by_group(DF, "rid", 0.2, 3)[1]["x"].tolist()
+            b = split_by_group(DF, "rid", 0.2, 3)[1]["x"].tolist()
+            assert a == b
+          message: "The same seed must give the same split."
+    solution: |
+      import pandas as pd
+      from sklearn.model_selection import GroupShuffleSplit
+
+
+      def split_by_group(
+          df: pd.DataFrame, group_col: str, test_size: float, seed: int
+      ) -> tuple[pd.DataFrame, pd.DataFrame]:
+          """Split rows so no group appears in both train and test.
+
+          Args:
+              df: Rows to split.
+              group_col: Column identifying the repeated unit, such as respondent.
+              test_size: Share of groups in the test set.
+              seed: Random seed for reproducibility.
+
+          Returns:
+              (train, test).
+          """
+          splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
+          train_idx, test_idx = next(splitter.split(df, groups=df[group_col]))
+          return df.iloc[train_idx], df.iloc[test_idx]
+    seeded_bugs:
+      - |
+        import pandas as pd
+        from sklearn.model_selection import train_test_split
+
+
+        def split_by_group(
+            df: pd.DataFrame, group_col: str, test_size: float, seed: int
+        ) -> tuple[pd.DataFrame, pd.DataFrame]:
+            """Row split."""
+            train, test = train_test_split(df, test_size=test_size, random_state=seed)
+            return train, test
+      - |
+        import pandas as pd
+        from sklearn.model_selection import GroupShuffleSplit
+
+
+        def split_by_group(
+            df: pd.DataFrame, group_col: str, test_size: float, seed: int
+        ) -> tuple[pd.DataFrame, pd.DataFrame]:
+            """No seed."""
+            splitter = GroupShuffleSplit(n_splits=1, test_size=test_size)
+            train_idx, test_idx = next(splitter.split(df, groups=df[group_col]))
+            return df.iloc[train_idx], df.iloc[test_idx]
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+          from sklearn.model_selection import train_test_split
+
+
+          def split_by_group(
+              df: pd.DataFrame, group_col: str, test_size: float, seed: int
+          ) -> tuple[pd.DataFrame, pd.DataFrame]:
+              """Row split."""
+              train, test = train_test_split(df, test_size=test_size, random_state=seed)
+              return train, test
+        triggers: disjoint
+    hints:
+      - "`GroupShuffleSplit(n_splits=1, test_size=..., random_state=seed)`."
+      - "`next(splitter.split(df, groups=df[group_col]))` gives index arrays."
+      - "Select with `df.iloc[...]`."
+    explanation: |
+      Group splitting keeps each respondent on one side, so validation measures performance on new people, as production will.
+
+  - id: B11-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Choose the split for each project.
+    slots:
+      - id: panel
+        label: "Predict drop-out for newly recruited panel members; data has 6 waves per member"
+        options: &splits
+          - {id: group, text: "Group split by member"}
+          - {id: time, text: "Time split"}
+          - {id: stratified, text: "Stratified random split"}
+        answer: group
+      - id: fraud
+        label: "Fraud flag at 0.8% prevalence, one row per independent transaction, no time drift"
+        options: *splits
+        answer: stratified
+      - id: forecast
+        label: "Forecast next month's store sales"
+        options: *splits
+        answer: time
+    model_answer: |
+      - Panel members will be new in production: group by member.
+      - Independent rows with a rare class: stratify on the target.
+      - Forecasting: train on the past, test on later months.
+    wrong_answers:
+      - answer: {panel: stratified}
+        feedback: "Members' waves would land on both sides. The model would recognise people, not patterns."
+      - answer: {fraud: group}
+        feedback: "Rows are independent here, so grouping adds nothing. The risk is a test set with too few frauds."
+      - answer: {forecast: stratified}
+        feedback: "A random split lets the model learn from months after the ones it is tested on."
+    hints:
+      - "What will be new in production?"
+      - "Are rows independent?"
+      - "Is time part of the use?"
+    explanation: |
+      The split mirrors production: new people, rare classes kept, or the future.
+
+recap:
+  - front: "Roles of train, validation and test"
+    back: "Fit, choose, measure once."
+  - front: "Rows repeat per respondent"
+    back: "Split by group (GroupKFold, GroupShuffleSplit), or the model learns people."
+  - front: "Group leakage demonstration"
+    back: "Random CV 0.995, GroupKFold 0.468 on a label unrelated to the features."
+  - front: "Rare class"
+    back: "stratify=y keeps the class share in each set."
+
+claims:
+  - claim: "Random 5-fold CV gave 0.995 and GroupKFold gave 0.468 on 200 simulated respondents with 5 waves each and a person-level random label."
+    status: verified
+    source: "Run with scikit-learn 1.8.0 and 1.9.1, RandomForestClassifier(n_estimators=100, random_state=0), in this repository."

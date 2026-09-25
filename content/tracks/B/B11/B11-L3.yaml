@@ -1,0 +1,322 @@
+id: B11-L3
+title: Cross-validation and honest hyperparameter search
+
+concept: |
+  **Cross-validation** (CV) splits the training data into k folds, trains on k - 1 and scores on the remaining one, k times. Report the **mean and the spread** across folds. A mean AUC of 0.81 with fold scores from 0.70 to 0.90 is a less certain result than 0.81 with scores from 0.79 to 0.83.
+
+  `cross_validate` (scikit-learn 1.8) returns several metrics in one pass:
+
+  ```python
+  res = cross_validate(pipe, X, y, cv=StratifiedKFold(5, shuffle=True, random_state=7),
+                       scoring=["roc_auc", "average_precision"])
+  res["test_roc_auc"].mean(), res["test_roc_auc"].std()
+  ```
+
+  **Hyperparameter search.** `GridSearchCV` or `RandomizedSearchCV` tries settings and keeps the best by CV score. Inside a pipeline, name parameters as `step__param`: `{"clf__C": [0.01, 0.1, 1, 10]}`.
+
+  The catch: `best_score_` is the **best of many tries** on the same folds. It is optimistic, for the same reason as picking a model on the test set (lesson B11-L1). A simulation in this course's build: 20 datasets of pure noise, a k-nearest-neighbours grid of 60 settings. The mean `best_score_` was **0.598** accuracy. The honest estimate was **0.515**.
+
+  Get the honest estimate with **nested CV**: an outer CV loop scores the **whole search** as if it were one model.
+
+  ```python
+  search = GridSearchCV(pipe, grid, cv=inner, scoring="roc_auc")
+  honest = cross_val_score(search, X, y, cv=outer, scoring="roc_auc")
+  ```
+
+  Or keep a held-out test set that the search never sees, and score the refitted best model on it once.
+
+  Practical rules:
+
+  - Fix `random_state` in every splitter, so reruns compare like with like.
+  - Search on a log scale for regularisation strengths: 0.001, 0.01, 0.1, 1, 10.
+  - Prefer `RandomizedSearchCV` when the grid has more than about 50 combinations.
+  - Report the chosen settings, the honest score and the fold spread in the run log.
+
+why_it_matters: |
+  A team compared 300 configurations of a gradient-boosted model and reported the top `best_score_`, AUC 0.842, to the client as expected performance. The model went live and scored 0.80 over the first quarter. Nothing had drifted. The 0.842 had been the luckiest of 300 draws on the same five folds. A nested CV estimate of 0.80 would have set the right expectation from the start.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      search = GridSearchCV(pipe, {"clf__C": [0.001, 0.01, 0.1, 1, 10, 100]}, cv=5)
+      search.fit(X, y)
+      print("expected AUC", search.best_score_)
+    annotations:
+      - find: 'search = GridSearchCV(pipe, {"clf__C": [0.001, 0.01, 0.1, 1, 10, 100]}, cv=5)'
+        note: "Default scoring is accuracy for classifiers, not the AUC being reported."
+      - find: 'print("expected AUC", search.best_score_)'
+        note: "The best of several tries on the same folds: optimistic, and the wrong metric."
+  strong:
+    code: |
+      import numpy as np
+      from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score
+      from sklearn.pipeline import Pipeline
+
+
+      def nested_cv_auc(pipe: Pipeline, X: np.ndarray, y: np.ndarray, grid: dict[str, list[float]], seed: int) -> float:
+          """Honest AUC of the whole search: the search is refitted inside each outer fold."""
+          inner = StratifiedKFold(n_splits=3, shuffle=True, random_state=seed)
+          outer = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed + 1)
+          search = GridSearchCV(pipe, grid, cv=inner, scoring="roc_auc")
+          return float(cross_val_score(search, X, y, cv=outer, scoring="roc_auc").mean())
+    annotations:
+      - find: 'search = GridSearchCV(pipe, grid, cv=inner, scoring="roc_auc")'
+        note: "The metric you will report is the metric you tune on."
+      - find: 'return float(cross_val_score(search, X, y, cv=outer, scoring="roc_auc").mean())'
+        note: "Outer folds never take part in choosing the settings."
+  takeaway: |
+    Report CV mean and spread, tune with the reported metric, and estimate performance with nested CV or an untouched test set.
+
+exercises:
+  - id: B11-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      After `GridSearchCV` over 80 settings, what is `best_score_`?
+    options:
+      - {id: a, text: "An unbiased estimate of performance on new data"}
+      - {id: b, text: "The mean CV score of the best setting, optimistic because it was selected as the best"}
+      - {id: c, text: "The test-set score"}
+      - {id: d, text: "The training score of the refitted model"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Selecting the maximum of many noisy scores favours settings that were lucky on these folds."}
+      - {id: r2, text: "GridSearchCV always overfits."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "It is the maximum over 80 candidates on the same folds, so it carries selection optimism."
+      - answer: c
+        feedback: "GridSearchCV does not use a separate test set."
+      - answer: d
+        feedback: "It is a CV score on held-out folds, not a training score."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The search is fine. Its best score needs an outer check."
+    hints:
+      - "How was the best chosen?"
+      - "On which data was it scored?"
+      - "Selection on the same folds."
+    explanation: |
+      `best_score_` is the winner's CV score. Use nested CV or an untouched test set for the estimate you report.
+
+  - id: B11-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (scikit-learn 1.8)
+    code: |
+      from sklearn.linear_model import LogisticRegression
+      from sklearn.pipeline import make_pipeline
+      from sklearn.preprocessing import StandardScaler
+
+      pipe = make_pipeline(StandardScaler(), LogisticRegression())
+      print("clf__C" in pipe.get_params(), "logisticregression__C" in pipe.get_params())
+    answer: "False True"
+    wrong_answers:
+      - answer: "True True"
+        feedback: "make_pipeline names steps after their class in lower case. There is no step called clf."
+      - answer: "True False"
+        feedback: "Step names come from make_pipeline: logisticregression, so the key is logisticregression__C."
+    hints:
+      - "How does make_pipeline name its steps?"
+      - "Lower-case class names."
+      - "Parameter keys are step__param."
+    explanation: |
+      `make_pipeline` names steps `standardscaler` and `logisticregression`. Use `Pipeline([("clf", ...)])` when you want short, stable names for your grids.
+
+  - id: B11-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Tune C of the step named clf, scoring by ROC AUC.
+    template: |
+      search = GridSearchCV(pipe, {"[[g1]]": [0.01, 0.1, 1, 10]}, cv=inner, [[g2]]="roc_auc")
+    gaps:
+      g1: {accepted: [clf__C]}
+      g2: {accepted: [scoring]}
+    wrong_answers:
+      - answer: {g1: C}
+        feedback: "Inside a Pipeline, prefix the parameter with the step name and two underscores: clf__C."
+      - answer: {g1: clf_C}
+        feedback: "Two underscores separate the step name from the parameter: clf__C."
+    hints:
+      - "step__param."
+      - "The argument for the metric."
+      - "`clf__C` and `scoring`."
+    explanation: |
+      Pipeline parameters are addressed as `step__param`. `scoring` sets the metric the search optimises.
+
+  - id: B11-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy, scikit-learn]
+    prompt: |
+      Write `nested_cv_auc(X, y, c_values, seed) -> float`. Build a pipeline with steps `"scale"` (`StandardScaler`) and `"clf"` (`LogisticRegression(max_iter=1000)`). Wrap it in `GridSearchCV` over `{"clf__C": c_values}` with an inner `StratifiedKFold(n_splits=3, shuffle=True, random_state=seed)` and `scoring="roc_auc"`. Return the mean of `cross_val_score` of the search with an outer `StratifiedKFold(n_splits=5, shuffle=True, random_state=seed + 1)`, also scored by ROC AUC.
+    starter: |
+      from sklearn.linear_model import LogisticRegression
+      from sklearn.model_selection import GridSearchCV
+
+
+      def nested_cv_auc(X, y, c_values, seed):
+          search = GridSearchCV(LogisticRegression(), {"C": c_values}, cv=5).fit(X, y)
+          return search.best_score_
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+        _rng = np.random.default_rng(0)
+        X = _rng.normal(size=(120, 5))
+        y = (X[:, 0] + _rng.normal(scale=0.5, size=120) > 0).astype(int)
+        XN = _rng.normal(size=(120, 5))
+        YN = _rng.integers(0, 2, 120)
+        C = [0.01, 0.1, 1.0, 10.0]
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: nested_cv_auc
+          typed: true
+          docstring: true
+          message: "Give `nested_cv_auc` type hints and a docstring."
+        - id: no_best_score
+          kind: forbids_pattern
+          pattern: "best_score_"
+          message: "best_score_ is the optimistic number. Score the whole search with an outer CV."
+      tests:
+        - id: signal
+          code: |
+            assert round(nested_cv_auc(X, y, C, 3), 4) == 0.8702
+          message: "Use the inner and outer StratifiedKFold settings from the brief, scored by roc_auc."
+        - id: noise
+          code: |
+            assert round(nested_cv_auc(XN, YN, C, 3), 4) == 0.5103
+          message: "On noise the honest estimate must sit near 0.5 (0.5103 with these settings)."
+    solution: |
+      import numpy as np
+      from sklearn.linear_model import LogisticRegression
+      from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score
+      from sklearn.pipeline import Pipeline
+      from sklearn.preprocessing import StandardScaler
+
+
+      def nested_cv_auc(X: np.ndarray, y: np.ndarray, c_values: list[float], seed: int) -> float:
+          """Nested CV estimate of ROC AUC for a tuned logistic regression.
+
+          Args:
+              X: Features.
+              y: Binary target.
+              c_values: Candidate regularisation strengths.
+              seed: Base seed for the inner and outer splitters.
+
+          Returns:
+              Mean outer-fold ROC AUC of the whole search.
+          """
+          pipe = Pipeline([("scale", StandardScaler()), ("clf", LogisticRegression(max_iter=1000))])
+          inner = StratifiedKFold(n_splits=3, shuffle=True, random_state=seed)
+          outer = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed + 1)
+          search = GridSearchCV(pipe, {"clf__C": c_values}, cv=inner, scoring="roc_auc")
+          return float(cross_val_score(search, X, y, cv=outer, scoring="roc_auc").mean())
+    seeded_bugs:
+      - |
+        import numpy as np
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import StandardScaler
+
+
+        def nested_cv_auc(X: np.ndarray, y: np.ndarray, c_values: list[float], seed: int) -> float:
+            """Tunes on all rows, then cross-validates the winner."""
+            pipe = Pipeline([("scale", StandardScaler()), ("clf", LogisticRegression(max_iter=1000))])
+            inner = StratifiedKFold(n_splits=3, shuffle=True, random_state=seed)
+            outer = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed + 1)
+            search = GridSearchCV(pipe, {"clf__C": c_values}, cv=inner, scoring="roc_auc")
+            best = search.fit(X, y).best_estimator_
+            return float(cross_val_score(best, X, y, cv=outer, scoring="roc_auc").mean())
+    wrong_answers:
+      - answer: |
+          import numpy as np
+          from sklearn.linear_model import LogisticRegression
+          from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score
+          from sklearn.pipeline import Pipeline
+          from sklearn.preprocessing import StandardScaler
+
+
+          def nested_cv_auc(X: np.ndarray, y: np.ndarray, c_values: list[float], seed: int) -> float:
+              """Tunes on all rows, then cross-validates the winner."""
+              pipe = Pipeline([("scale", StandardScaler()), ("clf", LogisticRegression(max_iter=1000))])
+              inner = StratifiedKFold(n_splits=3, shuffle=True, random_state=seed)
+              outer = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed + 1)
+              search = GridSearchCV(pipe, {"clf__C": c_values}, cv=inner, scoring="roc_auc")
+              best = search.fit(X, y).best_estimator_
+              return float(cross_val_score(best, X, y, cv=outer, scoring="roc_auc").mean())
+        triggers: signal
+    hints:
+      - "Build the Pipeline, then the GridSearchCV around it."
+      - "Pass the search object, unfitted, to cross_val_score."
+      - "Both loops use scoring=\"roc_auc\"."
+    explanation: |
+      The outer loop treats the search as one model. Its folds never influence which C is chosen, so the mean is an honest estimate.
+
+  - id: B11-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      You must tune a model and tell the client what AUC to expect. You have 8,000 labelled rows. Choose the plan.
+    slots:
+      - id: holdout
+        label: "Held-out test set"
+        options:
+          - {id: keep_out, text: "Hold out 20%, untouched until the end"}
+          - {id: use_all, text: "Use all rows for the search"}
+        answer: keep_out
+      - id: search
+        label: "Search on the other 80%"
+        options:
+          - {id: cv_search, text: "RandomizedSearchCV with a fixed seed, scored by ROC AUC"}
+          - {id: best_test, text: "Try settings and keep the best test-set score"}
+        answer: cv_search
+      - id: report
+        label: "Number given to the client"
+        options:
+          - {id: test_once, text: "The refitted best model's AUC on the test set, measured once, with CV spread"}
+          - {id: best_score, text: "best_score_ from the search"}
+        answer: test_once
+    model_answer: |
+      - Hold out a test set at the start.
+      - Search on the rest with CV, a fixed seed and the reported metric.
+      - Report one test-set score, plus the fold spread from CV as a guide to uncertainty.
+    wrong_answers:
+      - answer: {search: best_test}
+        feedback: "Choosing on the test set makes its score optimistic."
+      - answer: {report: best_score}
+        feedback: "best_score_ is the best of many tries on the same folds."
+      - answer: {holdout: use_all}
+        feedback: "Without a holdout, use nested CV for the estimate. Otherwise the number is optimistic."
+    hints:
+      - "Which data never influences a choice?"
+      - "Which metric is tuned?"
+      - "Which number is honest?"
+    explanation: |
+      Keep one set of data out of every decision, and report its score once.
+
+recap:
+  - front: "Report CV results as"
+    back: "Mean and spread across folds, for the metric you care about."
+  - front: "Pipeline parameter names in a grid"
+    back: "step__param, such as clf__C. make_pipeline names steps after their class."
+  - front: "Is best_score_ an honest estimate?"
+    back: "No. Noise simulation: 0.598 best_score_ against 0.515 nested. Use nested CV or a held-out test set."
+  - front: "Nested CV in scikit-learn"
+    back: "cross_val_score(GridSearchCV(pipe, grid, cv=inner), X, y, cv=outer)."
+
+claims:
+  - claim: "Across 20 noise datasets with a 60-setting kNN grid, mean best_score_ was 0.598 and mean nested CV accuracy 0.515."
+    status: verified
+    source: "Simulated with scikit-learn 1.9.1 in this repository."
+  - claim: "cross_validate returns test_<metric> keys for each scorer."
+    status: verified
+    source: "Run on scikit-learn 1.8.0 in this repository."

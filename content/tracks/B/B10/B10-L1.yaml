@@ -1,0 +1,336 @@
+id: B10-L1
+title: Target leakage, features that know the answer
+
+concept: |
+  **Target leakage** happens when a feature carries information that would not exist at the moment you make the prediction. The model learns the leak, scores brilliantly in validation, and fails in production, where the leak is absent.
+
+  Ask one question of every feature: **would I know this value at prediction time?**
+
+  Typical leaks in customer and survey data:
+
+  - **Consequences of the outcome.** `cancellation_reason` predicts churn perfectly, because only churners have one. `refund_amount` predicts complaints.
+  - **Values measured after the prediction date.** `calls_to_support_last_30d` computed on the extraction date, not the prediction date, includes calls made while the customer was leaving.
+  - **Proxies from the labelling process.** A `reviewed_by` column that is only filled in for fraud cases.
+  - **IDs and timestamps that encode order.** If churners were loaded in a later batch, a row ID predicts churn.
+
+  A quick screen catches the worst cases. Compute each feature's AUC on its own against the target. A single feature with an AUC near 1.0, or near 0.0 for an inverse relationship, deserves suspicion before celebration. With scikit-learn 1.8:
+
+  ```python
+  from sklearn.metrics import roc_auc_score
+  auc = roc_auc_score(y, X[col])
+  strength = max(auc, 1 - auc)
+  ```
+
+  A screen does not prove leakage, and a leak spread across several features will pass it. The real defence is a **feature timeline**: for every feature, the date it becomes known, compared with the prediction date. Keep that table in the project and review it with someone who knows how the data is produced.
+
+  When in doubt, leave the feature out and measure how much the model loses. A feature worth 0.15 AUC on its own that nobody can explain is more likely a leak than a discovery.
+
+why_it_matters: |
+  A churn model scored AUC 0.97 in validation. The top feature was `days_since_last_login`, computed on the day the training data was extracted. For churned customers, that included the weeks after they had already left. In production, scored on active customers, the model ranked customers little better than chance. The retention campaign built on it spent its budget on the wrong people for two months.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      features = ["tenure_months", "plan", "days_since_last_login", "cancellation_reason"]
+      model.fit(train[features], train["churned"])
+      print(roc_auc_score(test["churned"], model.predict_proba(test[features])[:, 1]))
+    annotations:
+      - find: 'features = ["tenure_months", "plan", "days_since_last_login", "cancellation_reason"]'
+        note: "cancellation_reason exists only for churners. days_since_last_login was measured after the prediction date."
+      - find: 'print(roc_auc_score(test["churned"], model.predict_proba(test[features])[:, 1]))'
+        note: "The test set shares the leak, so the score looks superb."
+  strong:
+    code: |
+      import pandas as pd
+      from sklearn.metrics import roc_auc_score
+
+      LEAK_THRESHOLD = 0.95
+
+
+      def leakage_screen(X: pd.DataFrame, y: pd.Series, threshold: float = LEAK_THRESHOLD) -> list[str]:
+          """Numeric features that alone separate the classes suspiciously well."""
+          suspects = []
+          for col in X.select_dtypes("number").columns:
+              known = X[col].notna()
+              if known.sum() == 0 or y[known].nunique() < 2:
+                  continue
+              auc = roc_auc_score(y[known], X.loc[known, col])
+              if max(auc, 1 - auc) >= threshold:
+                  suspects.append(col)
+          return suspects
+    annotations:
+      - find: "for col in X.select_dtypes(\"number\").columns:"
+        note: "One feature at a time: a single near-perfect feature is the classic leak."
+      - find: "if known.sum() == 0 or y[known].nunique() < 2:"
+        note: "No AUC without both classes. Skip rather than crash."
+      - find: "if max(auc, 1 - auc) >= threshold:"
+        note: "Catches inverse relationships too."
+  takeaway: |
+    For every feature, know when it becomes available. Screen single-feature AUCs, and treat a near-perfect one as a suspect.
+
+exercises:
+  - id: B10-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You predict on 1 March whether a customer will churn in March. Which feature leaks?
+    options:
+      - {id: a, text: "Tenure in months on 1 March"}
+      - {id: b, text: "Number of support calls in February"}
+      - {id: c, text: "Number of support calls in March"}
+      - {id: d, text: "Plan type on 1 March"}
+    answer: c
+    reasons:
+      - {id: r1, text: "March calls happen after the prediction is made, and may be caused by leaving."}
+      - {id: r2, text: "Support calls always leak."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Tenure on 1 March is known on 1 March."
+      - answer: b
+        feedback: "February is before the prediction date. Safe to use."
+      - answer: d
+        feedback: "Plan type on 1 March is known at prediction time."
+      - answer: c|r2
+        feedback: "Right answer, wrong reason. February calls are fine. Timing decides."
+    hints:
+      - "When is the prediction made?"
+      - "Which value is measured after it?"
+      - "March, during the month you predict."
+    explanation: |
+      Features must come from before the prediction date. March calls are not available on 1 March.
+
+  - id: B10-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (scikit-learn 1.8)
+    code: |
+      from sklearn.metrics import roc_auc_score
+
+      churned = [0, 1, 0, 1]
+      days_inactive = [0.1, 0.9, 0.2, 0.8]
+      contract_months_left = [0.9, 0.1, 0.8, 0.2]
+      a = roc_auc_score(churned, days_inactive)
+      b = roc_auc_score(churned, contract_months_left)
+      print(a, max(b, 1 - b))
+    answer: "1.0 1.0"
+    wrong_answers:
+      - answer: "1.0 0.0"
+        feedback: "b is 0.0, a perfect inverse relationship. max(b, 1 - b) turns it into 1.0."
+    hints:
+      - "Does days_inactive separate the classes perfectly?"
+      - "And contract_months_left, in reverse?"
+      - "An AUC of 0 is as informative as 1."
+    explanation: |
+      Both separate the classes perfectly, one in reverse. A screen must check `max(auc, 1 - auc)`.
+
+  - id: B10-L1-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the review of a proposed feature.
+    items:
+      - {id: define, text: "Write down the prediction date and what the model will see then"}
+      - {id: timeline, text: "Find the date each feature value becomes known"}
+      - {id: compare, text: "Drop features known only after the prediction date"}
+      - {id: screen, text: "Run the single-feature AUC screen on what remains"}
+      - {id: explain, text: "Explain any high-AUC feature with the data owner, or drop it"}
+    answer: [define, timeline, compare, screen, explain]
+    wrong_answers:
+      - answer: [screen, define, timeline, compare, explain]
+        feedback: "Screening first finds the obvious leaks but misses timing leaks with modest AUC. Start from the prediction date."
+      - answer: [define, timeline, compare, explain, screen]
+        feedback: "Screen first, then explain what the screen flags."
+    hints:
+      - "Everything is judged against the prediction date."
+      - "Timing, then data-driven checks."
+      - "Explanation needs a suspect."
+    explanation: |
+      Define the moment of prediction, check each feature's timing, then use the screen as a second line of defence.
+
+  - id: B10-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas, scikit-learn]
+    prompt: |
+      Write `leakage_screen(X, y, threshold=0.95) -> list[str]`. For each numeric column of `X`, in column order, compute `roc_auc_score` on rows where the column is not missing. Return the names where `max(auc, 1 - auc) >= threshold`. Skip columns where the non-missing rows do not contain both classes.
+    starter: |
+      import pandas as pd
+      from sklearn.metrics import roc_auc_score
+
+
+      def leakage_screen(X, y, threshold=0.95):
+          return [c for c in X.columns if roc_auc_score(y, X[c]) > threshold]
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        y = pd.Series([0, 1, 0, 1, 0, 1, 0, 1])
+        X = pd.DataFrame({
+            "tenure": [5, 6, 30, 2, 12, 7, 20, 3],
+            "reason_code": [0, 3, 0, 2, 0, 1, 0, 4],
+            "months_left": [9, 0, 8, 1, 7, 0, 6, 1],
+            "plan": ["a", "b", "a", "b", "a", "b", "a", "b"],
+            "late_only": [None, 1.0, None, 2.0, None, 2.0, None, 3.0],
+        })
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: leakage_screen
+          typed: true
+          docstring: true
+          message: "Give `leakage_screen` type hints and a docstring."
+      tests:
+        - id: flags
+          code: |
+            out = leakage_screen(X, y)
+            assert "reason_code" in out
+          message: "reason_code separates the classes perfectly. Flag it."
+        - id: inverse
+          code: |
+            assert "months_left" in leakage_screen(X, y)
+          message: "months_left separates the classes in reverse. Use max(auc, 1 - auc)."
+        - id: exact
+          code: |
+            assert leakage_screen(X, y) == ["reason_code", "months_left"]
+          message: "Return only suspicious numeric columns, in column order. Skip text columns and one-class columns."
+    solution: |
+      import pandas as pd
+      from sklearn.metrics import roc_auc_score
+
+
+      def leakage_screen(X: pd.DataFrame, y: pd.Series, threshold: float = 0.95) -> list[str]:
+          """Numeric features that alone separate the classes suspiciously well.
+
+          Args:
+              X: Candidate features.
+              y: Binary target aligned with X.
+              threshold: AUC strength at or above which a feature is flagged.
+
+          Returns:
+              Suspect column names, in column order.
+          """
+          suspects = []
+          for col in X.select_dtypes("number").columns:
+              known = X[col].notna()
+              if known.sum() == 0 or y[known].nunique() < 2:
+                  continue
+              auc = roc_auc_score(y[known], X.loc[known, col])
+              if max(auc, 1 - auc) >= threshold:
+                  suspects.append(col)
+          return suspects
+    seeded_bugs:
+      - |
+        import pandas as pd
+        from sklearn.metrics import roc_auc_score
+
+
+        def leakage_screen(X: pd.DataFrame, y: pd.Series, threshold: float = 0.95) -> list[str]:
+            """Misses inverse relationships."""
+            suspects = []
+            for col in X.select_dtypes("number").columns:
+                known = X[col].notna()
+                if known.sum() == 0 or y[known].nunique() < 2:
+                    continue
+                if roc_auc_score(y[known], X.loc[known, col]) >= threshold:
+                    suspects.append(col)
+            return suspects
+      - |
+        import pandas as pd
+        from sklearn.metrics import roc_auc_score
+
+
+        def leakage_screen(X: pd.DataFrame, y: pd.Series, threshold: float = 0.95) -> list[str]:
+            """Flags one-class columns by treating missing as zero."""
+            suspects = []
+            for col in X.select_dtypes("number").columns:
+                auc = roc_auc_score(y, X[col].fillna(0))
+                if max(auc, 1 - auc) >= threshold:
+                    suspects.append(col)
+            return suspects
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+          from sklearn.metrics import roc_auc_score
+
+
+          def leakage_screen(X: pd.DataFrame, y: pd.Series, threshold: float = 0.95) -> list[str]:
+              """Misses inverse relationships."""
+              suspects = []
+              for col in X.select_dtypes("number").columns:
+                  known = X[col].notna()
+                  if known.sum() == 0 or y[known].nunique() < 2:
+                      continue
+                  if roc_auc_score(y[known], X.loc[known, col]) >= threshold:
+                      suspects.append(col)
+              return suspects
+        triggers: inverse
+    hints:
+      - "`X.select_dtypes(\"number\").columns` limits the loop to numeric features."
+      - "Filter rows with `X[col].notna()` and check `y[known].nunique() == 2`."
+      - "Flag when `max(auc, 1 - auc) >= threshold`."
+    explanation: |
+      The screen looks for any single feature that nearly separates the classes. Missingness itself can leak, as `late_only` shows: filled with zeros it would look perfect.
+
+  - id: B10-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A fraud model predicts at transaction time. Decide what to do with each candidate feature.
+    slots:
+      - id: amount
+        label: "Transaction amount"
+        options: &act
+          - {id: keep, text: "Keep"}
+          - {id: drop, text: "Drop: known only after the prediction"}
+          - {id: rebuild, text: "Rebuild as of transaction time"}
+        answer: keep
+      - id: chargeback
+        label: "Chargeback filed (yes/no)"
+        options: *act
+        answer: drop
+      - id: txn_count
+        label: "Customer's transaction count, computed on the extract date"
+        options: *act
+        answer: rebuild
+      - id: reviewer
+        label: "Analyst who reviewed the case"
+        options: *act
+        answer: drop
+    model_answer: |
+      - Amount: known at transaction time.
+      - Chargeback: a consequence of fraud, filed weeks later.
+      - Transaction count: useful, but must count only transactions before this one.
+      - Reviewer: assigned only to suspected cases, a proxy for the label.
+    wrong_answers:
+      - answer: {chargeback: keep}
+        feedback: "A chargeback is filed after the fraud is found. It is the label in disguise."
+      - answer: {txn_count: keep}
+        feedback: "Computed on the extract date, it includes transactions after this one. Rebuild it point in time."
+      - answer: {reviewer: keep}
+        feedback: "Reviewers are assigned to flagged cases. The feature encodes the labelling process."
+    hints:
+      - "Would you know it at the moment of the transaction?"
+      - "Can it be recomputed from earlier data?"
+      - "Who fills it in, and when?"
+    explanation: |
+      Keep what is known at prediction time, rebuild what can be made point in time, drop the rest.
+
+recap:
+  - front: "The one question for every feature"
+    back: "Would I know this value at prediction time?"
+  - front: "Single-feature leakage screen"
+    back: "AUC of each feature alone. Flag max(auc, 1 - auc) near 1."
+  - front: "Common leaks"
+    back: "Consequences of the outcome, values measured after the prediction date, labelling proxies, order-encoding IDs."
+  - front: "Feature timeline"
+    back: "A table of when each feature becomes known, reviewed with the data owner."
+
+claims:
+  - claim: "roc_auc_score returns 0.0 for a perfect inverse ranking."
+    status: verified
+    source: "Run on scikit-learn 1.8.0 and 1.9.1 in this repository."

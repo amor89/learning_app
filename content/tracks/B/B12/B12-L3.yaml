@@ -1,0 +1,362 @@
+id: B12-L3
+title: Imbalanced classes and error analysis by segment
+
+concept: |
+  **Imbalance.** When positives are rare, a model trained as usual predicts low probabilities, and the default 0.5 threshold flags almost nothing. That is a threshold problem, not always a model problem.
+
+  In this course's build (2.4% positives, logistic regression, scikit-learn 1.8), the plain model at 0.5 flagged 3 cases and found none. Lowering the threshold to 0.1 flagged 284 cases with precision 0.36 and recall 0.42. At 0.02 it reached recall 0.63 with precision 0.04. The same model trained with `class_weight="balanced"` reached recall 0.64 and precision 0.05 at 0.5: a very similar trade-off, with probabilities that were no longer calibrated (lesson B12-L2).
+
+  Options, in the order to try them:
+
+  1. **Train normally and choose the threshold** from capacity or cost (lesson B12-L1). Probabilities stay calibrated.
+  2. **Class weights** when the model struggles to learn the minority class at all. Recalibrate afterwards if you need probabilities.
+  3. **Resampling** (over- or under-sampling) **inside the training folds only**. Never resample the test set: its class balance must match production.
+
+  **Error analysis.** One overall metric hides where a model fails. Break the test results down by segment: region, device, customer tenure, survey mode. For each segment report the count, positives, precision and recall. A model with recall 0.60 overall can have recall 0.15 for new customers, the group the campaign most wants to reach.
+
+  Then read examples. Take the 20 most confident false positives and the 20 most confident false negatives, and look at them with someone who knows the domain. Patterns in those 40 rows often point to a missing feature, a label error or a leak.
+
+  Report segment results with their counts. A recall of 0.20 from 5 positives is a question, not a finding.
+
+why_it_matters: |
+  A complaint-routing model reported recall 0.71 overall. Complaints arriving by the new web chat were 18% of the volume and had recall 0.22: the model had been trained mostly on email text, and chat messages were shorter and informal. Urgent chat complaints waited in the general queue for three weeks before a supervisor noticed. A per-channel breakdown at validation would have shown it.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      model = LogisticRegression().fit(X_train, y_train)
+      print("recall", recall_score(y_test, model.predict(X_test)))
+    annotations:
+      - find: 'print("recall", recall_score(y_test, model.predict(X_test)))'
+        note: "The 0.5 default flags almost nothing on rare positives, and one overall number hides weak segments."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def metrics_by_segment(df: pd.DataFrame, segment: str) -> pd.DataFrame:
+          """Count, positives, precision and recall per segment. Columns y and flagged are 0/1."""
+          rows = []
+          for name, g in df.groupby(segment, sort=True):
+              tp = int(((g["y"] == 1) & (g["flagged"] == 1)).sum())
+              n_flag, n_pos = int(g["flagged"].sum()), int(g["y"].sum())
+              rows.append({
+                  segment: name,
+                  "n": len(g),
+                  "positives": n_pos,
+                  "precision": tp / n_flag if n_flag > 0 else None,
+                  "recall": tp / n_pos if n_pos > 0 else None,
+              })
+          return pd.DataFrame(rows)
+    annotations:
+      - find: 'for name, g in df.groupby(segment, sort=True):'
+        note: "One row per segment, in a stable order."
+      - find: '"positives": n_pos,'
+        note: "Counts beside every rate, so small segments are read with care."
+      - find: '"recall": tp / n_pos if n_pos > 0 else None,'
+        note: "No positives, no recall: None instead of a crash or a fake 0."
+  takeaway: |
+    Treat rare positives with a chosen threshold first, then break results down by segment and read the worst errors.
+
+exercises:
+  - id: B12-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A model trained on 2% positives flags nothing at the default threshold. What should you try first?
+    options:
+      - {id: a, text: "Oversample the test set to 50% positives."}
+      - {id: b, text: "Lower the threshold to match review capacity or costs."}
+      - {id: c, text: "Switch to a deep neural network."}
+      - {id: d, text: "Report accuracy instead."}
+    answer: b
+    reasons:
+      - {id: r1, text: "The model's ranking may be fine. Only the cut-off is wrong for rare positives."}
+      - {id: r2, text: "Lower thresholds always improve models."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Never resample the test set. Its balance must match production."
+      - answer: c
+        feedback: "A different model does not fix a threshold chosen by default."
+      - answer: d
+        feedback: "Accuracy would look excellent while the model finds nothing."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. A lower threshold trades precision for recall. It does not improve the model."
+    hints:
+      - "Is the problem the ranking or the cut-off?"
+      - "What does 0.5 mean at 2% prevalence?"
+      - "Choose the threshold from the decision."
+    explanation: |
+      At 2% prevalence few cases score above 0.5. Pick the threshold that matches capacity or cost, and check precision and recall there.
+
+  - id: B12-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      segments = {"email": (80, 100), "chat": (4, 20)}
+      for name, (found, positives) in segments.items():
+          print(name, found / positives)
+      print("overall", sum(f for f, _ in segments.values()) / sum(p for _, p in segments.values()))
+    answer: |
+      email 0.8
+      chat 0.2
+      overall 0.7
+    wrong_answers:
+      - answer: |
+          email 0.8
+          chat 0.2
+          overall 0.5
+        feedback: "Overall recall pools the counts: 84 of 120 is 0.7, not the mean of the two rates."
+    hints:
+      - "Recall is found over positives."
+      - "Overall pools the counts."
+      - "84 / 120."
+    explanation: |
+      An overall 0.7 hides a segment at 0.2. Pooled rates weight large segments more, so small segments disappear from the headline.
+
+  - id: B12-L3-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the steps for handling a rare positive class.
+    items:
+      - {id: split, text: "Split train and test, stratified, test left at its natural balance"}
+      - {id: train, text: "Train the model normally"}
+      - {id: threshold, text: "Choose the threshold from capacity or cost on validation data"}
+      - {id: segments, text: "Break test results down by segment, with counts"}
+      - {id: read, text: "Read the most confident false positives and false negatives"}
+    answer: [split, train, threshold, segments, read]
+    wrong_answers:
+      - answer: [train, split, threshold, segments, read]
+        feedback: "Split before training, so the test set never influences the model."
+      - answer: [split, train, segments, threshold, read]
+        feedback: "Segment precision and recall depend on the threshold. Choose it first."
+    hints:
+      - "What must exist before training?"
+      - "What do segment metrics depend on?"
+      - "Reading examples comes last."
+    explanation: |
+      Split, train, threshold, then look for where and why the model fails.
+
+  - id: B12-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Write `metrics_by_segment(df, segment) -> pd.DataFrame`. `df` has 0/1 columns `y` and `flagged` and a segment column named by `segment`. Return one row per segment, sorted by segment, with columns `segment` (named as the input column), `n`, `positives`, `precision` and `recall`. Use `None` for precision when a segment has no flags, and for recall when it has no positives.
+    starter: |
+      import pandas as pd
+
+
+      def metrics_by_segment(df, segment):
+          return df.groupby(segment)["y"].mean().reset_index()
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        DF = pd.DataFrame({
+            "channel": ["email", "email", "email", "chat", "chat", "post"],
+            "y":       [1, 1, 0, 1, 0, 0],
+            "flagged": [1, 0, 1, 0, 0, 0],
+        })
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: metrics_by_segment
+          typed: true
+          docstring: true
+          message: "Give `metrics_by_segment` type hints and a docstring."
+      tests:
+        - id: shape
+          code: |
+            out = metrics_by_segment(DF, "channel")
+            assert list(out.columns) == ["channel", "n", "positives", "precision", "recall"]
+            assert out["channel"].tolist() == ["chat", "email", "post"]
+          message: "Return the columns in the order given, one row per segment, sorted by segment."
+        - id: values
+          code: |
+            out = metrics_by_segment(DF, "channel").set_index("channel")
+            assert out.loc["email", "n"] == 3 and out.loc["email", "positives"] == 2
+            assert out.loc["email", "precision"] == 0.5 and out.loc["email", "recall"] == 0.5
+            assert out.loc["chat", "recall"] == 0.0
+          message: "Count true positives per segment: precision = tp / flagged, recall = tp / positives."
+        - id: none_values
+          code: |
+            out = metrics_by_segment(DF, "channel").set_index("channel")
+            assert pd.isna(out.loc["chat", "precision"])
+            assert pd.isna(out.loc["post", "precision"]) and pd.isna(out.loc["post", "recall"])
+          message: "No flags gives no precision, and no positives gives no recall: missing, not 0."
+    solution: |
+      import pandas as pd
+
+
+      def metrics_by_segment(df: pd.DataFrame, segment: str) -> pd.DataFrame:
+          """Count, positives, precision and recall per segment.
+
+          Args:
+              df: Columns y and flagged (0/1) plus the segment column.
+              segment: Name of the segment column.
+
+          Returns:
+              One row per segment, sorted by segment.
+          """
+          rows = []
+          for name, g in df.groupby(segment, sort=True):
+              tp = int(((g["y"] == 1) & (g["flagged"] == 1)).sum())
+              n_flag = int(g["flagged"].sum())
+              n_pos = int(g["y"].sum())
+              rows.append(
+                  {
+                      segment: name,
+                      "n": len(g),
+                      "positives": n_pos,
+                      "precision": tp / n_flag if n_flag > 0 else None,
+                      "recall": tp / n_pos if n_pos > 0 else None,
+                  }
+              )
+          return pd.DataFrame(rows)
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def metrics_by_segment(df: pd.DataFrame, segment: str) -> pd.DataFrame:
+            """Zero instead of missing."""
+            rows = []
+            for name, g in df.groupby(segment, sort=True):
+                tp = int(((g["y"] == 1) & (g["flagged"] == 1)).sum())
+                n_flag = max(int(g["flagged"].sum()), 1)
+                n_pos = max(int(g["y"].sum()), 1)
+                rows.append(
+                    {
+                        segment: name,
+                        "n": len(g),
+                        "positives": int(g["y"].sum()),
+                        "precision": tp / n_flag,
+                        "recall": tp / n_pos,
+                    }
+                )
+            return pd.DataFrame(rows)
+      - |
+        import pandas as pd
+
+
+        def metrics_by_segment(df: pd.DataFrame, segment: str) -> pd.DataFrame:
+            """Overall tp for every segment."""
+            tp_all = int(((df["y"] == 1) & (df["flagged"] == 1)).sum())
+            rows = []
+            for name, g in df.groupby(segment, sort=True):
+                n_flag = int(g["flagged"].sum())
+                n_pos = int(g["y"].sum())
+                rows.append(
+                    {
+                        segment: name,
+                        "n": len(g),
+                        "positives": n_pos,
+                        "precision": tp_all / n_flag if n_flag > 0 else None,
+                        "recall": tp_all / n_pos if n_pos > 0 else None,
+                    }
+                )
+            return pd.DataFrame(rows)
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def metrics_by_segment(df: pd.DataFrame, segment: str) -> pd.DataFrame:
+              """Zero instead of missing."""
+              rows = []
+              for name, g in df.groupby(segment, sort=True):
+                  tp = int(((g["y"] == 1) & (g["flagged"] == 1)).sum())
+                  n_flag = max(int(g["flagged"].sum()), 1)
+                  n_pos = max(int(g["y"].sum()), 1)
+                  rows.append(
+                      {
+                          segment: name,
+                          "n": len(g),
+                          "positives": int(g["y"].sum()),
+                          "precision": tp / n_flag,
+                          "recall": tp / n_pos,
+                      }
+                  )
+              return pd.DataFrame(rows)
+        triggers: none_values
+    hints:
+      - "Loop over `df.groupby(segment, sort=True)`."
+      - "tp counts rows where y and flagged are both 1, within the segment."
+      - "Build a list of dicts and return `pd.DataFrame(rows)`."
+    explanation: |
+      Per-segment counts and rates show where the model fails. Missing values for empty denominators stop a segment with no positives looking like a failure.
+
+  - id: B12-L3-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [numpy, pandas]
+    prompt: |
+      Validation reports recall 0.78, but production recall is 0.41. Tap the line that makes the evaluation unrepresentative, and fix the function.
+    code: |
+      import pandas as pd
+
+
+      def prepare_sets(train: pd.DataFrame, test: pd.DataFrame, seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+          """Oversample positives so the model sees more of them."""
+          pos_train = train[train["y"] == 1].sample(frac=5.0, replace=True, random_state=seed)
+          pos_test = test[test["y"] == 1].sample(frac=5.0, replace=True, random_state=seed)
+          return pd.concat([train, pos_train]), pd.concat([test, pos_test])
+    bug_lines: [7, 8]
+    fix_checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        TRAIN = pd.DataFrame({"y": [0, 0, 0, 1]})
+        TEST = pd.DataFrame({"y": [0, 0, 0, 0, 1]})
+      tests:
+        - id: test_untouched
+          code: |
+            tr, te = prepare_sets(TRAIN, TEST, 0)
+            assert te["y"].tolist() == [0, 0, 0, 0, 1]
+          message: "The test set must keep its natural class balance. Resample training rows only."
+        - id: train_oversampled
+          code: |
+            tr, te = prepare_sets(TRAIN, TEST, 0)
+            assert (tr["y"] == 1).sum() == 6
+          message: "Training positives must still be oversampled: 1 original plus 5 copies."
+    fix_solution: |
+      import pandas as pd
+
+
+      def prepare_sets(train: pd.DataFrame, test: pd.DataFrame, seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+          """Oversample training positives. The test set keeps its natural balance."""
+          pos_train = train[train["y"] == 1].sample(frac=5.0, replace=True, random_state=seed)
+          return pd.concat([train, pos_train]), test
+    wrong_answers:
+      - lines: [6]
+        feedback: "Oversampling training positives is a legitimate choice. The problem is the other set."
+    hints:
+      - "Which set must look like production?"
+      - "What does line 7 do to it?"
+      - "Return test unchanged."
+    explanation: |
+      Oversampling the test set inflates positives and duplicates them, so recall is measured on a world that does not exist. Resample training data only.
+
+recap:
+  - front: "First response to rare positives"
+    back: "Train normally and choose the threshold from capacity or cost."
+  - front: "Resampling rule"
+    back: "Only inside training folds. Never the test set."
+  - front: "Error analysis"
+    back: "Metrics per segment with counts, then read the most confident errors."
+  - front: "Pooled vs segment recall"
+    back: "Pooling weights large segments. Overall 0.7 can hide a segment at 0.2."
+
+claims:
+  - claim: "Plain logistic regression at 2.4% prevalence: threshold 0.1 gave precision 0.36, recall 0.42; threshold 0.02 gave recall 0.63, precision 0.04; balanced weights at 0.5 gave recall 0.64, precision 0.05."
+    status: verified
+    source: "Run with scikit-learn 1.9.1 in this repository (make_classification, random_state=0)."

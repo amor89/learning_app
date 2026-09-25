@@ -1,0 +1,330 @@
+id: B12-L1
+title: Choose the metric from the decision
+
+concept: |
+  A metric is a summary of the mistakes you care about. Choose it from the decision the model supports, before you train anything.
+
+  **Accuracy fails on imbalanced data.** A test set from this course's build has 2.4% positives. Predicting "negative" for everyone scores accuracy **0.976**. A logistic regression at the default 0.5 threshold scored 0.9755, with **recall 0.0**: it found no positives at all.
+
+  Better summaries, all in scikit-learn 1.8:
+
+  - **ROC AUC** (`roc_auc_score`): the chance a random positive ranks above a random negative. It ignores the threshold and the class balance. Good for comparing rankers. It hides how many false positives come with each true positive when positives are rare.
+  - **Average precision**, the area under the precision-recall curve (`average_precision_score`): sensitive to rare positives. A random ranking scores the **prevalence**, 0.025 here. The same logistic regression scored **0.30**, twelve times the baseline. Always quote the baseline next to it.
+  - **Precision and recall at a threshold**: precision is the share of flagged cases that are real. Recall is the share of real cases that are flagged. These map straight onto work: "of 100 customers we call, 30 were going to churn" and "we reach 64% of the churners".
+  - **Cost-weighted metrics**: if a missed fraud costs £400 and a false alarm costs £5 of analyst time, compute the total cost at each threshold and pick the cheapest.
+
+  Pick the **threshold** from the decision too. 0.5 is a default of the library, not a business rule. If the team can review 200 cases a day, the threshold is whatever flags 200 cases.
+
+  Report the metric with the prevalence and the number of positives in the test set. A precision of 0.30 from 12 positives is not the same evidence as from 1,200.
+
+why_it_matters: |
+  A claims triage model was reported as "97.6% accurate". It flagged nothing. Fraud prevalence was 2.4%, so a model that approved every claim scored the same. The number went into a board paper before anyone asked how many frauds it caught. The answer was zero.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      pred = model.predict(X_test)
+      print("accuracy", accuracy_score(y_test, pred))
+    annotations:
+      - find: "pred = model.predict(X_test)"
+        note: "predict() uses a 0.5 threshold that nobody chose."
+      - find: 'print("accuracy", accuracy_score(y_test, pred))'
+        note: "Accuracy on rare positives rewards predicting the majority class."
+  strong:
+    code: |
+      import numpy as np
+      from sklearn.metrics import average_precision_score, roc_auc_score
+
+
+      def evaluate(y_true: np.ndarray, scores: np.ndarray, threshold: float) -> dict[str, float | None]:
+          """Ranking and threshold metrics, with the baseline to compare against."""
+          flagged = scores >= threshold
+          tp = int((flagged & (y_true == 1)).sum())
+          n_flagged, n_pos = int(flagged.sum()), int((y_true == 1).sum())
+          return {
+              "prevalence": float(y_true.mean()),
+              "roc_auc": float(roc_auc_score(y_true, scores)),
+              "average_precision": float(average_precision_score(y_true, scores)),
+              "precision": tp / n_flagged if n_flagged > 0 else None,
+              "recall": tp / n_pos if n_pos > 0 else None,
+          }
+    annotations:
+      - find: '"prevalence": float(y_true.mean()),'
+        note: "The baseline for average precision, reported alongside it."
+      - find: '"precision": tp / n_flagged if n_flagged > 0 else None,'
+        note: "No flags, no precision: None, not a division error or a misleading 0."
+  takeaway: |
+    Choose metrics and thresholds from the decision. Report prevalence and counts beside every number.
+
+exercises:
+  - id: B12-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Positives are 2.4% of the test set. A model has accuracy 0.976. What do you know?
+    options:
+      - {id: a, text: "The model is excellent."}
+      - {id: b, text: "Nothing useful yet. Predicting all negatives scores the same."}
+      - {id: c, text: "The model finds 97.6% of positives."}
+      - {id: d, text: "The model is calibrated."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Accuracy is dominated by the 97.6% majority class."}
+      - {id: r2, text: "Accuracy is never useful."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "A constant 'negative' prediction scores 0.976 too."
+      - answer: c
+        feedback: "That would be recall. Accuracy mixes both classes."
+      - answer: d
+        feedback: "Accuracy says nothing about probability calibration."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Accuracy works for balanced classes with equal costs."
+    hints:
+      - "What does a constant prediction score?"
+      - "Compare with 1 - prevalence."
+      - "0.976."
+    explanation: |
+      With 2.4% positives, 0.976 is the no-skill baseline. Look at recall, precision and average precision.
+
+  - id: B12-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print, to two decimals? (scikit-learn 1.8, NumPy 2.4)
+    code: |
+      import numpy as np
+      from sklearn.metrics import average_precision_score
+
+      rng = np.random.default_rng(0)
+      y = (rng.random(20000) < 0.05).astype(int)
+      random_scores = rng.random(20000)
+      print(round(average_precision_score(y, random_scores), 2))
+    answer: "0.05"
+    wrong_answers:
+      - answer: "0.5"
+        feedback: "0.5 is the random baseline for ROC AUC. For average precision the baseline is the prevalence, here 5%."
+    hints:
+      - "A random ranking's precision at every recall level is about the prevalence."
+      - "What is the prevalence?"
+      - "About 5%."
+    explanation: |
+      The no-skill average precision equals the prevalence. Always report it beside the model's score.
+
+  - id: B12-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Flag the top 200 cases a day, whatever their scores.
+    template: |
+      threshold = np.sort(scores)[[[g1]]]
+      flagged = scores >= [[g2]]
+    gaps:
+      g1: {accepted: ["-200"]}
+      g2: {accepted: [threshold]}
+    wrong_answers:
+      - answer: {g1: "200"}
+        feedback: "np.sort is ascending. The 200th largest value is at index -200."
+    hints:
+      - "np.sort sorts ascending."
+      - "Count from the end."
+      - "`-200`, then compare with `threshold`."
+    explanation: |
+      The threshold comes from capacity, not from 0.5. Ties at the threshold can flag a few more than 200.
+
+  - id: B12-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy, scikit-learn]
+    prompt: |
+      Write `evaluate(y_true, scores, threshold) -> dict[str, float | None]` returning:
+
+      - `prevalence`: mean of `y_true`.
+      - `roc_auc` and `average_precision` from scikit-learn.
+      - `precision` and `recall` at `scores >= threshold`, computed from counts. Return `None` for precision when nothing is flagged, and for recall when there are no positives.
+    starter: |
+      from sklearn.metrics import accuracy_score
+
+
+      def evaluate(y_true, scores, threshold):
+          return {"accuracy": accuracy_score(y_true, scores >= threshold)}
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+        Y = np.array([0, 0, 0, 0, 1, 0, 1, 1])
+        S = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.9])
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: evaluate
+          typed: true
+          docstring: true
+          message: "Give `evaluate` type hints and a docstring."
+      tests:
+        - id: values
+          code: |
+            r = evaluate(Y, S, 0.55)
+            assert r["prevalence"] == 0.375
+            assert round(r["roc_auc"], 4) == 0.9333
+            assert r["precision"] == 2 / 3 and r["recall"] == 2 / 3
+          message: "Check prevalence, ROC AUC, and precision and recall from counts at scores >= threshold."
+        - id: ap
+          code: |
+            assert round(evaluate(Y, S, 0.55)["average_precision"], 4) == 0.9167
+          message: "average_precision must come from average_precision_score(y_true, scores)."
+        - id: none_flagged
+          code: |
+            r = evaluate(Y, S, 0.95)
+            assert r["precision"] is None and r["recall"] == 0.0
+          message: "No flagged cases: precision is None, recall is 0.0."
+    solution: |
+      import numpy as np
+      from sklearn.metrics import average_precision_score, roc_auc_score
+
+
+      def evaluate(y_true: np.ndarray, scores: np.ndarray, threshold: float) -> dict[str, float | None]:
+          """Ranking metrics, threshold metrics and the prevalence baseline.
+
+          Args:
+              y_true: Binary labels.
+              scores: Model scores, higher means more likely positive.
+              threshold: Flag cases with score >= threshold.
+
+          Returns:
+              prevalence, roc_auc, average_precision, precision, recall.
+          """
+          flagged = scores >= threshold
+          tp = int((flagged & (y_true == 1)).sum())
+          n_flagged = int(flagged.sum())
+          n_pos = int((y_true == 1).sum())
+          return {
+              "prevalence": float(y_true.mean()),
+              "roc_auc": float(roc_auc_score(y_true, scores)),
+              "average_precision": float(average_precision_score(y_true, scores)),
+              "precision": tp / n_flagged if n_flagged > 0 else None,
+              "recall": tp / n_pos if n_pos > 0 else None,
+          }
+    seeded_bugs:
+      - |
+        import numpy as np
+        from sklearn.metrics import average_precision_score, roc_auc_score
+
+
+        def evaluate(y_true: np.ndarray, scores: np.ndarray, threshold: float) -> dict[str, float | None]:
+            """Precision and recall swapped."""
+            flagged = scores >= threshold
+            tp = int((flagged & (y_true == 1)).sum())
+            n_flagged = int(flagged.sum())
+            n_pos = int((y_true == 1).sum())
+            return {
+                "prevalence": float(y_true.mean()),
+                "roc_auc": float(roc_auc_score(y_true, scores)),
+                "average_precision": float(average_precision_score(y_true, scores)),
+                "precision": tp / n_pos if n_pos > 0 else None,
+                "recall": tp / n_flagged if n_flagged > 0 else None,
+            }
+      - |
+        import numpy as np
+        from sklearn.metrics import average_precision_score, roc_auc_score
+
+
+        def evaluate(y_true: np.ndarray, scores: np.ndarray, threshold: float) -> dict[str, float | None]:
+            """Precision 0 when nothing is flagged."""
+            flagged = scores >= threshold
+            tp = int((flagged & (y_true == 1)).sum())
+            n_flagged = max(int(flagged.sum()), 1)
+            n_pos = int((y_true == 1).sum())
+            return {
+                "prevalence": float(y_true.mean()),
+                "roc_auc": float(roc_auc_score(y_true, scores)),
+                "average_precision": float(average_precision_score(y_true, scores)),
+                "precision": tp / n_flagged,
+                "recall": tp / n_pos if n_pos > 0 else None,
+            }
+    wrong_answers:
+      - answer: |
+          import numpy as np
+          from sklearn.metrics import average_precision_score, roc_auc_score
+
+
+          def evaluate(y_true: np.ndarray, scores: np.ndarray, threshold: float) -> dict[str, float | None]:
+              """Precision 0 when nothing is flagged."""
+              flagged = scores >= threshold
+              tp = int((flagged & (y_true == 1)).sum())
+              n_flagged = max(int(flagged.sum()), 1)
+              n_pos = int((y_true == 1).sum())
+              return {
+                  "prevalence": float(y_true.mean()),
+                  "roc_auc": float(roc_auc_score(y_true, scores)),
+                  "average_precision": float(average_precision_score(y_true, scores)),
+                  "precision": tp / n_flagged,
+                  "recall": tp / n_pos if n_pos > 0 else None,
+              }
+        triggers: none_flagged
+    hints:
+      - "flagged = scores >= threshold. tp counts flagged positives."
+      - "precision = tp / flagged count. recall = tp / positive count."
+      - "Return None when the denominator is 0."
+    explanation: |
+      Counts make precision and recall transparent. Returning None for an empty denominator avoids a misleading 0.0 and a crash.
+
+  - id: B12-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Choose the headline metric for each model.
+    slots:
+      - id: fraud
+        label: "Fraud: 1% prevalence, analysts review 150 cases a day"
+        options: &metrics
+          - {id: precision_at_k, text: "Precision among the top k flagged"}
+          - {id: accuracy, text: "Accuracy"}
+          - {id: auc, text: "ROC AUC"}
+          - {id: cost, text: "Total cost at the chosen threshold"}
+        answer: precision_at_k
+      - id: compare
+        label: "Compare two ranking models before any threshold exists"
+        options: *metrics
+        answer: auc
+      - id: credit
+        label: "Loan approval: a default costs £4,000, a wrongly refused customer costs £300 of margin"
+        options: *metrics
+        answer: cost
+    model_answer: |
+      - Fraud with fixed review capacity: precision in the top 150, the share of analyst time spent on real fraud.
+      - Comparing rankers: ROC AUC, with average precision beside it for rare positives.
+      - Unequal, known costs: total cost at the threshold, which picks the threshold too.
+    wrong_answers:
+      - answer: {fraud: accuracy}
+        feedback: "At 1% prevalence, flagging nothing is 99% accurate."
+      - answer: {credit: auc}
+        feedback: "AUC ignores the threshold and the cost difference, which decide profit."
+      - answer: {compare: cost}
+        feedback: "Without a threshold or agreed costs, compare rankings first."
+    hints:
+      - "Is capacity fixed?"
+      - "Are costs known and unequal?"
+      - "Is there a threshold yet?"
+    explanation: |
+      Metrics follow the decision: capacity, costs, or pure ranking.
+
+recap:
+  - front: "Accuracy at 2.4% prevalence"
+    back: "0.976 for predicting all negatives. Useless as a headline."
+  - front: "Baseline for average precision"
+    back: "The prevalence. Report it beside the score."
+  - front: "Where the threshold comes from"
+    back: "The decision: review capacity or costs. Not the 0.5 default."
+  - front: "Precision and recall"
+    back: "Precision: share of flags that are real. Recall: share of real cases flagged."
+
+claims:
+  - claim: "On make_classification data with 2.4% positives, all-negative accuracy was 0.976, logistic regression at 0.5 had recall 0.0, average precision 0.30 against a random 0.025."
+    status: verified
+    source: "Run with scikit-learn 1.8.0 and 1.9.1 in this repository (random_state=0)."
