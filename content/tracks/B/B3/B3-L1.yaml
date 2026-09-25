@@ -1,0 +1,343 @@
+id: B3-L1
+title: Dtypes in pandas 3, nullable and string
+
+concept: |
+  Every pandas column has a **dtype**. The wrong dtype gives wrong answers without an error: IDs that lose leading zeros, counts that turn into floats, text that sorts as numbers.
+
+  Three facts about pandas 3.0:
+
+  - **Text columns default to the `str` dtype.** `pd.Series(["a", None]).dtype` prints `str`, not `object`. Missing values in it are `NaN`. Only strings are allowed, so a stray integer no longer hides in a text column.
+  - **A missing value turns an integer column into `float64`**, unless you ask for a nullable dtype. `pd.Series([1, None])` is `float64`. `pd.Series([1, None], dtype="Int64")` keeps integers and shows the gap as `<NA>`.
+  - **Setting a value that does not fit raises.** Assigning `1.5` into an `int64` Series raises `TypeError` instead of silently upcasting the column. (Assigning `NaN` still upcasts to `float64`.)
+
+  The capital letter matters. `int64` is NumPy's integer with no missing values. `Int64`, `Float64` and `boolean` are pandas **nullable** dtypes that hold `pd.NA`.
+
+  Set dtypes where data enters, not later:
+
+  ```python
+  df = pd.read_csv(
+      path,
+      dtype={"respondent_id": "str", "postcode": "str", "household_size": "Int64"},
+  )
+  ```
+
+  Without the `dtype` map, `read_csv` reads a postcode such as `01234` as the number `1234.0` once any row is blank. With it, `"01234"` stays a string.
+
+  Check the result with `df.dtypes` right after loading. `df.convert_dtypes()` switches every column to the nullable equivalents in one call, useful for exploration. An explicit map is better in pipelines, because it fails loudly when the source changes.
+
+why_it_matters: |
+  A panel file stores respondent IDs such as `00731`. One wave has a blank ID row, so `read_csv` infers `float64` and the ID becomes `731.0`. The join to the previous wave, where IDs were read as text, matches nothing. The longitudinal report shows 0% retention for a panel that kept 82% of its members.
+
+  `dtype={"respondent_id": "str"}` at load time keeps `00731` as written in every wave.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      df = pd.read_csv("panel_w2.csv")
+      df["respondent_id"] = df["respondent_id"].astype(int).astype(str)
+      df["household_size"] = df["household_size"].fillna(0).astype(int)
+    annotations:
+      - find: 'df = pd.read_csv("panel_w2.csv")'
+        note: "Dtypes inferred: a blank row turns IDs and counts into float64."
+      - find: 'df["respondent_id"] = df["respondent_id"].astype(int).astype(str)'
+        note: "Leading zeros were lost at load time. This cannot bring them back."
+      - find: 'df["household_size"] = df["household_size"].fillna(0).astype(int)'
+        note: "Replaces 'unknown' with 0, a real value that biases every mean."
+  strong:
+    code: |
+      import pandas as pd
+
+      PANEL_DTYPES: dict[str, str] = {
+          "respondent_id": "str",
+          "household_size": "Int64",
+      }
+
+
+      def read_panel(path: str) -> pd.DataFrame:
+          """Read one panel wave with explicit dtypes."""
+          return pd.read_csv(path, dtype=PANEL_DTYPES)
+    annotations:
+      - find: '"respondent_id": "str",'
+        note: "IDs are labels, not numbers: 00731 stays 00731."
+      - find: '"household_size": "Int64",'
+        note: "Nullable integer: a gap stays <NA>, the rest stay integers."
+      - find: "return pd.read_csv(path, dtype=PANEL_DTYPES)"
+        note: "Dtypes fixed where data enters. In a pipeline, load the map from config."
+  takeaway: |
+    Decide dtypes at load time. IDs and codes as str, counts with gaps as Int64.
+
+exercises:
+  - id: B3-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      On pandas 3.0, what is the dtype of `pd.Series([4, None, 2])`?
+    options:
+      - {id: a, text: "int64"}
+      - {id: b, text: "Int64"}
+      - {id: c, text: "float64"}
+      - {id: d, text: "object"}
+    answer: c
+    reasons:
+      - {id: r1, text: "NumPy int64 cannot hold a missing value, so pandas stores NaN in a float column."}
+      - {id: r2, text: "pandas 3 stores every number as float."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "int64 has no way to represent a missing value."
+      - answer: b
+        feedback: "Int64 is used only when you ask for it, for example with dtype=\"Int64\" or convert_dtypes()."
+      - answer: d
+        feedback: "Numbers with None infer a numeric dtype, not object."
+      - answer: c|r2
+        feedback: "Right answer, wrong reason. pd.Series([4, 2]) is int64. The None forces the float."
+    hints:
+      - "Can NumPy's int64 hold NaN?"
+      - "What does pandas use for NaN by default?"
+      - "A float."
+    explanation: |
+      NaN is a float, so a missing value upcasts integers to `float64`. Ask for `Int64` to keep integers.
+
+  - id: B3-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print on pandas 3.0?
+    code: |
+      import io
+
+      import pandas as pd
+
+      csv = "id,postcode\n1,01234\n2,\n"
+      df = pd.read_csv(io.StringIO(csv))
+      print(df["postcode"].iloc[0])
+    answer: "1234.0"
+    wrong_answers:
+      - answer: "01234"
+        feedback: "Without a dtype map, read_csv infers a number. The blank row makes it float64."
+      - answer: "1234"
+        feedback: "The blank row forces float64, so the value prints with .0."
+    hints:
+      - "What dtype does read_csv infer for 01234?"
+      - "What does the blank row add?"
+      - "A number with a missing value is float64."
+    explanation: |
+      `read_csv` reads `01234` as a number and the blank as NaN, so the column is `float64` and the leading zero is gone. Pass `dtype={"postcode": "str"}`.
+
+  - id: B3-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Keep IDs as text and let the count column hold missing values as integers.
+    template: |
+      df = pd.read_csv(path, dtype={"respondent_id": "[[g1]]", "household_size": "[[g2]]"})
+    gaps:
+      g1: {accepted: [str, string]}
+      g2: {accepted: [Int64]}
+    wrong_answers:
+      - answer: {g2: int64}
+        feedback: "Lower-case int64 is NumPy's integer and fails on a blank value. Use capital-I Int64."
+      - answer: {g1: int}
+        feedback: "IDs are labels. Reading them as numbers drops leading zeros."
+    hints:
+      - "IDs are labels, not quantities."
+      - "Which integer dtype holds pd.NA?"
+      - "`str` and `Int64`."
+    explanation: |
+      `str` keeps IDs as written. `Int64` is the nullable integer dtype.
+
+  - id: B3-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Write `read_panel(text: str) -> pd.DataFrame`. It reads CSV text with columns `respondent_id` and `household_size`. Keep `respondent_id` as text with leading zeros, and `household_size` as a nullable integer where blanks become `<NA>`. Take the dtype map from a module constant `PANEL_DTYPES`.
+    starter: |
+      import io
+
+      import pandas as pd
+
+
+      def read_panel(text):
+          return pd.read_csv(io.StringIO(text))
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: read_panel
+          typed: true
+          docstring: true
+          message: "Give `read_panel` type hints and a docstring."
+        - id: constant
+          kind: requires_pattern
+          pattern: "^PANEL_DTYPES\\b"
+          message: "Define the dtype map as a module constant PANEL_DTYPES."
+        - id: no_fillna
+          kind: forbids_pattern
+          pattern: "fillna\\("
+          message: "Do not fill blanks. Unknown is not zero."
+      tests:
+        - id: ids
+          code: |
+            df = read_panel("respondent_id,household_size\n00731,2\n00042,\n")
+            assert list(df["respondent_id"]) == ["00731", "00042"]
+          message: "respondent_id must keep its leading zeros. Read it as str."
+        - id: counts
+          code: |
+            df = read_panel("respondent_id,household_size\n00731,2\n00042,\n")
+            assert str(df["household_size"].dtype) == "Int64"
+            assert df["household_size"].iloc[0] == 2
+            assert df["household_size"].isna().iloc[1]
+          message: "household_size must be Int64, with the blank as <NA>."
+    solution: |
+      import io
+
+      import pandas as pd
+
+      PANEL_DTYPES: dict[str, str] = {"respondent_id": "str", "household_size": "Int64"}
+
+
+      def read_panel(text: str) -> pd.DataFrame:
+          """Read panel CSV text with explicit dtypes.
+
+          Args:
+              text: CSV content with respondent_id and household_size.
+
+          Returns:
+              A frame with str IDs and nullable integer counts.
+          """
+          return pd.read_csv(io.StringIO(text), dtype=PANEL_DTYPES)
+    seeded_bugs:
+      - |
+        import io
+
+        import pandas as pd
+
+        PANEL_DTYPES: dict[str, str] = {"household_size": "Int64"}
+
+
+        def read_panel(text: str) -> pd.DataFrame:
+            """IDs inferred."""
+            return pd.read_csv(io.StringIO(text), dtype=PANEL_DTYPES)
+      - |
+        import io
+
+        import pandas as pd
+
+        PANEL_DTYPES: dict[str, str] = {"respondent_id": "str"}
+
+
+        def read_panel(text: str) -> pd.DataFrame:
+            """Counts inferred."""
+            return pd.read_csv(io.StringIO(text), dtype=PANEL_DTYPES)
+    wrong_answers:
+      - answer: |
+          import io
+
+          import pandas as pd
+
+          PANEL_DTYPES: dict[str, str] = {"respondent_id": "str"}
+
+
+          def read_panel(text: str) -> pd.DataFrame:
+              """Counts inferred."""
+              return pd.read_csv(io.StringIO(text), dtype=PANEL_DTYPES)
+        triggers: counts
+      - answer: |
+          import io
+
+          import pandas as pd
+
+          PANEL_DTYPES: dict[str, str] = {"household_size": "Int64"}
+
+
+          def read_panel(text: str) -> pd.DataFrame:
+              """IDs inferred."""
+              return pd.read_csv(io.StringIO(text), dtype=PANEL_DTYPES)
+        triggers: ids
+    hints:
+      - "read_csv takes a dtype mapping."
+      - "IDs as str, counts as Int64."
+      - "`pd.read_csv(io.StringIO(text), dtype=PANEL_DTYPES)`."
+    explanation: |
+      The dtype map fixes both columns at load time. In a real pipeline it comes from config, not code.
+
+  - id: B3-L1-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [pandas]
+    prompt: |
+      The mean household size reported for wave 3 dropped from 2.6 to 2.1. Nothing changed in the sample. Tap the line that caused it.
+    code: |
+      import pandas as pd
+
+
+      def mean_household(df: pd.DataFrame) -> float:
+          """Mean household size among respondents who answered."""
+          sizes = df["household_size"].astype("Int64")
+          sizes = sizes.fillna(0)
+          return float(sizes.mean())
+    bug_lines: [7]
+    fix_checker:
+      kind: python
+      setup: |
+        import pandas as pd
+      tests:
+        - id: ignores_missing
+          code: |
+            df = pd.DataFrame({"household_size": pd.array([2, 4, None], dtype="Int64")})
+            assert mean_household(df) == 3.0
+          message: "Blanks must be left out of the mean, not counted as 0."
+        - id: plain
+          code: |
+            df = pd.DataFrame({"household_size": pd.array([1, 2], dtype="Int64")})
+            assert mean_household(df) == 1.5
+          message: "The mean of answered values must be correct."
+    fix_solution: |
+      import pandas as pd
+
+
+      def mean_household(df: pd.DataFrame) -> float:
+          """Mean household size among respondents who answered."""
+          sizes = df["household_size"].astype("Int64")
+          return float(sizes.mean())
+    wrong_answers:
+      - lines: [6]
+        feedback: "Int64 is right: it keeps blanks as <NA>, which mean() skips. The problem is what happens next."
+      - lines: [8]
+        feedback: "mean() is fine on its own. It skips <NA>, but by then the blanks are zeros."
+    hints:
+      - "What does mean() do with <NA>?"
+      - "What does it do with 0?"
+      - "Filling blanks with 0 adds fake answers."
+    explanation: |
+      `mean()` skips `<NA>` by default. Filling with 0 turns non-answers into households of size zero and pulls the mean down.
+
+recap:
+  - front: "Default text dtype in pandas 3.0"
+    back: "str, with NaN for missing values. Only strings are allowed."
+  - front: "int64 vs Int64"
+    back: "int64 is NumPy, no missing values. Int64 is the pandas nullable integer that holds pd.NA."
+  - front: "Keep leading zeros in IDs"
+    back: "Read the column with dtype str in read_csv."
+  - front: "Assign 1.5 into an int64 Series on pandas 3"
+    back: "Raises TypeError instead of silently upcasting."
+  - front: "Where to set dtypes"
+    back: "At load time, from a dtype map in config. Check df.dtypes right after."
+
+claims:
+  - claim: "In pandas 3.0 text columns default to the str dtype, with NaN as the missing value."
+    status: verified
+    source: "pandas 3.0 release notes; run on pandas 3.0.6 and 3.0.2 in this repository."
+  - claim: "In pandas 3.0 setting an incompatible value such as 1.5 into an int64 Series raises TypeError."
+    status: verified
+    source: "pandas 3.0 release notes (setitem upcasting removed); run on pandas 3.0.6 and 3.0.2 in this repository."
+  - claim: "read_csv infers float64 for an integer-like column with a blank value."
+    status: verified
+    source: "Run on pandas 3.0.6 and 3.0.2 in this repository."

@@ -1,0 +1,347 @@
+id: B1-L3
+title: ruff and mypy in daily work
+
+concept: |
+  Two tools catch most mistakes before a test runs.
+
+  **ruff** lints and formats. On a ten-line sample it reported three real problems:
+
+  ```text
+  m.py:1:1: I001 [*] Import block is un-sorted or un-formatted
+  m.py:1:8: F401 [*] `os` imported but unused
+  m.py:9:30: B905 `zip()` without an explicit `strict=` parameter
+  ```
+
+  B905 matters for data work: `zip(flags, weights)` silently stops at the shorter list, so a missing weight drops a respondent without an error. `zip(..., strict=True)` raises instead.
+
+  **mypy** checks types. On the same file, strict mode found:
+
+  ```text
+  m.py:14: error: Unsupported operand types for * ("None" and "int")  [operator]
+  m.py:17: error: Function is missing a type annotation  [no-untyped-def]
+  ```
+
+  Line 14 multiplies a `float | None` by 100. When the total weight is zero, the function returns `None` and the report crashes. mypy found the zero-weight bug without any test data.
+
+  Daily habits:
+
+  - Configure both once in `pyproject.toml` (`[tool.ruff]` with the rule sets you want, `[tool.mypy]` with `strict = true`).
+  - Run `ruff check --fix .` and `ruff format .` before each commit. `--fix` applies only safe fixes.
+  - Run `mypy` on `src/` and `tests/`. Fix errors by handling the case, not by adding `# type: ignore`.
+  - Run the same commands in CI (lesson A10-L3), so the rules are not optional.
+
+  Libraries without type information show `import-untyped` or missing-stub notes. Install the stub package if one exists, or add a targeted `[[tool.mypy.overrides]]` with `ignore_missing_imports = true` for that module only.
+
+why_it_matters: |
+  A reporting script formats a weighted share as `f"{share * 100:.1f}%"`. For eleven months every subgroup has respondents. Then a new region with no fieldwork yet appears in the sample frame, its total weight is zero, `weighted_share` returns `None`, and the monthly client pack fails to build on deadline day.
+
+  mypy flags `None * 100` the first time it runs on the file. The fix is two lines, written months before the failure.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import os
+      import pandas as pd
+
+
+      def weighted_share(flags, weights):
+          total = sum(weights)
+          if total == 0:
+              return None
+          return sum(w for f, w in zip(flags, weights) if f == 1) / total
+
+
+      def report(flags, weights):
+          return f"{weighted_share(flags, weights) * 100:.1f}%"
+    annotations:
+      - find: "import os"
+        note: "F401: unused import."
+      - find: "def weighted_share(flags, weights):"
+        note: "No hints: mypy cannot see that the function can return None."
+      - find: "for f, w in zip(flags, weights)"
+        note: "B905: zip silently truncates to the shorter list."
+      - find: 'return f"{weighted_share(flags, weights) * 100:.1f}%"'
+        note: "Crashes with TypeError when the share is None."
+  strong:
+    code: |
+      def weighted_share(flags: list[int], weights: list[float]) -> float | None:
+          """Weighted share of flagged rows, or None when the total weight is 0."""
+          total = sum(weights)
+          if total == 0:
+              return None
+          return sum(w for f, w in zip(flags, weights, strict=True) if f == 1) / total
+
+
+      def report(flags: list[int], weights: list[float]) -> str:
+          """Share as a percentage string, or 'n/a' when undefined."""
+          share = weighted_share(flags, weights)
+          if share is None:
+              return "n/a"
+          return f"{share * 100:.1f}%"
+    annotations:
+      - find: "def weighted_share(flags: list[int], weights: list[float]) -> float | None:"
+        note: "The return type admits None, so mypy makes every caller handle it."
+      - find: "zip(flags, weights, strict=True)"
+        note: "Unequal lengths raise ValueError instead of dropping rows."
+      - find: "if share is None:"
+        note: "The case mypy flagged, handled on purpose."
+  takeaway: |
+    ruff and mypy found an unused import, a silent truncation and a crash on zero weight, before anyone wrote a test.
+
+exercises:
+  - id: B1-L3-E1
+    type: predict_output
+    difficulty: 1
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      flags = [1, 0, 1]
+      weights = [2.0, 1.0]
+      print(list(zip(flags, weights)))
+    answer: "[(1, 2.0), (0, 1.0)]"
+    wrong_answers:
+      - answer: "ValueError"
+        feedback: "Only `zip(..., strict=True)` raises. Plain zip stops at the shorter input without a word."
+      - answer: "[(1, 2.0), (0, 1.0), (1, None)]"
+        feedback: "That is `itertools.zip_longest`. zip drops the extra element."
+    hints:
+      - "How long is each list?"
+      - "What does zip do when lengths differ?"
+      - "It stops at the shortest."
+    explanation: |
+      `zip` stops at the shortest input, so the third respondent disappears. ruff's B905 asks for `strict=True`, which raises `ValueError` on unequal lengths (Python 3.10+).
+
+  - id: B1-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      mypy reports `Unsupported operand types for * ("None" and "int")` on `share * 100`. What is the right fix?
+    options:
+      - {id: a, text: "Add `# type: ignore` to the line."}
+      - {id: b, text: "Handle the None case before the multiplication."}
+      - {id: c, text: "Change the return type to `float` and keep returning None."}
+      - {id: d, text: "Turn off strict mode."}
+    answer: b
+    reasons:
+      - {id: r1, text: "mypy found a real path where the value is None. Handling it removes the crash."}
+      - {id: r2, text: "mypy errors are style issues."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The ignore hides the warning and keeps the crash."
+      - answer: c
+        feedback: "The hint would then lie, and mypy would flag the `return None` instead. The crash stays."
+      - answer: d
+        feedback: "Weakening the checker hides this bug and every future one like it."
+      - answer: b|r2
+        feedback: "Right fix, wrong reason. This is a real crash on zero weight, not style."
+    hints:
+      - "When can share be None?"
+      - "Is that case possible in real data?"
+      - "Handle it."
+    explanation: |
+      mypy found a reachable crash. Handle `None` explicitly, for example by returning `"n/a"`.
+
+  - id: B1-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the pre-commit routine: apply safe lint fixes, format, then type-check.
+    template: |
+      ruff check [[g1]] .
+      ruff [[g2]] .
+      [[g3]]
+    gaps:
+      g1: {accepted: [--fix]}
+      g2: {accepted: [format]}
+      g3: {accepted: [mypy, mypy src tests, mypy .]}
+    wrong_answers:
+      - answer: {g1: --unsafe-fixes}
+        feedback: "Unsafe fixes can change behaviour. Use --fix for the safe ones, and review the rest by hand."
+      - answer: {g3: python -m pytest}
+        feedback: "Tests matter, but the step after formatting in this routine is the type checker."
+    hints:
+      - "The flag that applies safe fixes."
+      - "The formatter subcommand."
+      - "The type checker's command."
+    explanation: |
+      `ruff check --fix .` applies safe fixes, `ruff format .` formats, and `mypy` type-checks with the settings in pyproject.toml.
+
+  - id: B1-L3-E4
+    type: refactor
+    difficulty: 4
+    language: python
+    prompt: |
+      Make this pass `ruff` (no B905) and `mypy --strict`: add type hints, keep the None result for zero weight, make unequal lengths raise, and make `report` return `"n/a"` instead of crashing.
+    starter: |
+      def weighted_share(flags, weights):
+          total = sum(weights)
+          if total == 0:
+              return None
+          return sum(w for f, w in zip(flags, weights) if f == 1) / total
+
+
+      def report(flags, weights):
+          return f"{weighted_share(flags, weights) * 100:.1f}%"
+    checker:
+      kind: python
+      ast_rules:
+        - id: share_typed
+          kind: requires_function
+          name: weighted_share
+          typed: true
+          message: "Add type hints to `weighted_share`, returning `float | None`."
+        - id: report_typed
+          kind: requires_function
+          name: report
+          typed: true
+          message: "Add type hints to `report`, returning `str`."
+        - id: strict_zip
+          kind: requires_pattern
+          pattern: "zip\\([^)]*strict\\s*=\\s*True"
+          message: "Use `zip(..., strict=True)` so unequal lengths raise (ruff B905)."
+        - id: optional_return
+          kind: requires_pattern
+          pattern: "->\\s*float\\s*\\|\\s*None"
+          message: "`weighted_share` can return None: annotate `-> float | None`."
+      tests:
+        - id: share
+          code: |
+            assert weighted_share([1, 0], [3.0, 1.0]) == 0.75
+          message: "The share of weight 3 out of 4 is 0.75."
+        - id: zero
+          code: |
+            assert weighted_share([1], [0.0]) is None and report([1], [0.0]) == "n/a"
+          message: "Zero weight: weighted_share returns None and report returns 'n/a'."
+        - id: format
+          code: |
+            assert report([1, 0], [3.0, 1.0]) == "75.0%"
+          message: "report must format the share as a percentage with one decimal: 75.0%."
+        - id: unequal
+          code: |
+            try:
+                weighted_share([1, 0, 1], [1.0, 1.0])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "Unequal lengths must raise ValueError."
+    solution: |
+      def weighted_share(flags: list[int], weights: list[float]) -> float | None:
+          """Weighted share of flagged rows, or None when the total weight is 0."""
+          total = sum(weights)
+          if total == 0:
+              return None
+          return sum(w for f, w in zip(flags, weights, strict=True) if f == 1) / total
+
+
+      def report(flags: list[int], weights: list[float]) -> str:
+          """Share as a percentage string, or 'n/a' when undefined."""
+          share = weighted_share(flags, weights)
+          if share is None:
+              return "n/a"
+          return f"{share * 100:.1f}%"
+    seeded_bugs:
+      - |
+        def weighted_share(flags: list[int], weights: list[float]) -> float | None:
+            """No strict zip."""
+            total = sum(weights)
+            if total == 0:
+                return None
+            return sum(w for f, w in zip(flags, weights) if f == 1) / total
+
+
+        def report(flags: list[int], weights: list[float]) -> str:
+            """Handles None."""
+            share = weighted_share(flags, weights)
+            return "n/a" if share is None else f"{share * 100:.1f}%"
+      - |
+        def weighted_share(flags: list[int], weights: list[float]) -> float | None:
+            """Strict zip."""
+            total = sum(weights)
+            if total == 0:
+                return None
+            return sum(w for f, w in zip(flags, weights, strict=True) if f == 1) / total
+
+
+        def report(flags: list[int], weights: list[float]) -> str:
+            """Still crashes on None."""
+            return f"{weighted_share(flags, weights) * 100:.1f}%"
+    wrong_answers:
+      - answer: |
+          def weighted_share(flags: list[int], weights: list[float]) -> float | None:
+              """Strict zip."""
+              total = sum(weights)
+              if total == 0:
+                  return None
+              return sum(w for f, w in zip(flags, weights, strict=True) if f == 1) / total
+
+
+          def report(flags: list[int], weights: list[float]) -> str:
+              """Still crashes on None."""
+              return f"{weighted_share(flags, weights) * 100:.1f}%"
+        triggers: zero
+    hints:
+      - "Annotate: `flags: list[int], weights: list[float]`."
+      - "`zip(flags, weights, strict=True)`."
+      - "In report, store the share and return 'n/a' when it is None."
+    explanation: |
+      The types make the None case visible, `strict=True` stops silent truncation, and report handles None on purpose.
+
+  - id: B1-L3-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      mypy reports `Skipping analyzing "shapely": module is installed, but missing library stubs or py.typed marker`. Choose the response for each case.
+    slots:
+      - id: stubs_exist
+        label: "A stub package, types-shapely, exists on PyPI"
+        options: &responses
+          - {id: install, text: "Install the stubs in the dev group"}
+          - {id: override, text: "Add [[tool.mypy.overrides]] with ignore_missing_imports for that module"}
+          - {id: global, text: "Set ignore_missing_imports = true globally"}
+        answer: install
+      - id: no_stubs
+        label: "No stubs exist for an internal library"
+        options: *responses
+        answer: override
+      - id: many
+        label: "A colleague proposes silencing all such messages for every library"
+        options: *responses
+        answer: override
+    model_answer: |
+      - Stubs exist: install them in the dev group, and mypy checks your use of the library.
+      - No stubs: silence only that module with a targeted override.
+      - Never switch it off globally, or you lose the check for libraries that do ship types.
+    wrong_answers:
+      - answer: {stubs_exist: override}
+        feedback: "Stubs exist, so installing them gives you real checks for free."
+      - answer: {many: global}
+        feedback: "A global setting hides missing stubs you could have installed, for every library, forever."
+    hints:
+      - "Prefer real type information."
+      - "When there is none, narrow the exception."
+      - "Never global."
+    explanation: |
+      Install stubs where they exist, override per module where they do not, and keep the global check on.
+
+recap:
+  - front: "Why does ruff flag zip() without strict= (B905)?"
+    back: "zip silently truncates to the shorter input. strict=True raises ValueError instead."
+  - front: "mypy says None * int is unsupported. The fix?"
+    back: "Handle the None case in code. Never # type: ignore it away."
+  - front: "Daily commands before a commit"
+    back: "ruff check --fix ., ruff format ., mypy."
+  - front: "Missing stubs for one library"
+    back: "Install types-<lib> if it exists, otherwise a per-module mypy override. Never global."
+
+claims:
+  - claim: "ruff reports I001, F401 and B905 and mypy --strict reports [operator] and [no-untyped-def] on the sample shown."
+    status: verified
+    source: "ruff 0.16.9 and mypy 2.3.1 run in this repository."
+  - claim: "zip(strict=True) raises ValueError on unequal lengths (Python 3.10+)."
+    status: verified
+    source: "Python standard library; run in Python 3.11."

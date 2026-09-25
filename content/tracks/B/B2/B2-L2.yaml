@@ -1,0 +1,435 @@
+id: B2-L2
+title: Dataclasses as configuration objects
+
+concept: |
+  Analysis code needs settings: a minimum base size, a weight column, a list of waves. Passing them around as a loose `dict` has three costs. A typo in a key (`"min_bse"`) fails late or not at all. Nothing states which keys exist. Any function can change a value half way through a run.
+
+  A **dataclass** (Python 3.7 and later) turns the settings into a named, typed object.
+
+  ```python
+  from dataclasses import dataclass, field
+
+
+  @dataclass(frozen=True)
+  class ReportConfig:
+      weight_col: str
+      min_base: int = 50
+      waves: tuple[str, ...] = ()
+
+      def __post_init__(self) -> None:
+          if self.min_base <= 0:
+              raise ValueError(f"min_base must be positive, got {self.min_base}")
+  ```
+
+  What you get:
+
+  - **Named fields.** `cfg.min_bse` raises `AttributeError` at once. Your editor and mypy see the fields.
+  - **`frozen=True`.** Assigning a field raises `dataclasses.FrozenInstanceError`. Settings stay fixed for the run. Use `dataclasses.replace(cfg, min_base=30)` to build a changed copy.
+  - **`__post_init__`.** Runs after the generated `__init__`. Put checks here so a bad config fails at load time, not in hour three.
+
+  Two traps:
+
+  - **Type hints are not checked at runtime.** `ReportConfig(weight_col="w", min_base="30")` builds without error. Convert or check types in `__post_init__`, or use pydantic (lesson B5-L2) when input comes from files.
+  - **Mutable defaults.** `waves: list[str] = []` raises `ValueError` when the class is defined. Use `field(default_factory=list)`, or an immutable tuple.
+
+  Load the config once at the edge, from YAML, JSON or arguments, and pass the object to the pure core.
+
+why_it_matters: |
+  A weighting script reads `config["min_base"]` from a dict built in a notebook cell. An analyst edits the cell to `config["minbase"] = 30` for a test and forgets to revert. The script keeps using the old default of 50, so 14 subgroups the client asked to see are suppressed in the published tables. Nobody notices for two waves.
+
+  With a frozen dataclass, `ReportConfig(minbase=30)` raises `TypeError: unexpected keyword argument` at the first run.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      CONFIG = {"weight_col": "weight", "min_base": 50, "waves": []}
+
+
+      def suppress_small(counts, config=CONFIG):
+          config["min_base"] = config.get("minbase", 50)
+          return {k: v for k, v in counts.items() if v >= config["min_base"]}
+    annotations:
+      - find: 'CONFIG = {"weight_col": "weight", "min_base": 50, "waves": []}'
+        note: "A module-level dict: no fixed keys, no types, shared and mutable."
+      - find: "def suppress_small(counts, config=CONFIG):"
+        note: "A mutable default that every call shares."
+      - find: 'config["min_base"] = config.get("minbase", 50)'
+        note: "A typo in the key silently falls back to 50, and the write changes the shared dict."
+  strong:
+    code: |
+      from dataclasses import dataclass
+
+
+      @dataclass(frozen=True)
+      class ReportConfig:
+          """Settings for one reporting run."""
+
+          weight_col: str
+          min_base: int = 50
+
+          def __post_init__(self) -> None:
+              if not isinstance(self.min_base, int) or self.min_base <= 0:
+                  raise ValueError(f"min_base must be a positive int, got {self.min_base!r}")
+
+
+      def suppress_small(counts: dict[str, int], config: ReportConfig) -> dict[str, int]:
+          """Keep subgroups whose base reaches config.min_base."""
+          return {k: v for k, v in counts.items() if v >= config.min_base}
+    annotations:
+      - find: "@dataclass(frozen=True)"
+        note: "Fixed fields, and no assignment after construction."
+      - find: "if not isinstance(self.min_base, int) or self.min_base <= 0:"
+        note: "Validation at load time. Hints alone are not checked at runtime."
+      - find: "def suppress_small(counts: dict[str, int], config: ReportConfig) -> dict[str, int]:"
+        note: "The function receives the config and reads it. It never changes it."
+  takeaway: |
+    A frozen dataclass names every setting, rejects unknown ones, and checks values once, when you build it.
+
+exercises:
+  - id: B2-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      `cfg` is an instance of a `@dataclass(frozen=True)` class with a field `min_base`. What does `cfg.min_base = 30` do?
+    options:
+      - {id: a, text: "Sets min_base to 30."}
+      - {id: b, text: "Raises dataclasses.FrozenInstanceError."}
+      - {id: c, text: "Creates a copy with min_base 30."}
+      - {id: d, text: "Does nothing, silently."}
+    answer: b
+    reasons:
+      - {id: r1, text: "frozen=True makes the generated __setattr__ raise on every field assignment."}
+      - {id: r2, text: "Integer fields are read-only in every dataclass."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That is the behaviour without frozen=True. Frozen instances reject assignment."
+      - answer: c
+        feedback: "Assignment never returns a copy. Use dataclasses.replace(cfg, min_base=30) for that."
+      - answer: d
+        feedback: "It fails loudly, which is the point: settings cannot drift during a run."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Without frozen=True every field, int or not, accepts assignment."
+    hints:
+      - "What does frozen=True promise?"
+      - "Is the failure silent or loud?"
+      - "The exception is a subclass of AttributeError."
+    explanation: |
+      Frozen dataclasses raise `dataclasses.FrozenInstanceError` on assignment. Build a changed copy with `dataclasses.replace`.
+
+  - id: B2-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      from dataclasses import dataclass
+
+
+      @dataclass
+      class Settings:
+          min_base: int = 50
+
+
+      print(Settings("30"))
+    answer: "Settings(min_base='30')"
+    wrong_answers:
+      - answer: "Settings(min_base=30)"
+        feedback: "Dataclasses do not convert values. The string '30' is stored as it is."
+      - answer: "TypeError"
+        feedback: "Type hints are not checked at runtime. The call succeeds and stores a string."
+    hints:
+      - "Does a dataclass check or convert types?"
+      - "What does the generated __repr__ show for a string?"
+      - "It uses repr() of each value, so strings keep their quotes."
+    explanation: |
+      The hint `int` is for your editor and mypy. At runtime the dataclass stores `'30'`. Check or convert in `__post_init__`.
+
+  - id: B2-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Give `waves` an empty list as its default, safely.
+    template: |
+      from dataclasses import dataclass, field
+
+
+      @dataclass
+      class Run:
+          waves: list[str] = field([[g1]]=list)
+    gaps:
+      g1: {accepted: [default_factory]}
+    wrong_answers:
+      - answer: {g1: default}
+        feedback: "`field(default=list)` stores the list class itself, not a new list."
+    hints:
+      - "A plain `= []` raises ValueError at class definition."
+      - "You need a function that builds a fresh list per instance."
+      - "The keyword is `default_factory`."
+    explanation: |
+      `field(default_factory=list)` calls `list()` for each new instance, so no two instances share one list.
+
+  - id: B2-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Complete `ReportConfig` and write `load_config(raw)`.
+
+      - `ReportConfig` is a frozen dataclass with `weight_col: str` and `min_base: int = 50`.
+      - In `__post_init__`, raise `ValueError` if `min_base` is not an `int` or is not positive.
+      - `load_config(raw: dict[str, object]) -> ReportConfig` builds the config from a dict. An unknown key must raise `TypeError`, a missing `weight_col` must raise `TypeError`.
+    starter: |
+      from dataclasses import dataclass
+
+
+      class ReportConfig:
+          ...
+
+
+      def load_config(raw):
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: frozen
+          kind: requires_pattern
+          pattern: "@dataclass\\([^)]*frozen\\s*=\\s*True"
+          message: "Declare the class with @dataclass(frozen=True)."
+        - id: typed_documented
+          kind: requires_function
+          name: load_config
+          typed: true
+          docstring: true
+          message: "Give `load_config` type hints and a docstring."
+        - id: post_init
+          kind: requires_pattern
+          pattern: "def __post_init__"
+          message: "Validate min_base in __post_init__."
+      setup: |
+        import dataclasses
+      tests:
+        - id: builds
+          code: |
+            cfg = load_config({"weight_col": "w", "min_base": 30})
+            assert cfg.weight_col == "w" and cfg.min_base == 30
+            assert load_config({"weight_col": "w"}).min_base == 50
+          message: "load_config must build a ReportConfig from the dict, with min_base defaulting to 50."
+        - id: frozen_runtime
+          code: |
+            cfg = load_config({"weight_col": "w"})
+            try:
+                cfg.min_base = 1
+            except dataclasses.FrozenInstanceError:
+                pass
+            else:
+                raise AssertionError("assignment allowed")
+          message: "The config must be frozen."
+        - id: rejects_bad_value
+          code: |
+            for bad in (0, -5, "30"):
+                try:
+                    load_config({"weight_col": "w", "min_base": bad})
+                except ValueError:
+                    continue
+                raise AssertionError(bad)
+          message: "min_base of 0, a negative number or a string must raise ValueError."
+        - id: rejects_unknown_key
+          code: |
+            try:
+                load_config({"weight_col": "w", "minbase": 30})
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("typo accepted")
+          message: "A misspelt key such as minbase must raise TypeError, not fall back to the default."
+    solution: |
+      from dataclasses import dataclass
+
+
+      @dataclass(frozen=True)
+      class ReportConfig:
+          """Settings for one reporting run."""
+
+          weight_col: str
+          min_base: int = 50
+
+          def __post_init__(self) -> None:
+              if not isinstance(self.min_base, int) or self.min_base <= 0:
+                  raise ValueError(f"min_base must be a positive int, got {self.min_base!r}")
+
+
+      def load_config(raw: dict[str, object]) -> ReportConfig:
+          """Build a ReportConfig from a parsed YAML or JSON mapping.
+
+          Args:
+              raw: Keys must match ReportConfig fields.
+
+          Returns:
+              A validated, frozen config.
+
+          Raises:
+              TypeError: On an unknown or missing key.
+              ValueError: On an invalid min_base.
+          """
+          return ReportConfig(**raw)  # type: ignore[arg-type]
+    seeded_bugs:
+      - |
+        from dataclasses import dataclass
+
+
+        @dataclass(frozen=True)
+        class ReportConfig:
+            """No validation."""
+
+            weight_col: str
+            min_base: int = 50
+
+            def __post_init__(self) -> None:
+                pass
+
+
+        def load_config(raw: dict[str, object]) -> ReportConfig:
+            """Build."""
+            return ReportConfig(**raw)  # type: ignore[arg-type]
+      - |
+        from dataclasses import dataclass
+
+
+        @dataclass(frozen=True)
+        class ReportConfig:
+            """Validates."""
+
+            weight_col: str
+            min_base: int = 50
+
+            def __post_init__(self) -> None:
+                if not isinstance(self.min_base, int) or self.min_base <= 0:
+                    raise ValueError(self.min_base)
+
+
+        def load_config(raw: dict[str, object]) -> ReportConfig:
+            """Reads with get, so typos fall back to the default."""
+            return ReportConfig(
+                weight_col=str(raw["weight_col"]),
+                min_base=raw.get("min_base", 50),  # type: ignore[arg-type]
+            )
+    wrong_answers:
+      - answer: |
+          from dataclasses import dataclass
+
+
+          @dataclass(frozen=True)
+          class ReportConfig:
+              """Validates."""
+
+              weight_col: str
+              min_base: int = 50
+
+              def __post_init__(self) -> None:
+                  if not isinstance(self.min_base, int) or self.min_base <= 0:
+                      raise ValueError(self.min_base)
+
+
+          def load_config(raw: dict[str, object]) -> ReportConfig:
+              """Reads with get, so typos fall back to the default."""
+              return ReportConfig(
+                  weight_col=str(raw["weight_col"]),
+                  min_base=raw.get("min_base", 50),  # type: ignore[arg-type]
+              )
+        triggers: rejects_unknown_key
+      - answer: |
+          from dataclasses import dataclass
+
+
+          @dataclass(frozen=True)
+          class ReportConfig:
+              """Positive check only."""
+
+              weight_col: str
+              min_base: int = 50
+
+              def __post_init__(self) -> None:
+                  if int(self.min_base) <= 0:
+                      raise ValueError(self.min_base)
+
+
+          def load_config(raw: dict[str, object]) -> ReportConfig:
+              """Build."""
+              return ReportConfig(**raw)  # type: ignore[arg-type]
+        triggers: rejects_bad_value
+    hints:
+      - "`ReportConfig(**raw)` passes each key as a keyword argument."
+      - "The generated __init__ raises TypeError on an unknown or missing keyword."
+      - "Check `isinstance(self.min_base, int)` and `self.min_base > 0` in __post_init__."
+    explanation: |
+      Unpacking the dict into the constructor lets the generated `__init__` reject unknown and missing keys. `__post_init__` catches bad values. `frozen=True` stops later edits.
+
+  - id: B2-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A weighting pipeline reads its settings from `weighting.yaml`. Choose how the settings flow through the code.
+    slots:
+      - id: shape
+        label: "Shape of the settings in code"
+        options:
+          - {id: frozen_dc, text: "A frozen dataclass with typed fields"}
+          - {id: dict, text: "The dict returned by yaml.safe_load"}
+          - {id: globals, text: "Module-level constants set from the file at import"}
+        answer: frozen_dc
+      - id: when
+        label: "When values are checked"
+        options:
+          - {id: load, text: "Once, when the config object is built"}
+          - {id: use, text: "In each function, where the value is used"}
+        answer: load
+      - id: pass
+        label: "How functions get the settings"
+        options:
+          - {id: param, text: "As a parameter"}
+          - {id: import, text: "By importing a shared config module"}
+        answer: param
+    model_answer: |
+      - A frozen dataclass: named fields, unknown keys rejected, no edits during the run.
+      - Check once at load time in __post_init__, so a bad file fails before any work starts.
+      - Pass the object as a parameter, so tests build their own config.
+    wrong_answers:
+      - answer: {shape: dict}
+        feedback: "A dict accepts any key, including typos, and any function can change it."
+      - answer: {shape: globals}
+        feedback: "Reading a file at import is a module-level side effect, and every test shares the same values."
+      - answer: {when: use}
+        feedback: "Checks spread across functions fail late, after hours of work, and drift apart."
+      - answer: {pass: import}
+        feedback: "A shared import is a global. Tests cannot give one function a different config."
+    hints:
+      - "Which shape rejects a misspelt key?"
+      - "When would you rather see a bad value: now or in hour three?"
+      - "Globals make functions impure (lesson B2-L1)."
+    explanation: |
+      Build a frozen, validated object at the edge and pass it into the pure core.
+
+recap:
+  - front: "Why a frozen dataclass for settings?"
+    back: "Named, typed fields, unknown keys rejected, and no assignment after construction."
+  - front: "Change one setting on a frozen config"
+    back: "dataclasses.replace(cfg, min_base=30) returns a new object."
+  - front: "Are dataclass type hints checked at runtime?"
+    back: "No. Validate or convert in __post_init__, or use pydantic for external input."
+  - front: "Empty list default on a dataclass field"
+    back: "field(default_factory=list). A plain [] raises ValueError at class definition."
+
+claims:
+  - claim: "Assigning a field of a frozen dataclass raises dataclasses.FrozenInstanceError, a subclass of AttributeError."
+    status: verified
+    source: "Python dataclasses documentation; run on Python 3.11 and 3.14 in this repository."
+  - claim: "A list default on a dataclass field raises ValueError at class definition."
+    status: verified
+    source: "Python dataclasses documentation; run on Python 3.11 in this repository."
+  - claim: "Dataclasses do not check or convert field types at runtime."
+    status: verified
+    source: "Python dataclasses documentation; predict-output exercise run in this repository."

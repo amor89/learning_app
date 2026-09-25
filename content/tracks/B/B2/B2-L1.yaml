@@ -1,0 +1,326 @@
+id: B2-L1
+title: Pure functions, side effects at the edges
+
+concept: |
+  A **pure function** returns a value that depends only on its arguments, and changes nothing outside itself: no file writes, no global variables, no mutation of the inputs, no printing, no clock or random calls it does not receive.
+
+  ```python
+  def weighted_mean(values: list[float], weights: list[float]) -> float:
+      return sum(v * w for v, w in zip(values, weights, strict=True)) / sum(weights)
+  ```
+
+  Pure functions are easy to test (inputs in, answer out), safe to reuse, and safe to run twice. Most analysis logic can be pure: cleaning, feature building, statistics, scoring.
+
+  Some work is not pure by nature: reading files, calling APIs, writing tables, logging, reading the clock. Push that work to the **edges** of the program, into a thin layer that gathers inputs, calls the pure core, and writes results.
+
+  ```text
+  read (impure) -> transform, compute (pure) -> write (impure)
+  ```
+
+  Three side effects hide easily in data code:
+
+  - **Mutating an argument.** `df["x"] = ...` or `rows.append(...)` inside a function changes the caller's object. The caller did not ask for that. Return a new object instead: `df.assign(x=...)`, or build a new list.
+  - **Reading globals.** A function that reads a module-level `THRESHOLD` or `TODAY` gives different answers after someone changes it. Pass it in.
+  - **Hidden time and randomness.** `datetime.now()` or `np.random.rand()` inside a function makes its output untestable. Pass a date, or a `numpy.random.Generator`.
+
+  In pandas 3, Copy-on-Write is always on, so many operations already return new objects. Assigning a column with `df[col] = ...` still changes `df` itself, which is exactly the mutation to keep out of shared functions.
+
+why_it_matters: |
+  A feature function adds `age_group` to the DataFrame it receives, in place. The training script calls it, then passes the same DataFrame to a stratified split on `age_group`. Later, someone reorders the calls so the split runs first. The split fails with a KeyError on one laptop and works on another, depending on which notebook cells ran before.
+
+  A pure `add_age_group(df) -> DataFrame` that returns a new frame gives the same result in every order, and its test needs three rows.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import datetime
+
+      THRESHOLD = 0.5
+
+
+      def score_respondents(df):
+          df["age"] = datetime.date.today().year - df["birth_year"]
+          df["high_reach"] = df["reach"] > THRESHOLD
+          df.to_csv("scored.csv", index=False)
+          print("scored", len(df))
+          return df
+    annotations:
+      - find: 'df["age"] = datetime.date.today().year - df["birth_year"]'
+        note: "Mutates the caller's frame and reads the clock: the answer changes on 1 January."
+      - find: 'df["high_reach"] = df["reach"] > THRESHOLD'
+        note: "Reads a module global: change THRESHOLD anywhere and every result changes."
+      - find: 'df.to_csv("scored.csv", index=False)'
+        note: "Writes a file from inside the computation."
+      - find: 'print("scored", len(df))'
+        note: "Output in the middle of logic, not in the program's edge."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def score_respondents(df: pd.DataFrame, as_of_year: int, threshold: float) -> pd.DataFrame:
+          """Add age and high_reach. Returns a new frame; the input is unchanged."""
+          return df.assign(
+              age=as_of_year - df["birth_year"],
+              high_reach=df["reach"] > threshold,
+          )
+
+
+      def main(input_path: str, output_path: str, as_of_year: int, threshold: float) -> None:
+          """The edge: read, call the pure core, write."""
+          scored = score_respondents(pd.read_csv(input_path), as_of_year, threshold)
+          scored.to_csv(output_path, index=False)
+    annotations:
+      - find: "def score_respondents(df: pd.DataFrame, as_of_year: int, threshold: float) -> pd.DataFrame:"
+        note: "Everything the result depends on is a parameter."
+      - find: "return df.assign("
+        note: "assign returns a new frame. The caller's data is not touched."
+      - find: 'def main(input_path: str, output_path: str, as_of_year: int, threshold: float) -> None:'
+        note: "Reading, writing and choosing the year happen here, at the edge."
+  takeaway: |
+    The pure core is tested with three rows and a fixed year. The edge is a few lines that are easy to read.
+
+exercises:
+  - id: B2-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which function is pure?
+    options:
+      - {id: a, text: "`def add(rows, x): rows.append(x); return rows`"}
+      - {id: b, text: "`def share(n, total): return n / total if total else None`"}
+      - {id: c, text: "`def stamp(df): return df.assign(ts=pd.Timestamp.now())`"}
+      - {id: d, text: "`def save(df, path): df.to_csv(path)`"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Its result depends only on its arguments, and it changes nothing outside itself."}
+      - {id: r2, text: "It is the shortest."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "append mutates the caller's list, a side effect."
+      - answer: c
+        feedback: "It reads the clock, so the same input gives a different result each call."
+      - answer: d
+        feedback: "Writing a file is a side effect. It belongs at the edge."
+      - answer: b|r2
+        feedback: "Right function, wrong reason. Purity is about inputs and side effects, not length."
+    hints:
+      - "Does the result depend on anything except the arguments?"
+      - "Does the function change anything outside itself?"
+      - "Only one answers no to both."
+    explanation: |
+      `share` depends only on `n` and `total` and changes nothing. The others mutate, read the clock, or write a file.
+
+  - id: B2-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print on pandas 3?
+    code: |
+      import pandas as pd
+
+
+      def add_flag(df):
+          df["flag"] = df["x"] > 1
+          return df
+
+
+      original = pd.DataFrame({"x": [1, 2]})
+      result = add_flag(original)
+      print(list(original.columns))
+    answer: "['x', 'flag']"
+    wrong_answers:
+      - answer: "['x']"
+        feedback: "Copy-on-Write protects against changes through derived objects, but `df[\"flag\"] = ...` changes df itself, and df is the caller's object."
+    hints:
+      - "Is `df` a copy or the caller's object?"
+      - "Does column assignment change the object it is called on?"
+      - "It does."
+    explanation: |
+      `df` is the same object as `original`. Assigning a column changes it, so the caller sees `flag` appear. Use `df.assign(flag=...)` to return a new frame.
+
+  - id: B2-L1-E3
+    type: refactor
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Make `add_age` pure: take the reference year as a parameter, return a new DataFrame, and leave the input unchanged. Keep the name `add_age` and the new column `age`.
+    starter: |
+      import datetime
+
+
+      def add_age(df):
+          df["age"] = datetime.date.today().year - df["birth_year"]
+          return df
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: add_age
+          typed: true
+          docstring: true
+          message: "Give `add_age` type hints and a docstring."
+        - id: no_clock
+          kind: forbids_pattern
+          pattern: "today\\(|now\\("
+          message: "Do not read the clock inside the function. Pass the year in."
+      tests:
+        - id: value
+          code: |
+            out = add_age(pd.DataFrame({"birth_year": [2000, 1990]}), 2026)
+            assert list(out["age"]) == [26, 36]
+          message: "age must be the given year minus birth_year."
+        - id: pure
+          code: |
+            src = pd.DataFrame({"birth_year": [2000]})
+            add_age(src, 2026)
+            assert list(src.columns) == ["birth_year"]
+          message: "The input frame changed. Return df.assign(age=...) instead."
+    solution: |
+      import pandas as pd
+
+
+      def add_age(df: pd.DataFrame, as_of_year: int) -> pd.DataFrame:
+          """Return a copy of df with age = as_of_year - birth_year."""
+          return df.assign(age=as_of_year - df["birth_year"])
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def add_age(df: pd.DataFrame, as_of_year: int) -> pd.DataFrame:
+            """Mutates."""
+            df["age"] = as_of_year - df["birth_year"]
+            return df
+      - |
+        import datetime
+
+        import pandas as pd
+
+
+        def add_age(df: pd.DataFrame, as_of_year: int) -> pd.DataFrame:
+            """Ignores the parameter."""
+            return df.assign(age=datetime.date.today().year - df["birth_year"])
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def add_age(df: pd.DataFrame, as_of_year: int) -> pd.DataFrame:
+              """Mutates."""
+              df["age"] = as_of_year - df["birth_year"]
+              return df
+        triggers: pure
+    hints:
+      - "Add a parameter for the year."
+      - "Use `df.assign(...)`, which returns a new frame."
+      - "`return df.assign(age=as_of_year - df[\"birth_year\"])`."
+    explanation: |
+      The year is an input, so tests fix it. `assign` returns a new frame, so callers keep their data.
+
+  - id: B2-L1-E4
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      The second call returns a list containing the first call's flags. Tap the line, then fix the function without changing its behaviour otherwise.
+    code: |
+      def flag_low_bases(bases: dict[str, float], minimum: float, flags: list[str] = []) -> list[str]:
+          """Names of subgroups whose base is below minimum."""
+          for name, base in bases.items():
+              if base < minimum:
+                  flags.append(name)
+          return flags
+    bug_lines: [1]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_mutable_default
+          kind: forbids_mutable_default
+          message: "The list default is still there. Use None, or build the list inside."
+      tests:
+        - id: independent
+          code: |
+            flag_low_bases({"a": 10.0}, 50.0)
+            assert flag_low_bases({"b": 100.0}, 50.0) == []
+          message: "The second call must not see the first call's flags."
+        - id: works
+          code: |
+            assert flag_low_bases({"a": 10.0, "b": 100.0}, 50.0) == ["a"]
+          message: "Subgroups below the minimum must be returned."
+    fix_solution: |
+      def flag_low_bases(bases: dict[str, float], minimum: float) -> list[str]:
+          """Names of subgroups whose base is below minimum."""
+          return [name for name, base in bases.items() if base < minimum]
+    wrong_answers:
+      - lines: [5]
+        feedback: "append is where the state leaks, but the shared list is created on line 1."
+    hints:
+      - "When is the default list created?"
+      - "Is it shared between calls?"
+      - "Build a fresh list inside the function."
+    explanation: |
+      The default list is created once and shared by every call, a hidden state that makes the function impure. Build the list inside, here with a comprehension.
+
+  - id: B2-L1-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      Sort each step of a weekly scoring script into the pure core or the edge.
+    slots:
+      - id: read
+        label: "Read the respondent extract from storage"
+        options: &parts
+          - {id: edge, text: "Edge"}
+          - {id: core, text: "Pure core"}
+        answer: edge
+      - id: features
+        label: "Compute features from the extract and a reference date"
+        options: *parts
+        answer: core
+      - id: predict
+        label: "Score respondents with a model object passed in"
+        options: *parts
+        answer: core
+      - id: write
+        label: "Write scores to the output table and log the row count"
+        options: *parts
+        answer: edge
+    model_answer: |
+      - Reading and writing, logging and choosing the reference date: edge.
+      - Features and scoring, given all inputs as arguments: pure core.
+    wrong_answers:
+      - answer: {read: core}
+        feedback: "Reading storage depends on the world outside the function. Keep it at the edge."
+      - answer: {write: core}
+        feedback: "Writing and logging are side effects. Keep them at the edge."
+      - answer: {features: edge}
+        feedback: "Feature logic given its inputs is deterministic. Make it pure so it can be tested and reused."
+    hints:
+      - "Does the step touch anything outside Python's memory?"
+      - "Does its result depend only on its arguments?"
+      - "I/O at the edges, logic in the core."
+    explanation: |
+      A thin edge does I/O. A pure core does the thinking and gets the tests.
+
+recap:
+  - front: "What makes a function pure?"
+    back: "Its result depends only on its arguments, and it changes nothing outside itself."
+  - front: "Three hidden side effects in data code"
+    back: "Mutating arguments, reading globals, reading the clock or randomness inside the function."
+  - front: "Return a new DataFrame with an extra column"
+    back: "df.assign(col=...). df[\"col\"] = ... changes the caller's frame."
+  - front: "Program shape"
+    back: "Read at the edge, compute in a pure core, write at the edge."
+
+claims:
+  - claim: "In pandas 3 Copy-on-Write is always on, but assigning a column changes the DataFrame it is called on."
+    status: verified
+    source: "Run on pandas 3.0.6 and 3.0.2 in this repository (predict-output exercise)."

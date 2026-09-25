@@ -1,0 +1,305 @@
+id: B1-L2
+title: One virtual environment per project, and python -m pip
+
+concept: |
+  A **virtual environment** is a folder with its own Python interpreter link and its own `site-packages`. Packages you install there do not touch the system Python or any other project.
+
+  ```bash
+  python -m venv .venv
+  source .venv/bin/activate        # Windows: .venv\Scripts\activate
+  python -m pip install --upgrade pip
+  python -m pip install -e . --group dev
+  ```
+
+  Rules that prevent most "it worked yesterday" problems:
+
+  - **One environment per project.** Two projects that share an environment share their version conflicts. Upgrading pandas for one breaks the other.
+  - **Never install into the system Python.** Operating systems and other tools depend on it.
+  - **Use `python -m pip`, not bare `pip`.** Bare `pip` runs whichever `pip` comes first on your PATH, which may belong to a different interpreter. `python -m pip` always installs into the interpreter you are about to run.
+  - **Keep `.venv/` out of Git.** It is large, machine-specific and rebuildable. Commit `pyproject.toml` and a lock file instead (lesson B6-L3).
+
+  In code, `sys.prefix != sys.base_prefix` is True inside a virtual environment. A script that must not run against the system Python can check it and stop.
+
+  Sometimes one project needs **two** environments, because two dependencies cannot live together. A real case from this course's own build: PySpark 4.0.4 fails to import its pandas integration with pandas 3.x, so the Spark test harness runs in its own environment pinned to pandas 2.x, while the rest uses pandas 3. Separate environments, each fully pinned, beat one environment held together by guesswork.
+
+  Tools such as `uv` create and sync environments much faster, and conda manages non-Python libraries. The principles are the same.
+
+why_it_matters: |
+  An analyst runs `pip install statsmodels` in a terminal, then `python analysis.py` in the same terminal, and gets `ModuleNotFoundError`. `pip` belonged to one Python, and `python` to another. They try `sudo pip install`, which upgrades NumPy in the system Python and breaks a command-line tool the operating system uses. Two hours are gone.
+
+  `python -m venv .venv`, activation, and `python -m pip install` make the interpreter that installs and the interpreter that runs the same one.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      $ pip install pandas scikit-learn
+      $ sudo pip install --upgrade numpy
+      $ python train.py
+      ModuleNotFoundError: No module named 'sklearn'
+      $ git add .venv/ data/ train.py
+    annotations:
+      - find: "$ pip install pandas scikit-learn"
+        note: "Bare pip, no environment: installs into whichever Python owns this pip."
+      - find: "$ sudo pip install --upgrade numpy"
+        note: "Changes the system Python that the operating system relies on."
+      - find: "ModuleNotFoundError: No module named 'sklearn'"
+        note: "The python that runs is not the one pip installed into."
+      - find: "$ git add .venv/ data/ train.py"
+        note: "Commits a machine-specific environment folder and data."
+  strong:
+    code: |
+      $ python -m venv .venv
+      $ source .venv/bin/activate
+      (.venv) $ python -m pip install --upgrade pip
+      (.venv) $ python -m pip install -e . --group dev
+      (.venv) $ python -c "import sys; print(sys.prefix != sys.base_prefix)"
+      True
+      (.venv) $ python train.py
+    annotations:
+      - find: "$ python -m venv .venv"
+        note: "A project-local environment, listed in .gitignore."
+      - find: "(.venv) $ python -m pip install -e . --group dev"
+        note: "The same interpreter installs and runs. Dependencies come from pyproject.toml."
+      - find: "True"
+        note: "Proof that the active interpreter is the virtual environment."
+  takeaway: |
+    One environment per project, created from pyproject.toml, with python -m pip so installing and running use the same interpreter.
+
+exercises:
+  - id: B1-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Why prefer `python -m pip install x` over `pip install x`?
+    options:
+      - {id: a, text: "It is faster."}
+      - {id: b, text: "It installs into the interpreter that `python` runs, whatever is first on PATH."}
+      - {id: c, text: "It installs packages globally for all users."}
+      - {id: d, text: "It skips dependency resolution."}
+    answer: b
+    reasons:
+      - {id: r1, text: "`python -m pip` runs pip as a module of that exact interpreter."}
+      - {id: r2, text: "Bare pip is deprecated."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Speed is the same. The benefit is installing into the right interpreter."
+      - answer: c
+        feedback: "It installs into the current interpreter's environment, which inside a venv is the project only."
+      - answer: d
+        feedback: "Resolution is identical. Only the target interpreter is guaranteed."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Bare pip still works. It may simply belong to a different Python."
+    hints:
+      - "How many Pythons might be on your PATH?"
+      - "Which pip does `python -m pip` use?"
+      - "The one belonging to that python."
+    explanation: |
+      `python -m pip` ties the install to the interpreter you will run. Bare `pip` is whichever pip script PATH finds first.
+
+  - id: B1-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      You run this with `.venv/bin/python`, a virtual environment created by `python -m venv .venv`. What does it print?
+    code: |
+      import sys
+
+      print(sys.prefix != sys.base_prefix)
+    answer: "True"
+    wrong_answers:
+      - answer: "False"
+        feedback: "Inside a venv, sys.prefix points at the venv folder and sys.base_prefix at the base installation, so they differ."
+    hints:
+      - "What does sys.prefix point to inside a venv?"
+      - "And sys.base_prefix?"
+      - "They are different folders."
+    explanation: |
+      `sys.prefix` is the virtual environment, `sys.base_prefix` is the Python it was created from. They differ only inside a venv.
+
+  - id: B1-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Create the environment, then install the project in editable mode with its dev group.
+    template: |
+      python -m [[g1]] .venv
+      source .venv/bin/activate
+      python -m pip install [[g2]] . --group dev
+    gaps:
+      g1: {accepted: [venv]}
+      g2: {accepted: [-e, --editable]}
+    wrong_answers:
+      - answer: {g1: virtualenv}
+        feedback: "virtualenv is a separate package. The standard library module is `venv`."
+      - answer: {g2: -r}
+        feedback: "`-r` reads a requirements file. Editable installs of the project use `-e .`."
+    hints:
+      - "The standard library module that creates environments."
+      - "The flag for an editable install."
+      - "`venv` and `-e`."
+    explanation: |
+      `python -m venv .venv` creates the environment. `pip install -e .` installs the project so edits under src/ take effect immediately.
+
+  - id: B1-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `require_virtualenv()`. It raises `RuntimeError` with the message `"activate the project's virtual environment first"` when the running interpreter is not inside a virtual environment, and returns `None` otherwise. Read `sys.prefix` and `sys.base_prefix` when the function is called, not at import time.
+    starter: |
+      import sys
+
+
+      def require_virtualenv() -> None:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: require_virtualenv
+          typed: true
+          docstring: true
+          message: "Give `require_virtualenv` a return type and a docstring."
+        - id: compares_prefixes
+          kind: requires_pattern
+          pattern: "sys\\.prefix[\\s\\S]*sys\\.base_prefix|sys\\.base_prefix[\\s\\S]*sys\\.prefix"
+          message: "Compare `sys.prefix` with `sys.base_prefix`."
+      setup: |
+        import sys
+        _saved = (sys.prefix, sys.base_prefix)
+      tests:
+        - id: inside
+          code: |
+            sys.prefix, sys.base_prefix = "/p/.venv", "/usr"
+            try:
+                assert require_virtualenv() is None
+            finally:
+                sys.prefix, sys.base_prefix = _saved
+          message: "Inside a venv (prefixes differ) the function must return None."
+        - id: outside
+          code: |
+            sys.prefix, sys.base_prefix = "/usr", "/usr"
+            try:
+                require_virtualenv()
+            except RuntimeError as err:
+                assert "virtual environment" in str(err)
+            else:
+                raise AssertionError("no RuntimeError")
+            finally:
+                sys.prefix, sys.base_prefix = _saved
+          message: "Outside a venv (prefixes equal) raise RuntimeError that mentions the virtual environment."
+    solution: |
+      import sys
+
+
+      def require_virtualenv() -> None:
+          """Stop when not running inside a virtual environment.
+
+          Raises:
+              RuntimeError: If sys.prefix equals sys.base_prefix.
+          """
+          if sys.prefix == sys.base_prefix:
+              raise RuntimeError("activate the project's virtual environment first")
+    seeded_bugs:
+      - |
+        import sys
+
+        IN_VENV = sys.prefix != sys.base_prefix
+
+
+        def require_virtualenv() -> None:
+            """Reads the prefixes once, at import time."""
+            if not IN_VENV:
+                raise RuntimeError("activate the project's virtual environment first")
+      - |
+        import sys
+
+
+        def require_virtualenv() -> None:
+            """Backwards."""
+            if sys.prefix != sys.base_prefix:
+                raise RuntimeError("activate the project's virtual environment first")
+    wrong_answers:
+      - answer: |
+          import sys
+
+
+          def require_virtualenv() -> None:
+              """Backwards."""
+              if sys.prefix != sys.base_prefix:
+                  raise RuntimeError("activate the project's virtual environment first")
+        triggers: inside
+    hints:
+      - "Inside a venv the two prefixes differ."
+      - "Raise when they are equal."
+      - "Read them inside the function body."
+    explanation: |
+      Equal prefixes mean the system or base interpreter is running. Reading them at call time keeps the check correct in tests and in any process that changes them.
+
+  - id: B1-L2-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      Your project needs pandas 3.0 for analysis, and a Spark test harness on PySpark 4.0.4, which fails to import its pandas integration with pandas 3.x. Choose the set-up.
+    slots:
+      - id: envs
+        label: "Environments"
+        options:
+          - {id: two, text: "Two environments: dev (pandas 3) and spark (pandas 2), each pinned"}
+          - {id: one_latest, text: "One environment with the latest of everything"}
+          - {id: one_old, text: "One environment, everything downgraded to pandas 2"}
+        answer: two
+      - id: declare
+        label: "Where the difference is recorded"
+        options:
+          - {id: groups, text: "Separate dependency groups in pyproject.toml, with a comment on why"}
+          - {id: readme, text: "A note in the team chat"}
+        answer: groups
+      - id: ci
+        label: "CI"
+        options:
+          - {id: two_jobs, text: "Two jobs, one per environment"}
+          - {id: one_job, text: "One job installing both groups together"}
+        answer: two_jobs
+    model_answer: |
+      - Two environments, because the constraint is real and tested.
+      - Two dependency groups in pyproject.toml, with the reason written next to the pin.
+      - Two CI jobs, so each environment is tested exactly as it is used.
+    wrong_answers:
+      - answer: {envs: one_latest}
+        feedback: "PySpark 4.0.4 fails with pandas 3.x: `assertDataFrameEqual` raises ImportError. One environment cannot satisfy both."
+      - answer: {envs: one_old}
+        feedback: "That works, but the analysis code then runs on an older pandas than intended. Separate environments keep each part current."
+      - answer: {ci: one_job}
+        feedback: "Installing both groups together recreates the conflict in CI."
+      - answer: {declare: readme}
+        feedback: "Chat messages are lost. Record the pin and its reason in pyproject.toml."
+    hints:
+      - "Can one environment hold both constraints?"
+      - "Where will the next developer look?"
+      - "CI must match how each environment is used."
+    explanation: |
+      When two tools conflict, give each its own pinned environment, record why in pyproject.toml, and test both in CI.
+
+recap:
+  - front: "Create and use a project environment"
+    back: "python -m venv .venv, activate it, then python -m pip install -e . --group dev."
+  - front: "Why python -m pip?"
+    back: "It installs into the interpreter that python runs. Bare pip may belong to another Python."
+  - front: "Detect a virtual environment in code"
+    back: "sys.prefix != sys.base_prefix."
+  - front: "Two dependencies that cannot coexist"
+    back: "Two pinned environments and two dependency groups, each tested in CI."
+
+claims:
+  - claim: "sys.prefix differs from sys.base_prefix inside a venv."
+    status: verified
+    source: "Python venv documentation; checked in this repository's virtual environments."
+  - claim: "PySpark 4.0.4 fails to import assertDataFrameEqual with pandas 3.x."
+    status: verified
+    source: "Reproduced in this repository (VERSIONS.md)."

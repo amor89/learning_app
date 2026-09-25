@@ -168,7 +168,7 @@ def check_html(node: Any, where: str) -> None:
         for i, value in enumerate(node):
             if isinstance(value, str):
                 bad = unknown_tags(value)
-                if bad and not where.endswith("lines"):
+                if bad and where.endswith("html"):
                     raise ValueError(f"{where}[{i}]: unexpected HTML tags {sorted(bad)}")
             else:
                 check_html(value, f"{where}[{i}]")

@@ -1,0 +1,333 @@
+id: B1-L1
+title: One pyproject.toml and a src layout
+
+concept: |
+  A data science project starts as a notebook and a CSV. By month three it has helper modules, tests, a model, and three people asking how to run it. The fix is structure from day one.
+
+  **`pyproject.toml`** is the one configuration file for a modern Python project. It holds:
+
+  - `[project]`: name, version, `requires-python`, and runtime `dependencies`.
+  - `[dependency-groups]` (PEP 735): named groups for development only, such as `test` or `lint`. They never ship with the package. Install one with `pip install --group test` (pip 25.1 and later).
+  - `[tool.*]` tables for tools: `[tool.ruff]`, `[tool.mypy]`, `[tool.pytest.ini_options]`.
+
+  One file replaces `setup.py`, `requirements.txt`, `setup.cfg`, `.flake8` and `pytest.ini`.
+
+  **The src layout** puts importable code under `src/`:
+
+  ```text
+  reach_model/
+  ├── pyproject.toml
+  ├── src/reach_model/        # importable package
+  │   ├── __init__.py
+  │   ├── features.py
+  │   └── train.py
+  ├── tests/                  # pytest, imports reach_model
+  ├── notebooks/              # exploration; imports reach_model, holds no logic
+  └── data/                   # small samples only; real data stays out of Git
+  ```
+
+  With `src/`, Python can only import your package after you install it (`pip install -e .`). Tests then run against the installed package, exactly as a user or a job would. Without it, tests silently import whatever sits in the working directory, and "works on my machine" follows.
+
+  Notebooks explore and present. Functions that matter move into `src/`, where tests and type checks reach them. A notebook that defines the feature pipeline inline cannot be tested or reused by the training job.
+
+  Pin `requires-python` to the versions you test, for example `">=3.11"`, so pip refuses an interpreter you never tried.
+
+why_it_matters: |
+  A team trains a churn model from `train.ipynb`, which defines `build_features()` in a cell. The scoring job copies the function into `score.py`. A month later someone fixes a leakage bug in the notebook version only. Training and scoring now compute features differently, and live accuracy drops 9 points while offline metrics look fine.
+
+  With `build_features()` in `src/churn/features.py`, imported by both the notebook and the job, one fix reaches both, and one test protects it.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      churn/
+      ├── train.ipynb            # defines build_features() in cell 7
+      ├── score.py               # copy of build_features(), edited later
+      ├── utils.py
+      ├── requirements.txt       # pandas, scikit-learn (no versions)
+      ├── setup.cfg              # flake8 settings
+      └── data.csv               # 2 GB client extract, committed
+    annotations:
+      - find: "├── train.ipynb            # defines build_features() in cell 7"
+        note: "Logic trapped in a notebook: untestable, and copied instead of imported."
+      - find: "├── score.py               # copy of build_features(), edited later"
+        note: "Two versions of one function drift apart."
+      - find: "├── requirements.txt       # pandas, scikit-learn (no versions)"
+        note: "No pins: every install resolves different versions."
+      - find: "└── data.csv               # 2 GB client extract, committed"
+        note: "Client data in Git: a size problem and a data-protection problem."
+  strong:
+    code: |
+      churn/
+      ├── pyproject.toml         # project, dependency groups, ruff, mypy, pytest
+      ├── src/churn/
+      │   ├── __init__.py
+      │   ├── features.py        # build_features(), used by training and scoring
+      │   ├── train.py
+      │   └── score.py
+      ├── tests/
+      │   └── test_features.py
+      ├── notebooks/
+      │   └── 01_explore.ipynb   # imports churn.features
+      └── data/
+          └── sample_200_rows.csv
+    annotations:
+      - find: "├── pyproject.toml         # project, dependency groups, ruff, mypy, pytest"
+        note: "One file configures the project and every tool."
+      - find: "│   ├── features.py        # build_features(), used by training and scoring"
+        note: "One definition, imported everywhere it is needed."
+      - find: "│   └── test_features.py"
+        note: "Tests import the installed package, as the jobs do."
+      - find: "└── sample_200_rows.csv"
+        note: "A small, anonymised sample for tests. Real data stays in governed storage."
+  takeaway: |
+    Logic lives once, in an installable package. Notebooks, jobs and tests import it.
+
+exercises:
+  - id: B1-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Where do you declare `pytest` and `ruff` so they install for developers but never ship with the package?
+    options:
+      - {id: a, text: "`[project] dependencies`"}
+      - {id: b, text: "`[dependency-groups]`"}
+      - {id: c, text: "`[tool.pytest.ini_options]`"}
+      - {id: d, text: "A comment in README.md"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Dependency groups (PEP 735) are named lists that are not part of the built distribution."}
+      - {id: r2, text: "Dependency groups are only for test tools."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "`[project] dependencies` install for every user of the package, in production too."
+      - answer: c
+        feedback: "That table configures how pytest runs. It does not install anything."
+      - answer: d
+        feedback: "A comment installs nothing and drifts from reality."
+      - answer: b|r2
+        feedback: "Right table, wrong reason. Groups can hold any development tools: tests, linting, docs, notebooks."
+    hints:
+      - "Which table never ships in the built package?"
+      - "It was added by PEP 735."
+      - "`[dependency-groups]`."
+    explanation: |
+      `[dependency-groups]` holds development-only requirements. `pip install --group dev` (pip 25.1+) installs them.
+
+  - id: B1-L1-E2
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the `pyproject.toml` so runtime needs and developer tools are separate.
+    template: |
+      [project]
+      name = "churn"
+      requires-python = ">=3.11"
+      [[g1]] = ["pandas>=3.0,<3.1", "scikit-learn>=1.8,<1.10"]
+
+      [[[g2]]]
+      dev = ["pytest>=9", "ruff>=0.16", "mypy>=2.3"]
+    gaps:
+      g1: {accepted: [dependencies]}
+      g2: {accepted: [dependency-groups]}
+    wrong_answers:
+      - answer: {g1: requires}
+        feedback: "The runtime list under [project] is called `dependencies`."
+      - answer: {g2: tool.dev}
+        feedback: "`[tool.*]` tables configure tools. Development requirements go in `[dependency-groups]`."
+      - answer: {g2: optional-dependencies}
+        feedback: "Optional dependencies (extras) ship with the package for users to opt into. Development-only tools belong in `[dependency-groups]`."
+    hints:
+      - "The runtime key is plural."
+      - "The development table has a hyphenated name."
+      - "`dependencies` and `dependency-groups`."
+    explanation: |
+      `[project].dependencies` lists what users need to run the package. `[dependency-groups]` lists what developers need to work on it.
+
+  - id: B1-L1-E3
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `unpinned(pyproject_text)`. Parse the TOML with the standard library and return, sorted, every entry in `[project].dependencies` that has no version constraint at all (no `=`, `<`, `>`, `~` or `!`). Return an empty list when there is no dependencies key.
+    starter: |
+      import tomllib
+
+
+      def unpinned(pyproject_text: str) -> list[str]:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: unpinned
+          typed: true
+          docstring: true
+          message: "Give `unpinned` type hints and a docstring."
+        - id: uses_tomllib
+          kind: requires_call
+          name: tomllib.loads
+          message: "Parse with `tomllib.loads` from the standard library (Python 3.11+)."
+      tests:
+        - id: finds
+          code: |
+            text = '[project]\nname = "x"\ndependencies = ["pandas>=3.0", "numpy", "requests", "pydantic~=2.12"]\n'
+            assert unpinned(text) == ["numpy", "requests"]
+          message: "numpy and requests have no constraint. Constrained entries must not be listed."
+        - id: missing_key
+          code: |
+            assert unpinned('[project]\nname = "x"\n') == []
+          message: "Without a dependencies key, return an empty list."
+        - id: extras
+          code: |
+            assert unpinned('[project]\ndependencies = ["uvicorn[standard]", "fastapi==0.115.0"]\n') == ["uvicorn[standard]"]
+          message: "An extra in brackets is not a version constraint. uvicorn[standard] is still unpinned."
+    solution: |
+      import tomllib
+
+      CONSTRAINT_CHARS = set("=<>~!")
+
+
+      def unpinned(pyproject_text: str) -> list[str]:
+          """Runtime dependencies with no version constraint.
+
+          Args:
+              pyproject_text: Contents of pyproject.toml.
+
+          Returns:
+              Sorted requirement strings without =, <, >, ~ or !.
+          """
+          project = tomllib.loads(pyproject_text).get("project", {})
+          deps = project.get("dependencies", [])
+          return sorted(d for d in deps if not CONSTRAINT_CHARS & set(d))
+    seeded_bugs:
+      - |
+        import tomllib
+
+
+        def unpinned(pyproject_text: str) -> list[str]:
+            """Treats brackets as constraints."""
+            deps = tomllib.loads(pyproject_text).get("project", {}).get("dependencies", [])
+            return sorted(d for d in deps if not any(c in d for c in "=<>~![")
+      - |
+        import tomllib
+
+
+        def unpinned(pyproject_text: str) -> list[str]:
+            """Fails without a dependencies key."""
+            deps = tomllib.loads(pyproject_text)["project"]["dependencies"]
+            return sorted(d for d in deps if not any(c in d for c in "=<>~!"))
+    wrong_answers:
+      - answer: |
+          import tomllib
+
+
+          def unpinned(pyproject_text: str) -> list[str]:
+              """Fails without a dependencies key."""
+              deps = tomllib.loads(pyproject_text)["project"]["dependencies"]
+              return sorted(d for d in deps if not any(c in d for c in "=<>~!"))
+        triggers: missing_key
+    hints:
+      - "`tomllib.loads(text)` returns a dict."
+      - "Use `.get` with defaults for the project table and the dependencies list."
+      - "Keep entries that contain none of = < > ~ !."
+    explanation: |
+      `tomllib` ships with Python 3.11+. Checking characters is enough to spot a missing constraint, and `.get` handles projects that declare no dependencies.
+
+  - id: B1-L1-E4
+    type: mcq
+    difficulty: 4
+    prompt: |
+      With a src layout, a colleague runs `pytest` straight after cloning and gets `ModuleNotFoundError: No module named 'churn'`. What is the right fix?
+    options:
+      - {id: a, text: "Add `sys.path.insert(0, 'src')` at the top of every test file."}
+      - {id: b, text: "Run `pip install -e .` in the project's virtual environment."}
+      - {id: c, text: "Move the package out of src/ so imports work from the root."}
+      - {id: d, text: "Copy the package into tests/."}
+    answer: b
+    reasons:
+      - {id: r1, text: "The src layout is designed so that only the installed package is importable, which makes tests use it like any user would."}
+      - {id: r2, text: "pytest cannot find packages in folders."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Path hacks in every file defeat the point of the layout and break when files move."
+      - answer: c
+        feedback: "That removes the protection the layout gives: tests would import the working directory instead of the installed package."
+      - answer: d
+        feedback: "Copies drift. Tests must exercise the real package."
+      - answer: b|r2
+        feedback: "Right fix, wrong reason. pytest can import from folders. The src layout deliberately hides the package until it is installed."
+    hints:
+      - "Why can Python not see src/churn?"
+      - "What makes a package importable everywhere in the environment?"
+      - "An editable install."
+    explanation: |
+      `pip install -e .` installs the package in editable mode, so imports resolve to `src/churn` and edits take effect without reinstalling.
+
+  - id: B1-L1-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      Place each piece of a modelling project.
+    slots:
+      - id: features
+        label: "build_features(), used by training and by the nightly scoring job"
+        options: &places
+          - {id: src, text: "src/<package>/"}
+          - {id: notebook, text: "A notebook cell"}
+          - {id: tests, text: "tests/"}
+          - {id: outside, text: "Outside the repository"}
+        answer: src
+      - id: explore
+        label: "Plots comparing feature distributions for a one-off question"
+        options: *places
+        answer: notebook
+      - id: known_answer
+        label: "A check that build_features() gives the right output for 5 hand-made rows"
+        options: *places
+        answer: tests
+      - id: extract
+        label: "The full client data extract"
+        options: *places
+        answer: outside
+    model_answer: |
+      - Shared logic in the package, imported by notebook and jobs.
+      - One-off exploration in notebooks, which import the package.
+      - Known-answer checks in tests/.
+      - Real data in governed storage, never in Git. Keep only small anonymised samples in the repository.
+    wrong_answers:
+      - answer: {features: notebook}
+        feedback: "The scoring job cannot import a notebook cell, so it would copy it, and the copies would drift."
+      - answer: {extract: src}
+        feedback: "Client data in the repository leaks with every clone. Keep it in governed storage."
+      - answer: {known_answer: notebook}
+        feedback: "A check in a notebook runs only when someone reruns the notebook. Put it in tests/ so CI runs it."
+    hints:
+      - "What must more than one program import?"
+      - "What should CI run on every change?"
+      - "What must never be cloned?"
+    explanation: |
+      Package for shared logic, notebooks for exploration, tests for checks, governed storage for data.
+
+recap:
+  - front: "What goes in pyproject.toml?"
+    back: "[project] with dependencies, [dependency-groups] for development tools, and [tool.*] settings for ruff, mypy and pytest."
+  - front: "Install a dependency group"
+    back: "pip install --group dev (pip 25.1 and later)."
+  - front: "Why the src layout?"
+    back: "Only the installed package is importable, so tests run against it exactly as jobs do."
+  - front: "Where does shared logic live?"
+    back: "In the package under src/, imported by notebooks, jobs and tests. Never copied."
+
+claims:
+  - claim: "PEP 735 defines [dependency-groups]; pip 25.1 (April 2025) added --group."
+    status: search-only
+    source: "https://peps.python.org/pep-0735/ and https://ichard26.github.io/blog/2025/04/whats-new-in-pip-25.1/"
+  - claim: "pip 26.2.1 lists --group in `pip install --help`; tomllib is in the standard library from Python 3.11."
+    status: verified
+    source: "Checked in this repository's build environment."

@@ -1,0 +1,316 @@
+id: B3-L3
+title: Method chaining and Copy-on-Write
+
+concept: |
+  **Copy-on-Write** (CoW) is always on in pandas 3.0. Every indexing result, such as `df[cols]`, `df[mask]` or `df["a"]`, behaves as a separate object. Changing it never changes `df`. pandas copies data only when you write to a shared object, so reads stay cheap.
+
+  One consequence: **chained assignment never works**.
+
+  ```python
+  df[df["age"] < 18]["weight"] = 0       # df unchanged, ChainedAssignmentError warning
+  df.loc[df["age"] < 18, "weight"] = 0   # one step: df changed
+  ```
+
+  The first line writes to a temporary copy, which Python then discards. pandas 3 emits a `ChainedAssignmentError` warning, but the code keeps running. `SettingWithCopyWarning` no longer exists.
+
+  CoW rewards a second habit: **method chaining**. Build the result as one expression of steps that each return a new frame.
+
+  ```python
+  result = (
+      raw
+      .rename(columns=COLUMN_MAP)
+      .loc[lambda d: d["age"] >= 18]
+      .assign(weight=lambda d: d["weight"].clip(upper=5.0))
+      .pipe(add_age_band, bins=BINS, labels=LABELS)
+  )
+  ```
+
+  - `assign(col=lambda d: ...)` refers to the frame at that step, not the original `raw`.
+  - `.loc[lambda d: ...]` filters on the current step.
+  - `.pipe(func, **kwargs)` calls your own pure function (lesson B2-L1) inside the chain.
+
+  Chains read top to bottom, leave no half-finished variables (`df2`, `df_tmp`, `df_final`) in the namespace, and do not mutate the input. Keep each chain to about ten steps. Split longer ones into named functions and join them with `pipe`.
+
+  To debug a chain, comment out steps from the bottom up, or add `.pipe(lambda d: print(d.shape) or d)` between steps.
+
+why_it_matters: |
+  An analyst caps extreme weights with `df[df["weight"] > 5]["weight"] = 5`. On pandas 2 it printed a SettingWithCopyWarning that everyone had learned to ignore. The weights were never capped. Three respondents with weights above 12 moved the reported brand share by 4 points. After the upgrade to pandas 3 the assignment still does nothing, with a different warning.
+
+  `df.assign(weight=df["weight"].clip(upper=5.0))` or a single `df.loc[mask, "weight"] = 5` does what the analyst meant.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      df = raw.rename(columns=COLUMN_MAP)
+      df2 = df[df["age"] >= 18]
+      df2[df2["weight"] > 5]["weight"] = 5.0
+      df3 = add_age_band(df2, BINS, LABELS)
+      result = df3
+    annotations:
+      - find: "df2 = df[df[\"age\"] >= 18]"
+        note: "Intermediate names that outlive their use and invite edits to the wrong one."
+      - find: 'df2[df2["weight"] > 5]["weight"] = 5.0'
+        note: "Chained assignment: writes to a temporary copy. The weights are not capped."
+      - find: "result = df3"
+        note: "Which of df, df2, df3 is the final state? The reader has to trace every line."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def prepare(raw: pd.DataFrame, column_map: dict[str, str], bins: list[int], labels: list[str]) -> pd.DataFrame:
+          """Rename, keep adults, cap weights at 5 and add age bands."""
+          return (
+              raw
+              .rename(columns=column_map)
+              .loc[lambda d: d["age"] >= 18]
+              .assign(weight=lambda d: d["weight"].clip(upper=5.0))
+              .pipe(add_age_band, bins=bins, labels=labels)
+          )
+    annotations:
+      - find: ".loc[lambda d: d[\"age\"] >= 18]"
+        note: "Filters the renamed frame at this step."
+      - find: '.assign(weight=lambda d: d["weight"].clip(upper=5.0))'
+        note: "Returns a new frame with capped weights. No assignment to a copy."
+      - find: ".pipe(add_age_band, bins=bins, labels=labels)"
+        note: "Your own pure function, called as one step of the chain."
+  takeaway: |
+    Under Copy-on-Write, write with .loc in one step, or better, build a new frame with a chain of assign, loc and pipe.
+
+exercises:
+  - id: B3-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      On pandas 3.0, `df[df["age"] < 18]["weight"] = 0` runs. What happens to `df`?
+    options:
+      - {id: a, text: "Weights of under-18s become 0."}
+      - {id: b, text: "Nothing. pandas emits a ChainedAssignmentError warning."}
+      - {id: c, text: "It raises an exception and stops."}
+      - {id: d, text: "Every weight becomes 0."}
+    answer: b
+    reasons:
+      - {id: r1, text: "The first indexing step returns a new object, so the write lands on a temporary copy."}
+      - {id: r2, text: "pandas 3 makes every DataFrame read-only."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Under Copy-on-Write the assignment goes to a temporary copy. Use df.loc[mask, \"weight\"] = 0."
+      - answer: c
+        feedback: "ChainedAssignmentError is a warning, not an exception. The code keeps running with df unchanged."
+      - answer: d
+        feedback: "The filter only selects rows. And the write never reaches df anyway."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. df.loc[mask, col] = value still changes df."
+    hints:
+      - "What does df[mask] return under Copy-on-Write?"
+      - "Where does the second step write?"
+      - "To a copy that is thrown away."
+    explanation: |
+      Two indexing steps mean two objects. The write hits the temporary one. Write in one step with `.loc`, or use `assign`.
+
+  - id: B3-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print on pandas 3.0?
+    code: |
+      import pandas as pd
+
+      df = pd.DataFrame({"a": [1, 2, 3]})
+      s = df["a"]
+      s.iloc[0] = 100
+      print(df["a"].tolist())
+    answer: "[1, 2, 3]"
+    wrong_answers:
+      - answer: "[100, 2, 3]"
+        feedback: "Under Copy-on-Write, s behaves as a separate object. Writing to it copies the data first, so df is unchanged."
+    hints:
+      - "Is s a view you can write through?"
+      - "When does Copy-on-Write copy?"
+      - "On the first write to shared data."
+    explanation: |
+      `s` shares memory with `df` until you write to it. The write triggers a copy, so `df` keeps its values.
+
+  - id: B3-L3-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Put the steps of the chain in order. The raw columns are `wt` and `age`. Weights must average 1.0 across the adults in the output.
+    items:
+      - {id: rename, text: ".rename(columns={\"wt\": \"weight\"})"}
+      - {id: filter, text: ".loc[lambda d: d[\"age\"] >= 18]"}
+      - {id: norm, text: ".assign(weight=lambda d: d[\"weight\"] / d[\"weight\"].mean())"}
+      - {id: band, text: ".pipe(add_age_band, bins=BINS, labels=LABELS)"}
+    answer: [rename, filter, norm, band]
+    wrong_answers:
+      - answer: [filter, norm, rename, band]
+        feedback: "The normalising step reads the weight column, which does not exist until the rename."
+      - answer: [rename, norm, filter, band]
+        feedback: "Normalising before the filter averages over minors too, so adult weights no longer average 1.0."
+    hints:
+      - "Which column names does each step need?"
+      - "Which step depends on which rows are present?"
+      - "Rename, filter, normalise, band."
+    explanation: |
+      Each step sees the output of the step above. Rename first so later steps use canonical names. A step that aggregates, such as a mean, must follow the filter that defines its population.
+
+  - id: B3-L3-E4
+    type: refactor
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Rewrite `cap_weights` as one method chain that returns a new frame. Keep only rows where `age >= 18`, then cap `weight` at `cap`. Leave the input unchanged. No chained assignment.
+    starter: |
+      def cap_weights(df, cap):
+          adults = df[df["age"] >= 18]
+          adults[adults["weight"] > cap]["weight"] = cap
+          return adults
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        SRC = pd.DataFrame({"age": [17, 30, 40], "weight": [9.0, 2.0, 8.0]})
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: cap_weights
+          typed: true
+          docstring: true
+          message: "Give `cap_weights` type hints and a docstring."
+        - id: no_chained_assignment
+          kind: forbids_pattern
+          pattern: "\\]\\s*\\[[^\\]]+\\]\\s*=[^=]"
+          message: "That is chained assignment. It writes to a copy. Use assign or clip."
+      tests:
+        - id: capped
+          code: |
+            out = cap_weights(SRC, 5.0)
+            assert list(out["weight"]) == [2.0, 5.0]
+          message: "Weights above cap must become cap, among adults only."
+        - id: filtered
+          code: |
+            out = cap_weights(SRC, 5.0)
+            assert list(out["age"]) == [30, 40]
+          message: "Only rows with age 18 or over must remain."
+        - id: pure
+          code: |
+            cap_weights(SRC, 5.0)
+            assert list(SRC["weight"]) == [9.0, 2.0, 8.0]
+          message: "The input frame changed."
+    solution: |
+      import pandas as pd
+
+
+      def cap_weights(df: pd.DataFrame, cap: float) -> pd.DataFrame:
+          """Keep adults and cap their weights at cap."""
+          return df.loc[lambda d: d["age"] >= 18].assign(
+              weight=lambda d: d["weight"].clip(upper=cap)
+          )
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def cap_weights(df: pd.DataFrame, cap: float) -> pd.DataFrame:
+            """Chained assignment."""
+            adults = df[df["age"] >= 18]
+            adults[adults["weight"] > cap]["weight"] = cap
+            return adults
+      - |
+        import pandas as pd
+
+
+        def cap_weights(df: pd.DataFrame, cap: float) -> pd.DataFrame:
+            """Caps everyone, filters nobody."""
+            return df.assign(weight=lambda d: d["weight"].clip(upper=cap))
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def cap_weights(df: pd.DataFrame, cap: float) -> pd.DataFrame:
+              """Caps everyone, filters nobody."""
+              return df.assign(weight=lambda d: d["weight"].clip(upper=cap))
+        triggers: capped
+    hints:
+      - "Filter with .loc[lambda d: ...]."
+      - "Cap with Series.clip(upper=cap)."
+      - "Join them: `df.loc[...].assign(weight=lambda d: d[\"weight\"].clip(upper=cap))`."
+    explanation: |
+      `loc` then `assign` builds a new frame in two steps, with no temporary copies to write to.
+
+  - id: B3-L3-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [pandas]
+    prompt: |
+      Weights for invalid interviews should be zero. The check after the function shows they are unchanged. Tap the line to fix, and rewrite the function.
+    code: |
+      import pandas as pd
+
+
+      def zero_invalid(df: pd.DataFrame) -> pd.DataFrame:
+          """Set weight to 0 where valid is False."""
+          out = df.copy()
+          out[~out["valid"]]["weight"] = 0.0
+          return out
+    bug_lines: [7]
+    fix_checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        SRC = pd.DataFrame({"valid": [True, False], "weight": [1.5, 2.0]})
+      tests:
+        - id: zeroed
+          code: |
+            assert list(zero_invalid(SRC)["weight"]) == [1.5, 0.0]
+          message: "Invalid rows must get weight 0.0."
+        - id: pure
+          code: |
+            zero_invalid(SRC)
+            assert list(SRC["weight"]) == [1.5, 2.0]
+          message: "The input frame changed."
+    fix_solution: |
+      import pandas as pd
+
+
+      def zero_invalid(df: pd.DataFrame) -> pd.DataFrame:
+          """Set weight to 0 where valid is False."""
+          return df.assign(weight=df["weight"].where(df["valid"], 0.0))
+    wrong_answers:
+      - lines: [6]
+        feedback: "copy() is harmless. Under Copy-on-Write it is also cheap until a write."
+      - lines: [8]
+        feedback: "Returning out is fine. out never received the zeros."
+    hints:
+      - "How many indexing steps does line 7 take before the =?"
+      - "Where does the value land?"
+      - "Use .loc in one step, or Series.where inside assign."
+    explanation: |
+      `out[mask]["weight"] = 0.0` writes to a temporary copy. `df.assign(weight=df["weight"].where(df["valid"], 0.0))` keeps weights where valid and puts 0.0 elsewhere.
+
+recap:
+  - front: "Copy-on-Write in pandas 3.0"
+    back: "Always on. Indexing results behave as separate objects, copied only on write."
+  - front: "df[mask][\"col\"] = value on pandas 3"
+    back: "Changes nothing and emits ChainedAssignmentError. Use df.loc[mask, \"col\"] = value."
+  - front: "Refer to the current step inside a chain"
+    back: "A lambda: assign(x=lambda d: ...) or loc[lambda d: ...]."
+  - front: "Call your own function inside a chain"
+    back: ".pipe(func, **kwargs)."
+
+claims:
+  - claim: "Copy-on-Write is always enabled in pandas 3.0 and the mode.copy_on_write option has no effect."
+    status: verified
+    source: "pandas 3.0 release notes; Pandas4Warning text observed on pandas 3.0.6 and 3.0.2 in this repository."
+  - claim: "Chained assignment never updates the original in pandas 3.0 and emits ChainedAssignmentError as a warning."
+    status: verified
+    source: "pandas Copy-on-Write user guide; run on pandas 3.0.6 and 3.0.2 in this repository."
+  - claim: "SettingWithCopyWarning no longer exists in pandas 3.0."
+    status: verified
+    source: "pandas 3.0 release notes; pandas.errors has no SettingWithCopyWarning on 3.0.6."

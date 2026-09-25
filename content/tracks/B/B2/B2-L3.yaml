@@ -1,0 +1,351 @@
+id: B2-L3
+title: When a class earns its place
+
+concept: |
+  Python does not require classes. Many data science classes are functions in disguise: an `__init__` that stores arguments, and one method that uses them.
+
+  ```python
+  class Normaliser:
+      def __init__(self, col):
+          self.col = col
+
+      def run(self, df):
+          return df.assign(**{self.col: df[self.col] / df[self.col].sum()})
+  ```
+
+  Every caller writes `Normaliser("spend").run(df)`. A function, `normalise(df, col)`, says the same thing in one call, with nothing to construct.
+
+  A class earns its place when at least one of these holds:
+
+  - **State that outlives one call.** A weighting model learns targets in `fit` and applies them in `transform`. scikit-learn's `StandardScaler` stores `mean_` and `scale_` between the two calls.
+  - **An invariant to protect.** A `Weights` object guarantees values are positive and sum to the sample size. Code that builds one through its constructor cannot break that rule.
+  - **Several operations on the same data.** A `SurveyDesign` with `mean()`, `ci()` and `subgroup()` that all need weights, strata and clusters.
+  - **A shared interface.** Several classes with the same method, such as `load()`, so the caller swaps one for another.
+
+  Settings with no behaviour belong in a dataclass (lesson B2-L2). A single step belongs in a function (lesson B2-L1).
+
+  Test a design by asking: if you delete the class and keep its methods as functions, what breaks? If nothing, keep the functions.
+
+why_it_matters: |
+  A team wraps each cleaning step in a class: `DropDuplicates`, `FixDates`, `RenameColumns`, each with `__init__` and `run`. A new analyst adds a `self.seen_ids` set to `DropDuplicates` to speed up a second call. The pipeline object is reused across two tracker waves, so wave 2 silently drops every respondent who also took part in wave 1: 38% of the sample.
+
+  Pure functions have no `self` to keep stale state between calls.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      class AgeBander:
+          def __init__(self, bins, labels):
+              self.bins = bins
+              self.labels = labels
+
+          def run(self, df):
+              return df.assign(age_band=pd.cut(df["age"], self.bins, labels=self.labels))
+
+
+      banded = AgeBander([0, 34, 54, 120], ["18-34", "35-54", "55+"]).run(df)
+    annotations:
+      - find: "class AgeBander:"
+        note: "No state outlives a call, no invariant, one operation: a function in disguise."
+      - find: "def run(self, df):"
+        note: "A single method named run is the usual sign."
+      - find: 'banded = AgeBander([0, 34, 54, 120], ["18-34", "35-54", "55+"]).run(df)'
+        note: "Every caller builds an object only to call one method."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def add_age_band(df: pd.DataFrame, bins: list[int], labels: list[str]) -> pd.DataFrame:
+          """Return df with age_band cut from age."""
+          return df.assign(age_band=pd.cut(df["age"], bins, labels=labels))
+
+
+      class RakingWeights:
+          """Learn raking targets on one wave, apply them to later waves."""
+
+          def __init__(self, targets: dict[str, dict[str, float]]) -> None:
+              self.targets = targets
+              self.factors_: dict[str, float] | None = None
+
+          def fit(self, df: pd.DataFrame) -> "RakingWeights":
+              ...
+              return self
+
+          def transform(self, df: pd.DataFrame) -> pd.Series:
+              if self.factors_ is None:
+                  raise RuntimeError("call fit before transform")
+              ...
+    annotations:
+      - find: "def add_age_band(df: pd.DataFrame, bins: list[int], labels: list[str]) -> pd.DataFrame:"
+        note: "One step, no state: a function."
+      - find: "self.factors_: dict[str, float] | None = None"
+        note: "State that outlives one call, learned in fit and used in transform."
+      - find: 'raise RuntimeError("call fit before transform")'
+        note: "The class protects an order of operations a function could not."
+  takeaway: |
+    Functions by default. A class when state lives across calls, an invariant needs guarding, or several methods share the same data.
+
+exercises:
+  - id: B2-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which of these most needs a class?
+    options:
+      - {id: a, text: "Rename columns using a mapping."}
+      - {id: b, text: "Learn category frequencies on training data and encode test data with them."}
+      - {id: c, text: "Convert a date column to UTC."}
+      - {id: d, text: "Hold three settings with no behaviour."}
+    answer: b
+    reasons:
+      - {id: r1, text: "State learned in one call must be reused in a later call."}
+      - {id: r2, text: "It has the most lines of code."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "One step with no state. A function taking the mapping is enough."
+      - answer: c
+        feedback: "One step with no state. A function is enough."
+      - answer: d
+        feedback: "Settings with no behaviour belong in a dataclass, not a full class."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Size does not decide it. State across calls does."
+    hints:
+      - "Which task has two phases?"
+      - "What must survive between those phases?"
+      - "Learned frequencies must be stored between fit and transform."
+    explanation: |
+      Fit then transform needs stored state, the classic case for a class, as in scikit-learn's encoders.
+
+  - id: B2-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      class Deduper:
+          def __init__(self) -> None:
+              self.seen: set[int] = set()
+
+          def run(self, ids: list[int]) -> list[int]:
+              out = [i for i in ids if i not in self.seen]
+              self.seen.update(ids)
+              return out
+
+
+      d = Deduper()
+      d.run([1, 2, 3])
+      print(d.run([2, 3, 4]))
+    answer: "[4]"
+    wrong_answers:
+      - answer: "[2, 3, 4]"
+        feedback: "self.seen still holds 1, 2 and 3 from the first call, so 2 and 3 are dropped."
+    hints:
+      - "What is in self.seen after the first call?"
+      - "Which of 2, 3 and 4 is not in it?"
+      - "Only 4."
+    explanation: |
+      The object keeps state between calls. Reuse it on a new wave and it drops rows the new wave needs.
+
+  - id: B2-L3-E3
+    type: refactor
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Replace the class with a function `add_share(df, col)` that returns a new DataFrame with a column `share` equal to `df[col] / df[col].sum()`. If the column sums to zero, set `share` to `0.0` for every row.
+    starter: |
+      class ShareAdder:
+          def __init__(self, col):
+              self.col = col
+
+          def run(self, df):
+              return df.assign(share=df[self.col] / df[self.col].sum())
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: add_share
+          typed: true
+          docstring: true
+          message: "Give `add_share` type hints and a docstring."
+        - id: no_class
+          kind: forbids_pattern
+          pattern: "^class "
+          message: "Remove the class. A function is enough here."
+      tests:
+        - id: value
+          code: |
+            out = add_share(pd.DataFrame({"n": [1, 3]}), "n")
+            assert list(out["share"]) == [0.25, 0.75]
+          message: "share must be each value divided by the column total."
+        - id: zero_total
+          code: |
+            out = add_share(pd.DataFrame({"n": [0, 0]}), "n")
+            assert list(out["share"]) == [0.0, 0.0]
+          message: "A zero total must give share 0.0, not NaN."
+        - id: pure
+          code: |
+            src = pd.DataFrame({"n": [1]})
+            add_share(src, "n")
+            assert list(src.columns) == ["n"]
+          message: "The input frame changed. Return a new one."
+    solution: |
+      import pandas as pd
+
+
+      def add_share(df: pd.DataFrame, col: str) -> pd.DataFrame:
+          """Return df with share = col / column total, or 0.0 when the total is zero."""
+          total = df[col].sum()
+          if total == 0:
+              return df.assign(share=0.0)
+          return df.assign(share=df[col] / total)
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def add_share(df: pd.DataFrame, col: str) -> pd.DataFrame:
+            """No guard."""
+            return df.assign(share=df[col] / df[col].sum())
+      - |
+        import pandas as pd
+
+
+        def add_share(df: pd.DataFrame, col: str) -> pd.DataFrame:
+            """Mutates."""
+            total = df[col].sum()
+            df["share"] = 0.0 if total == 0 else df[col] / total
+            return df
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def add_share(df: pd.DataFrame, col: str) -> pd.DataFrame:
+              """No guard."""
+              return df.assign(share=df[col] / df[col].sum())
+        triggers: zero_total
+    hints:
+      - "Move self.col into a parameter."
+      - "Compute the total once and test it for zero."
+      - "`df.assign(share=0.0)` when the total is zero."
+    explanation: |
+      The class held one value and did one thing. A function with two parameters is shorter, and the zero guard stops a NaN column.
+
+  - id: B2-L3-E4
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      The same `Scaler` object is fitted on wave 1 and used for waves 2 and 3. Wave 3 results match a scaler fitted on wave 2 only. Tap the line that causes it.
+    code: |
+      class Scaler:
+          """Standardise with the mean and sd learned in fit."""
+
+          def fit(self, values: list[float]) -> "Scaler":
+              n = len(values)
+              self.mean_ = sum(values) / n
+              self.sd_ = (sum((v - self.mean_) ** 2 for v in values) / n) ** 0.5
+              return self
+
+          def transform(self, values: list[float]) -> list[float]:
+              self.fit(values)
+              return [(v - self.mean_) / self.sd_ for v in values]
+    bug_lines: [11]
+    fix_checker:
+      kind: python
+      tests:
+        - id: keeps_fit
+          code: |
+            s = Scaler().fit([0.0, 2.0])
+            assert s.transform([4.0]) == [3.0]
+          message: "transform must use the mean and sd from fit, not refit on new data."
+        - id: fit_works
+          code: |
+            s = Scaler().fit([0.0, 2.0])
+            assert (s.mean_, s.sd_) == (1.0, 1.0)
+          message: "fit must still learn the mean and sd."
+    fix_solution: |
+      class Scaler:
+          """Standardise with the mean and sd learned in fit."""
+
+          def fit(self, values: list[float]) -> "Scaler":
+              n = len(values)
+              self.mean_ = sum(values) / n
+              self.sd_ = (sum((v - self.mean_) ** 2 for v in values) / n) ** 0.5
+              return self
+
+          def transform(self, values: list[float]) -> list[float]:
+              return [(v - self.mean_) / self.sd_ for v in values]
+    wrong_answers:
+      - lines: [6]
+        feedback: "The mean formula is correct. The problem is when it is recomputed."
+      - lines: [12]
+        feedback: "The scaling formula is correct. It uses values that were just overwritten on line 11."
+    hints:
+      - "Which state should transform read?"
+      - "Does transform change that state?"
+      - "Refitting inside transform discards what fit learned."
+    explanation: |
+      Refitting in `transform` throws away the learned state, the only reason the class exists. It also leaks test data into the scaling.
+
+  - id: B2-L3-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      Choose a form for each piece of a survey analysis package.
+    slots:
+      - id: recode
+        label: "Recode a Likert column to numbers using a mapping"
+        options: &forms
+          - {id: function, text: "Function"}
+          - {id: dataclass, text: "Frozen dataclass"}
+          - {id: class, text: "Class with methods"}
+        answer: function
+      - id: settings
+        label: "Confidence level, minimum base and weight column"
+        options: *forms
+        answer: dataclass
+      - id: design
+        label: "Weights, strata and clusters used by mean, CI and subgroup methods"
+        options: *forms
+        answer: class
+    model_answer: |
+      - Recoding is one stateless step: a function.
+      - Settings with no behaviour: a frozen dataclass.
+      - A survey design shares the same data across several operations and must keep weights valid: a class.
+    wrong_answers:
+      - answer: {recode: class}
+        feedback: "One step, no state that outlives the call. A class adds construction with no benefit."
+      - answer: {settings: class}
+        feedback: "No behaviour to attach. A frozen dataclass gives fields, equality and immutability for free."
+      - answer: {design: function}
+        feedback: "Every function would need weights, strata and clusters passed again. A class keeps them together and valid."
+    hints:
+      - "Does it hold data, do something, or both?"
+      - "Do several operations share the same data?"
+      - "Delete the class: what breaks?"
+    explanation: |
+      Match the form to the need: function for a step, dataclass for settings, class for shared state with behaviour.
+
+recap:
+  - front: "A class with __init__ and one run method"
+    back: "A function in disguise. Replace it with a function."
+  - front: "Four reasons a class earns its place"
+    back: "State across calls, an invariant to protect, several operations on the same data, a shared interface."
+  - front: "The deletion test"
+    back: "Turn the methods into functions. If nothing breaks, keep the functions."
+  - front: "Settings with no behaviour"
+    back: "A frozen dataclass."
+
+claims:
+  - claim: "scikit-learn's StandardScaler stores mean_ and scale_ after fit."
+    status: verified
+    source: "scikit-learn 1.8 API reference; checked in this repository's dev environment."
