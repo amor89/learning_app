@@ -7,7 +7,7 @@ concept: |
   Incremental copy works in one of two ways:
 
   - **Watermark.** You pick an incremental column, such as a `ROWVERSION`, a datetime, a date or an increasing integer. Each subsequent load copies rows whose value is **larger than any value copied before**.
-  - **CDC.** If change data capture is enabled on the source database, the job reads its change stream and copies every insert, update and delete since the last run. You do not choose a column.
+  - **CDC** (preview in Copy job). If change data capture is enabled on the source database, the job reads its change stream and copies every insert, update and delete since the last run. You do not choose a column.
 
   The watermark method has two blind spots, and both follow from "larger than":
 
@@ -279,5 +279,8 @@ claims:
     status: verified
     source: "https://learn.microsoft.com/en-us/fabric/data-factory/incremental-copy-job (updated 2026-09-15) and .../what-is-copy-job (updated 2026-09-17)"
   - claim: "Update methods Append (default), Merge (primary key by default), Overwrite and SCD Type 2."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-factory/what-is-copy-job (updated 2026-09-17)"
+  - claim: "CDC replication in Copy job is in preview."
     status: verified
     source: "https://learn.microsoft.com/en-us/fabric/data-factory/what-is-copy-job (updated 2026-09-17)"

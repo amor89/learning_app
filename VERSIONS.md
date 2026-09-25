@@ -15,8 +15,8 @@ Checked on 25 September 2026. Status key:
 | Python on DBR 17.3 LTS | Unverified | Unverified | Check the "System environment" section of the 17.3 LTS release notes |
 | pandas, scikit-learn on DBR 17.3 LTS ML | Unverified | Unverified | requirements-cpu-17.3lts.txt from the ML release notes |
 | Databricks Free Edition | Serverless compute only, per-account quotas, one workspace, Python and SQL notebooks (no Scala or R), restricted outbound internet | Search only | docs.databricks.com/aws/en/getting-started/free-edition-limitations |
-| Fabric Runtime 2.0 | Spark 4.1, Delta Lake 4.2, Java 21, Python 3.13. GA, not yet the default runtime | Search only | learn.microsoft.com/en-us/fabric/data-engineering/runtime-2-0 |
-| Fabric default runtime | Unverified (1.3 expected) | Unverified | learn.microsoft.com/en-us/fabric/data-engineering/runtime |
+| Fabric Runtime 2.0 | Spark 4.1, Delta Lake 4.2, Java 21, Python 3.13. GA and recommended, not the default for new workspaces | Verified | learn.microsoft.com/en-us/fabric/data-engineering/runtime (updated 2026-07-24) |
+| Fabric default runtime | 1.3 for new workspaces, end of support announced | Verified | learn.microsoft.com/en-us/fabric/data-engineering/runtime (updated 2026-07-24) |
 
 ## Python packages (latest on PyPI)
 
@@ -61,18 +61,46 @@ Browser exercises run on the Pyodide versions. Laptop and CI tests run on the pi
 
 ## Fabric feature status
 
-Every Track C lesson cites a row in this table. Microsoft Learn pages were blocked in this build environment, so each row needs a direct page check before Phase 4.
+Every Track C lesson cites a row in this table. Each row was checked on the Microsoft Learn page named, in September 2026. "GA" means the page shows no preview label for the feature. Individual sub-features carry their own label, listed where a lesson teaches them. Each lesson's `claims` block lists the exact page and its update date.
 
-| Feature | Status | Check |
-|---|---|---|
-| Mirroring Azure Databricks Unity Catalog | GA | Search only (Fabric blog GA announcement) |
-| Mirroring Azure Databricks behind private endpoints | GA | Search only (Fabric blog) |
-| Fabric data agent | GA | Search only (Learn: concept-data-agent) |
-| Data agent in Microsoft 365 Copilot, Copilot Studio, Copilot in Power BI | Preview | Search only (Learn page titles carry "preview") |
-| OneLake security (roles to row and column level) | Unverified | Unverified |
-| Fabric IQ | Unverified | Unverified |
-| Copilot in notebooks (data access limited to the notebook's attached data) | Documented behaviour. GA status unverified | Search only |
-| OneLake shortcuts, Direct Lake, Eventstream, Eventhouse, Activator, Dataflows Gen2, copy job, deployment pipelines, Git integration, domains, sensitivity labels | Unverified | Check each in Phase 4 |
+| Feature | Status | Source page (Learn, fabric/...) | Lesson |
+|---|---|---|---|
+| Workspaces, capacities, F SKUs, pausing | GA | enterprise/licenses, enterprise/pause-resume | C1-L1 |
+| OneLake, abfss paths, regional endpoints | GA | onelake/onelake-overview, onelake/onelake-access-api | C1-L2 |
+| Workspace roles | GA | fundamentals/roles-workspaces | C1-L3 |
+| Lakehouse, schemas on by default | GA | data-engineering/lakehouse-overview (2026-05-07) | C2-L1 |
+| Warehouse (MERGE GA, ALTER COLUMN and nested CTEs preview) | GA | data-warehouse/tsql-surface-area, table-constraints, data-types; status from data-warehouse/data-warehousing (2025-09-09) | C2-L2 |
+| SQL analytics endpoint | GA | data-engineering/lakehouse-sql-analytics-endpoint | C2-L3 |
+| OneLake shortcuts, shortcut caching | GA | onelake/onelake-shortcuts (2026-07-13) | C3-L1 |
+| Mirroring (Azure SQL and others GA. Azure Database for MySQL, Dremio, SharePoint List preview) | GA, sources vary | mirroring/overview (2026-08-28) | C3-L2 |
+| Mirroring Azure Databricks Unity Catalog | GA | mirroring/azure-databricks (2025-10-24) | C3-L3 |
+| Copy job (watermark incremental copy) | GA | data-factory/what-is-copy-job (2026-09-17) | C4-L2 |
+| Copy job CDC replication | Preview | data-factory/what-is-copy-job (2026-09-17) | C4-L2 |
+| Dataflow Gen2 | GA | data-factory/dataflows-gen2-overview (2026-08-13), decision-guide-data-movement | C4-L1 |
+| Pipelines (activities, timeouts, retries, dependencies. Retry conditions preview, not taught) | GA | data-factory/activity-overview | C4-L3 |
+| NotebookUtils, environments, Runtime 2.0 | GA | data-engineering/notebook-utilities, create-and-use-environment, runtime | C5-L1, C5-L2 |
+| V-Order, resource profiles | GA | data-engineering/delta-optimization-and-v-order, resource-profiles-overview | C5-L2 |
+| Delta Lake interoperability across Fabric engines | GA | fundamentals/delta-lake-interoperability | C5-L3 |
+| Direct Lake on OneLake and on SQL (calculated tables on OneLake preview) | GA | fundamentals/direct-lake-overview (2026-09-02) | C6-L3 |
+| Eventstream (Azure Data Explorer source, DeltaFlow preview) | GA | real-time-intelligence/event-streams/overview (2026-04-29) | C7-L1 |
+| Eventhouse, KQL databases, data policies | GA | real-time-intelligence/eventhouse (2026-06-15), data-policies | C7-L2 |
+| Activator (publish business event preview) | GA | real-time-intelligence/data-activator/activator-introduction (2026-04-17) | C7-L3 |
+| Copilot in notebooks | Preview | fundamentals/copilot-ai-feature-state (2026-06-19), data-engineering/copilot-notebooks-overview | C8-L1, C8-L3 |
+| Copilot in Data Factory | GA | fundamentals/copilot-ai-feature-state (2026-06-19) | C8-L1 |
+| Copilot for SQL queries in a Warehouse | Preview | fundamentals/copilot-ai-feature-state (2026-06-19) | C8-L1 |
+| Copilot in Power BI (semantic models, reports) | GA | fundamentals/copilot-ai-feature-state (2026-06-19) | C8-L1 |
+| Fabric data agent | GA per data-science/concept-data-agent (2026-05-11). The release-status page lists it in a Data Science row marked preview with AI functions. Recheck both | data-science/concept-data-agent, fundamentals/copilot-ai-feature-state | C8-L2 |
+| Data agent in Microsoft 365 Copilot or Copilot Studio | Preview | data-science/data-agent-microsoft-365-copilot, data-agent-microsoft-copilot-studio | Not taught |
+| Domains (override of workspace assignments preview) | GA | governance/domains (2025-05-01) | C9-L1 |
+| Endorsement (promoted, certified, master data) | GA | governance/endorsement-overview (2024-07-11) | C9-L1 |
+| OneLake security RLS and CLS: lakehouse, Spark, Direct Lake on OneLake, SQL analytics endpoint in user's identity mode | GA | onelake/security/read-secured-data (2026-08-28) | C9-L2 |
+| OneLake security: Eventhouse RLS, authorised third-party engines | Preview | onelake/security/read-secured-data (2026-08-28) | C9-L2 |
+| Sensitivity labels, protection policies, Purview DLP | GA | governance/information-protection (2026-07-13), protection-policies-overview | C9-L3 |
+| Lineage view, impact analysis | GA | governance/lineage, governance/impact-analysis | C9-L3 |
+| Git integration (some item types preview) | GA | cicd/git-integration/intro-to-git-integration (2026-07-21) | C10-L1 |
+| Deployment pipelines | GA | cicd/deployment-pipelines/intro-to-deployment-pipelines (2026-07-17) | C10-L2 |
+| Smoothing, throttling, surge protection, Capacity Metrics app | GA | enterprise/throttling (2026-08-14), surge-protection, metrics-app | C10-L3 |
+| Fabric IQ (ontology preview) | Ontology preview | iq/overview (2026-07-08) | Not taught |
 
 ## Known platform behaviours to verify before teaching
 
