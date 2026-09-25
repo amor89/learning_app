@@ -258,8 +258,8 @@ recap:
 
 claims:
   - claim: "Git folders: per-user branches under /Workspace/Users/, trunk-based strategy, production Git folders updated only by automation, bundles recommended for deployment."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/repos/ci-cd"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/repos/ci-cd (checked 2026-09-25)"
   - claim: "dbutils.secrets.get(scope, key) reads a secret; values are shown as [REDACTED]; redaction does not prevent deliberate transformations."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/security/secrets/"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/security/secrets/ (checked 2026-09-25)"

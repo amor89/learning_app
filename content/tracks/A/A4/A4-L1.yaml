@@ -319,8 +319,8 @@ recap:
 
 claims:
   - claim: "Unity Catalog uses a three-level namespace, catalog.schema.table, and two-part names resolve against the current catalog."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/ (checked 2026-09-25)"
   - claim: "spark.catalog.currentCatalog() returns the current catalog (PySpark 3.4 and later)."
     status: verified
     source: "Present on PySpark 4.0.4 in this repository."

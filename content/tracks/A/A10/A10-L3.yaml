@@ -312,8 +312,8 @@ recap:
 
 claims:
   - claim: "Databricks recommends OAuth M2M for service principals in CI; environment variables DATABRICKS_HOST, DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET; github-oidc workload identity federation needs no client secret."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/dev-tools/auth/oauth-m2m and https://docs.databricks.com/aws/en/dev-tools/bundles/authentication"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/dev-tools/auth/oauth-m2m and https://docs.databricks.com/aws/en/dev-tools/bundles/authentication (checked 2026-09-25)"
   - claim: "databricks/setup-cli installs the Databricks CLI in GitHub Actions and accepts a version input."
     status: search-only
     source: "https://github.com/databricks/setup-cli"

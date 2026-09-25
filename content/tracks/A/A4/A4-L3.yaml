@@ -312,11 +312,11 @@ recap:
 
 claims:
   - claim: "Row filters are SQL UDFs returning BOOLEAN bound with SET ROW FILTER ... ON (cols); column masks are bound with ALTER COLUMN ... SET MASK."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/manually-apply"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/manually-apply (checked 2026-09-25)"
   - claim: "is_account_group_member returns true when the session user is a direct or indirect member of an account-level group; is_member checks workspace groups."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/sql/language-manual/functions/is_account_group_member"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/sql/language-manual/functions/is_account_group_member (checked 2026-09-25)"
   - claim: "Attribute-based access control (ABAC) policies apply filters and masks centrally through governed tags."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/abac/policies"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/abac/policies (checked 2026-09-25)"

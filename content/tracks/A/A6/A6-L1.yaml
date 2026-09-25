@@ -457,5 +457,5 @@ claims:
     status: verified
     source: "Run on PySpark 4.0.4: PySparkTypeError [NOT_COLUMN_OR_STR] Argument `col` should be a Column or str, got generator."
   - claim: "Lakeflow Spark Declarative Pipelines provide @dp.expect, @dp.expect_or_drop and @dp.expect_or_fail in pyspark.pipelines."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/ldp/developer/ldp-python-ref-expectations"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/ldp/developer/ldp-python-ref-expectations (checked 2026-09-25)"

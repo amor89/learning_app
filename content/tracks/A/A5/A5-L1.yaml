@@ -307,5 +307,5 @@ claims:
     status: verified
     source: "Run on PySpark 4.0.4 in this repository."
   - claim: "Serverless compute does not support DataFrame or SQL cache APIs."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/compute/serverless/limitations"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/compute/serverless/limitations (checked 2026-09-25)"

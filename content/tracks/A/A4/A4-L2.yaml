@@ -289,5 +289,5 @@ claims:
     status: search-only
     source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/manage-privileges/"
   - claim: "GRANT accepts a comma-separated list of privileges, and SHOW GRANTS lists grants on a securable."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/sql/language-manual/security-grant and https://docs.databricks.com/aws/en/sql/language-manual/security-show-grant"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/sql/language-manual/security-grant and https://docs.databricks.com/aws/en/sql/language-manual/security-show-grant (checked 2026-09-25)"

@@ -335,8 +335,8 @@ claims:
     status: verified
     source: "Run on PySpark 4.0.4 in this repository."
   - claim: "Databricks recommends liquid clustering over partitioning for UC managed tables; serverless does not support cache APIs."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/tables/clustering and https://docs.databricks.com/aws/en/compute/serverless/limitations"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/tables/clustering and https://docs.databricks.com/aws/en/compute/serverless/limitations (checked 2026-09-25)"
 
 practical:
   platform: databricks

@@ -285,11 +285,11 @@ recap:
 
 claims:
   - claim: "Auto Loader tracks files in RocksDB in the checkpoint for exactly-once processing; _metadata.file_path is available; checkpoints can live in Volumes paths."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/ (checked 2026-09-25)"
   - claim: "addNewColumns is the default schema evolution mode when no schema is provided; the stream stops with UnknownFieldException and picks up new columns on restart; _rescued_data is added when the schema is inferred."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/schema"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/schema (checked 2026-09-25)"
   - claim: "DataStreamWriter.trigger accepts availableNow=True and toTable exists in PySpark 4.0."
     status: verified
     source: "Checked on PySpark 4.0.4 in this repository."

@@ -253,8 +253,8 @@ claims:
     status: verified
     source: "Run on delta-spark 4.0.1 in this repository."
   - claim: "deletedFileRetentionDuration defaults to 7 days and logRetentionDuration to 30 days; from Databricks Runtime 18.0 time travel beyond deletedFileRetentionDuration is blocked."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/delta/vacuum and https://docs.databricks.com/aws/en/tables/history"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/delta/vacuum and https://docs.databricks.com/aws/en/tables/history (checked 2026-09-25)"
   - claim: "Databricks recommends liquid clustering and predictive optimization for Unity Catalog managed tables."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/tables/clustering"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/tables/clustering (checked 2026-09-25)"

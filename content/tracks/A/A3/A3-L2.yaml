@@ -23,7 +23,7 @@ concept: |
   Evolve on purpose, never by default. Two habits cause trouble:
 
   - Leaving `mergeSchema` on every silver write. A supplier typo such as `final_wieght` becomes a new, permanent column, and the real weight is NULL for that wave.
-  - Setting `spark.databricks.delta.schema.autoMerge.enabled` for the session. It turns evolution on for every MERGE in the job, including ones you did not think about.
+  - Setting `spark.databricks.delta.schema.autoMerge.enabled` for the session, which Databricks now labels legacy. It turns evolution on for every MERGE in the job, including ones you did not think about.
 
   The safe pattern: validate the incoming columns against the registry first (lesson A2-L2). If a column is new and expected, add it with `ALTER TABLE` or evolve that one write. If it is unexpected, fail the run and ask the supplier.
 
@@ -359,5 +359,5 @@ claims:
     status: verified
     source: "Run on delta-spark 4.0.1 in this repository."
   - claim: "spark.databricks.delta.schema.autoMerge.enabled turns on schema evolution for MERGE across the session."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/data-engineering/schema-evolution"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/data-engineering/schema-evolution (checked 2026-09-25)"

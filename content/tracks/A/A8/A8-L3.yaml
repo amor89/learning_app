@@ -345,8 +345,8 @@ claims:
     status: verified
     source: "Run on delta-spark 4.0.1 in this repository."
   - claim: "CDF on Databricks: delta.enableChangeDataFeed, readChangeFeed, startingVersion, table_changes."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/tables/features/change-data-feed"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/tables/features/change-data-feed (checked 2026-09-25)"
 
 practical:
   platform: databricks

@@ -390,14 +390,14 @@ recap:
 
 claims:
   - claim: "Databricks Asset Bundles were renamed Declarative Automation Bundles on 16 March 2026; the change is non-breaking."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/release-notes/dev-tools/bundles"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/release-notes/dev-tools/bundles (checked 2026-09-25)"
   - claim: "databricks.yml structure: bundle, variables, resources.jobs with parameters and tasks, targets with mode; variable resolution order."
     status: search-only
     source: "https://docs.databricks.com/aws/en/dev-tools/bundles/settings and https://docs.databricks.com/aws/en/dev-tools/bundles/variables"
   - claim: "Development mode prefixes resources with [dev ${workspace.current_user.short_name}] and pauses schedules and triggers."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/dev-tools/bundles/deployment-modes"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/dev-tools/bundles/deployment-modes (checked 2026-09-25)"
   - claim: "Notebook tasks read job parameters with dbutils.widgets.get."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/jobs/parameter-use"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/jobs/parameter-use (checked 2026-09-25)"

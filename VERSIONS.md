@@ -9,12 +9,12 @@ Checked on 25 September 2026. Status key:
 
 | Item | Version | Status | Source |
 |---|---|---|---|
-| Databricks Runtime LTS (target for lessons) | 17.3 LTS, Apache Spark 4.0.0, released October 2025 | Search only | docs.databricks.com/aws/en/release-notes/runtime/17.3lts |
-| Databricks Runtime 18 LTS | Apache Spark 4.1.0, JDK 21, unified release with dated updates | Search only. Search results describe it as "in feature development". Confirm its LTS status before switching lessons to it. | docs.databricks.com/aws/en/release-notes/runtime/18 |
-| Databricks Runtime 16.4 LTS | Apache Spark 3.5.2 | Search only | docs.databricks.com/aws/en/release-notes/runtime/16.4lts |
-| Python on DBR 17.3 LTS | Unverified | Unverified | Check the "System environment" section of the 17.3 LTS release notes |
+| Databricks Runtime LTS (target for lessons) | 17.3 LTS, Apache Spark 4.0.0, Delta Lake 4.0.0, released October 2025 | Verified (checked 2026-09-25) | docs.databricks.com/aws/en/release-notes/runtime/17.3lts |
+| Databricks Runtime 18 LTS | Apache Spark 4.1.0. In its GA (feature development) phase, becomes LTS when Runtime 19 is GA | Verified (checked 2026-09-25). Keep lessons on 17.3 LTS until 18 reaches LTS | docs.databricks.com/aws/en/release-notes/runtime/18 |
+| Databricks Runtime 16.4 LTS | Apache Spark 3.5.2 | Verified (checked 2026-09-25) | docs.databricks.com/aws/en/release-notes/runtime/16.4lts |
+| Python on DBR 17.3 LTS | Python 3.12.3, Java 17, Scala 2.13.16 | Verified (checked 2026-09-25) | System environment section of the 17.3 LTS release notes |
 | pandas, scikit-learn on DBR 17.3 LTS ML | Unverified | Unverified | requirements-cpu-17.3lts.txt from the ML release notes |
-| Databricks Free Edition | Serverless compute only, per-account quotas, one workspace, Python and SQL notebooks (no Scala or R), restricted outbound internet | Search only | docs.databricks.com/aws/en/getting-started/free-edition-limitations |
+| Databricks Free Edition | Serverless compute only, per-account quotas, no R or Scala, outbound internet restricted to trusted domains, one SQL warehouse | Verified (checked 2026-09-25) | docs.databricks.com/aws/en/getting-started/free-edition-limitations |
 | Fabric Runtime 2.0 | Spark 4.1, Delta Lake 4.2, Java 21, Python 3.13. GA and recommended, not the default for new workspaces | Verified | learn.microsoft.com/en-us/fabric/data-engineering/runtime (updated 2026-07-24) |
 | Fabric default runtime | 1.3 for new workspaces, end of support announced | Verified | learn.microsoft.com/en-us/fabric/data-engineering/runtime (updated 2026-07-24) |
 
@@ -104,7 +104,7 @@ Every Track C lesson cites a row in this table. Each row was checked on the Micr
 
 ## Known platform behaviours to verify before teaching
 
-- Serverless compute (and so Free Edition) does not support `df.cache()` / `persist()` or the classic Spark UI. Unverified. Affects A5 and D2 practicals.
+- Serverless compute does not support DataFrame or SQL cache APIs, and the Spark UI is not available. Verified on docs.databricks.com/aws/en/compute/serverless/limitations (checked 2026-09-25). Affects A5 and D2 practicals.
 - `owner` is a reserved table property in Spark and fails in `SET TBLPROPERTIES`. Unverified. Affects `reference/pipelines/unity_catalog.sql` and A4.
 - MERGE fails with a multiple-source-rows error when two source rows match one target row. Verified locally by `practice/tests/test_a3_l1_merge.py` on delta-spark 4.0.1.
 - Spark 4.0 turns ANSI mode on by default, so an invalid `cast` raises an error instead of returning null. Unverified for DBR 17.3 LTS. Affects A2 and D3.
@@ -130,16 +130,16 @@ Checked on 25 September 2026. "Local" means run on PySpark 4.0.4 with delta-spar
 | `withColumnRenamed` on a missing column is a silent no-op. | Verified | Local |
 | `pyspark.testing.assertDataFrameEqual` (with `checkRowOrder`, `rtol`, `atol`) and `assertSchemaEqual` exist. | Verified | Local |
 | Open-source Spark defaults `saveAsTable` to Parquet. Databricks defaults to Delta. The practice harness sets `spark.sql.sources.default=delta`. | Verified (OSS) | Local |
-| Serverless compute (and so Free Edition) does not support `cache()`, `persist()` or SQL `CACHE`. The Spark UI is replaced by the query profile. | Search | docs.databricks.com/aws/en/compute/serverless/limitations |
-| Row filters: SQL UDF returning BOOLEAN, applied with `ALTER TABLE ... SET ROW FILTER f ON (col)`. Column masks: `ALTER TABLE ... ALTER COLUMN c SET MASK f`. | Search | docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/manually-apply |
-| `is_account_group_member()` checks account-level groups, directly or indirectly. | Search | docs.databricks.com/aws/en/sql/language-manual/functions/is_account_group_member |
-| UC privileges `USE CATALOG`, `USE SCHEMA`, `SELECT`, `MODIFY`; grants on a schema inherit to current and future tables. | Search | docs.databricks.com/aws/en/data-governance/unity-catalog/manage-privileges/ |
-| Auto Loader: `cloudFiles.schemaLocation`, `_rescued_data`, `cloudFiles.schemaEvolutionMode` (for example `rescue`, `addNewColumns`), `trigger(availableNow=True)`. | Search | docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/schema |
-| Lakeflow Spark Declarative Pipelines expectations: `@dp.expect`, `@dp.expect_or_drop`, `@dp.expect_or_fail` from `pyspark.pipelines`. | Search | docs.databricks.com/aws/en/ldp/developer/ldp-python-ref-expectations |
-| Databricks Asset Bundles were renamed Declarative Automation Bundles on 16 March 2026. The `databricks bundle` CLI and `databricks.yml` are unchanged. | Search | docs.databricks.com/aws/en/release-notes/dev-tools/bundles |
+| Serverless compute (and so Free Edition) does not support DataFrame or SQL cache APIs. The Spark UI is not available. | Verified (checked 2026-09-25) | docs.databricks.com/aws/en/compute/serverless/limitations |
+| Row filters: SQL UDF returning BOOLEAN, applied with `ALTER TABLE ... SET ROW FILTER f ON (col)`. Column masks: `ALTER TABLE ... ALTER COLUMN c SET MASK f`. | Verified (checked 2026-09-25) | docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/manually-apply |
+| `is_account_group_member()` checks account-level groups, directly or indirectly. | Verified (checked 2026-09-25) | docs.databricks.com/aws/en/sql/language-manual/functions/is_account_group_member |
+| UC privileges `USE CATALOG`, `USE SCHEMA`, `SELECT`, `MODIFY`; grants on a schema inherit to current and future tables. | Privileges and inheritance verified (checked 2026-09-25). The exact read requirement is search only | docs.databricks.com/aws/en/data-governance/unity-catalog/manage-privileges/ |
+| Auto Loader: `cloudFiles.schemaLocation`, `_rescued_data`, `cloudFiles.schemaEvolutionMode` (for example `rescue`, `addNewColumns`), `trigger(availableNow=True)`. | addNewColumns default and UnknownFieldException verified (checked 2026-09-25). Other options search only | docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/schema |
+| Lakeflow Spark Declarative Pipelines expectations: `@dp.expect`, `@dp.expect_or_drop`, `@dp.expect_or_fail` from `pyspark.pipelines`. | Verified (checked 2026-09-25) | docs.databricks.com/aws/en/ldp/developer/ldp-python-ref-expectations |
+| Databricks Asset Bundles were renamed Declarative Automation Bundles on 16 March 2026. The `databricks bundle` CLI and `databricks.yml` are unchanged. | Rename and date verified (checked 2026-09-25). CLI unchanged: search only | docs.databricks.com/aws/en/release-notes/dev-tools/bundles |
 | Bundle variables resolve in order: `--var`, `BUNDLE_VAR_` environment variables, `variable-overrides.json`, target mappings, default. | Search | docs.databricks.com/aws/en/dev-tools/bundles/variables |
 | Job parameters read in notebooks with `dbutils.widgets.get`; dynamic value references such as `{{job.run_id}}` use double braces and are not expressions. | Search | docs.databricks.com/aws/en/jobs/parameter-use |
-| Git folders: one branch per developer under `/Workspace/Users/`; production Git folders updated only by automation. | Search | docs.databricks.com/aws/en/repos/ci-cd |
+| Git folders: one branch per developer under `/Workspace/Users/`; production Git folders updated only by automation. | Verified (checked 2026-09-25) | docs.databricks.com/aws/en/repos/ci-cd |
 | Liquid clustering `CLUSTER BY` / `CLUSTER BY AUTO` and predictive optimization for UC managed tables. | Search | docs.databricks.com/aws/en/tables/clustering |
 | PySpark 4.0.4 with pandas 3.0.6 fails on `pyspark.testing.assertDataFrameEqual` and pandas-on-Spark imports: `ImportError: cannot import name '_builtin_table' from 'pandas.core.common'`. With pandas 2.3.3 it works. The `spark` dependency group pins pandas 2.x and runs in its own environment. | Verified | Local |
 | `assertDataFrameEqual` ignores row order by default (`checkRowOrder=False`), compares floats with `rtol=1e-5`, fails on schema differences such as INT against BIGINT (`DIFFERENT_SCHEMA`) and on duplicate rows. `PySparkAssertionError` subclasses `AssertionError`. | Verified | Local, pandas 2.3.3 |

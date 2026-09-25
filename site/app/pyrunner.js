@@ -3,6 +3,7 @@ import { FIRST_LOAD_TIMEOUT_MS, RUN_TIMEOUT_MS, pyodideBase } from "./config.js"
 
 let worker = null;
 let warm = false;
+const loadedPackages = new Set();
 let nextId = 1;
 const pending = new Map();
 
@@ -14,14 +15,19 @@ function startWorker() {
     pending.delete(data.id);
     clearTimeout(job.timer);
     warm = true;
-    if (data.ok) job.resolve(data.result);
-    else job.reject(new Error(data.error));
+    if (data.ok) {
+      job.packages.forEach((p) => loadedPackages.add(p));
+      job.resolve(data.result);
+    } else {
+      job.reject(new Error(data.error));
+    }
   };
   worker.onerror = (event) => {
     for (const [, job] of pending) job.reject(new Error(event.message || "Python worker failed."));
     pending.clear();
     worker = null;
     warm = false;
+    loadedPackages.clear();
   };
 }
 
@@ -32,19 +38,22 @@ export function isWarm() {
 export function checkPython(checker, code, packages = []) {
   if (!worker) startWorker();
   const id = nextId++;
-  const limit = warm ? RUN_TIMEOUT_MS : FIRST_LOAD_TIMEOUT_MS;
+  // Downloading a package takes far longer than running code, so a new package gets the first-load limit.
+  const needsDownload = packages.some((p) => !loadedPackages.has(p));
+  const limit = warm && !needsDownload ? RUN_TIMEOUT_MS : FIRST_LOAD_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
-    const wasWarm = warm;
+    const wasLoading = limit === FIRST_LOAD_TIMEOUT_MS;
     const timer = setTimeout(() => {
       pending.delete(id);
       worker?.terminate();
       worker = null;
       warm = false;
-      reject(new Error(wasWarm
-        ? "Your code ran for too long. Check for an endless loop."
-        : "Python took too long to load. Check your connection and try again."));
+      loadedPackages.clear();
+      reject(new Error(wasLoading
+        ? "Python took too long to load. Check your connection and try again."
+        : "Your code ran for too long. Check for an endless loop."));
     }, limit);
-    pending.set(id, { resolve, reject, timer });
+    pending.set(id, { resolve, reject, timer, packages });
     worker.postMessage({ id, base: pyodideBase(), checker, code, packages });
   });
 }

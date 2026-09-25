@@ -365,8 +365,8 @@ recap:
 
 claims:
   - claim: "Jobs support email_notifications and webhook_notifications with on_start, on_success and on_failure; job-level notifications are not sent when failed tasks are retried; at most 3 destinations per on_failure."
-    status: search-only
-    source: "https://docs.databricks.com/aws/en/jobs/notifications"
+    status: verified
+    source: "https://docs.databricks.com/aws/en/jobs/notifications (checked 2026-09-25)"
   - claim: "Databricks SQL alerts run a query on a schedule and notify when a condition is met."
-    status: unverified
-    source: "Check https://docs.databricks.com/aws/en/sql/user/alerts/ before relying on alert configuration details."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/sql/user/alerts/ (checked 2026-09-25)"
