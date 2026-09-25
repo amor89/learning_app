@@ -1,0 +1,334 @@
+id: B16-L1
+title: Choose the device once, move model and data to it
+
+concept: |
+  PyTorch runs on the CPU, on NVIDIA GPUs (`cuda`) and on Apple silicon (`mps`). Every tensor and every model parameter lives on one **device**, and an operation needs all its inputs on the same device. Examples use PyTorch 2.14.
+
+  **Choose the device once, at the edge**, and pass it in:
+
+  ```python
+  def pick_device(prefer_gpu: bool = True) -> torch.device:
+      if prefer_gpu and torch.cuda.is_available():
+          return torch.device("cuda")
+      if prefer_gpu and torch.backends.mps.is_available():
+          return torch.device("mps")
+      return torch.device("cpu")
+  ```
+
+  Then move the model once, and each batch as you use it.
+
+  The trap: **`.to()` behaves differently on modules and tensors.**
+
+  - `model.to(device)` moves the parameters **in place** and returns the same model.
+  - `tensor.to(device)` returns a **new** tensor. The original stays where it was. `batch.to(device)` on its own line does nothing useful. Write `batch = batch.to(device)`.
+
+  Mixing devices raises `RuntimeError`, with a message such as "Tensor on device cpu is not on the expected device". This course's build reproduced it with PyTorch's `meta` device, because no GPU was available.
+
+  Other habits:
+
+  - Never hardcode `"cuda"`. The same code must run on a laptop CPU, in CI and on a GPU cluster.
+  - Move tensors to the CPU before converting to NumPy: `preds.cpu().numpy()`. NumPy cannot read GPU memory.
+  - Log the device with every run (lesson B14-L1). Results can differ slightly between devices.
+
+  PyTorch does not run in this app's browser runtime. The exercises check your code's structure, and the device logic uses plain Python.
+
+why_it_matters: |
+  A training script written on a GPU workstation had `.cuda()` calls on 14 lines. It had to run in CI on CPU machines for a smoke test. Every run failed at import of the first batch. The fix took an afternoon of search and replace, and one `.cuda()` hidden in a helper was missed and broke the nightly job a week later. One `device` chosen at the edge and passed in would have needed no changes.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      model = Net().cuda()
+      for x, y in loader:
+          x.to("cuda")
+          loss = loss_fn(model(x), y.cuda())
+    annotations:
+      - find: "model = Net().cuda()"
+        note: "Hardcoded GPU: fails on any machine without CUDA."
+      - find: 'x.to("cuda")'
+        note: "Returns a new tensor that is thrown away. x stays on the CPU."
+  strong:
+    code: |
+      from collections.abc import Iterable
+
+      import torch
+
+
+      def pick_device(prefer_gpu: bool = True) -> torch.device:
+          """CUDA, then Apple MPS, then CPU."""
+          if prefer_gpu and torch.cuda.is_available():
+              return torch.device("cuda")
+          if prefer_gpu and torch.backends.mps.is_available():
+              return torch.device("mps")
+          return torch.device("cpu")
+
+
+      def train_epoch(
+          model: torch.nn.Module,
+          loader: Iterable[tuple[torch.Tensor, torch.Tensor]],
+          loss_fn: torch.nn.Module,
+          optimizer: torch.optim.Optimizer,
+          device: torch.device,
+      ) -> float:
+          """One pass over loader. Returns the mean batch loss."""
+          model.train()
+          total, batches = 0.0, 0
+          for x, y in loader:
+              x, y = x.to(device), y.to(device)
+              optimizer.zero_grad()
+              loss = loss_fn(model(x), y)
+              loss.backward()
+              optimizer.step()
+              total += loss.item()
+              batches += 1
+          return total / batches if batches > 0 else float("nan")
+    annotations:
+      - find: "def pick_device(prefer_gpu: bool = True) -> torch.device:"
+        note: "One decision, made once, testable on any machine."
+      - find: "x, y = x.to(device), y.to(device)"
+        note: "Reassigned: the moved tensors are the ones used."
+      - find: "total += loss.item()"
+        note: "A Python float for logging, not a tensor holding the graph."
+  takeaway: |
+    Pick the device once and pass it in. Reassign tensors after .to(). Never hardcode "cuda".
+
+exercises:
+  - id: B16-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      After `x.to(device)` on its own line, where is `x`?
+    options:
+      - {id: a, text: "On device."}
+      - {id: b, text: "Where it was before. .to() on a tensor returns a new tensor."}
+      - {id: c, text: "Copied to both devices."}
+      - {id: d, text: "Deleted."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Tensor.to returns a new tensor. Only nn.Module.to changes the object in place."}
+      - {id: r2, text: ".to() only works on models."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That is true for models, not tensors. Write x = x.to(device)."
+      - answer: c
+        feedback: "The new tensor is discarded because it is not assigned."
+      - answer: d
+        feedback: "x is unchanged. The moved copy is what disappears."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. .to() works on tensors, it just does not modify them."
+    hints:
+      - "Is Tensor.to in place?"
+      - "What happens to an unassigned return value?"
+      - "Reassign."
+    explanation: |
+      `x = x.to(device)`. For modules, `model.to(device)` is in place and returns the same model.
+
+  - id: B16-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.14; the meta device stands in for a GPU)
+    code: |
+      import torch
+
+      t = torch.ones(2)
+      t.to("meta")
+      model = torch.nn.Linear(2, 1)
+      model.to("meta")
+      print(t.device, next(model.parameters()).device)
+    answer: "cpu meta"
+    wrong_answers:
+      - answer: "meta meta"
+        feedback: "Tensor.to returns a new tensor. t itself stays on the CPU."
+      - answer: "cpu cpu"
+        feedback: "Module.to moves parameters in place, so the model is on meta."
+    hints:
+      - "Which call is in place?"
+      - "Module.to."
+      - "Tensor.to returns a copy."
+    explanation: |
+      The asymmetry catches everyone once. Reassign tensors, and do not rely on reassigning models.
+
+  - id: B16-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Move a batch to the chosen device, and bring predictions back for NumPy.
+    template: |
+      x = x.[[g1]](device)
+      preds = model(x).detach().[[g2]]().numpy()
+    gaps:
+      g1: {accepted: [to]}
+      g2: {accepted: [cpu]}
+    wrong_answers:
+      - answer: {g1: cuda}
+        feedback: ".cuda() hardcodes the GPU. .to(device) works on any machine."
+    hints:
+      - "The device-agnostic method."
+      - "NumPy needs CPU memory."
+      - "`to` and `cpu`."
+    explanation: |
+      `.to(device)` keeps code portable. `.cpu()` before `.numpy()` avoids an error on GPU tensors.
+
+  - id: B16-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `pick_device_name(prefer_gpu: bool, cuda_ok: bool, mps_ok: bool) -> str` that returns `"cuda"`, `"mps"` or `"cpu"`: CUDA first, then MPS, then CPU, and always `"cpu"` when `prefer_gpu` is False. It takes availability as arguments so it runs and tests anywhere. The caller passes `torch.cuda.is_available()` and `torch.backends.mps.is_available()`.
+    starter: |
+      def pick_device_name(prefer_gpu, cuda_ok, mps_ok):
+          return "cuda"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: pick_device_name
+          typed: true
+          docstring: true
+          message: "Give `pick_device_name` type hints and a docstring."
+      tests:
+        - id: order
+          code: |
+            assert pick_device_name(True, True, True) == "cuda"
+            assert pick_device_name(True, False, True) == "mps"
+            assert pick_device_name(True, False, False) == "cpu"
+          message: "Prefer CUDA, then MPS, then CPU."
+        - id: opt_out
+          code: |
+            assert pick_device_name(False, True, True) == "cpu"
+          message: "prefer_gpu=False must always give cpu."
+    solution: |
+      def pick_device_name(prefer_gpu: bool, cuda_ok: bool, mps_ok: bool) -> str:
+          """Name of the device to use: cuda, then mps, then cpu.
+
+          Args:
+              prefer_gpu: False forces the CPU, for tests and CI.
+              cuda_ok: Result of torch.cuda.is_available().
+              mps_ok: Result of torch.backends.mps.is_available().
+
+          Returns:
+              "cuda", "mps" or "cpu".
+          """
+          if prefer_gpu and cuda_ok:
+              return "cuda"
+          if prefer_gpu and mps_ok:
+              return "mps"
+          return "cpu"
+    seeded_bugs:
+      - |
+        def pick_device_name(prefer_gpu: bool, cuda_ok: bool, mps_ok: bool) -> str:
+            """Ignores prefer_gpu."""
+            if cuda_ok:
+                return "cuda"
+            if mps_ok:
+                return "mps"
+            return "cpu"
+      - |
+        def pick_device_name(prefer_gpu: bool, cuda_ok: bool, mps_ok: bool) -> str:
+            """MPS first."""
+            if prefer_gpu and mps_ok:
+                return "mps"
+            if prefer_gpu and cuda_ok:
+                return "cuda"
+            return "cpu"
+    wrong_answers:
+      - answer: |
+          def pick_device_name(prefer_gpu: bool, cuda_ok: bool, mps_ok: bool) -> str:
+              """Ignores prefer_gpu."""
+              if cuda_ok:
+                  return "cuda"
+              if mps_ok:
+                  return "mps"
+              return "cpu"
+        triggers: opt_out
+    hints:
+      - "Check prefer_gpu in every GPU branch."
+      - "CUDA before MPS."
+      - "Fall through to cpu."
+    explanation: |
+      Passing availability in makes the decision a pure function (lesson B2-L1): easy to test on a laptop with no GPU.
+
+  - id: B16-L1-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      Validation runs without errors on the CPU but raises "Expected all tensors to be on the same device" on the GPU. Tap the line that causes it.
+    code: |
+      from collections.abc import Iterable
+
+      import torch
+
+
+      def validate(model: torch.nn.Module, loader: Iterable[tuple[torch.Tensor, torch.Tensor]], device: torch.device) -> float:
+          """Accuracy on the validation loader."""
+          model.eval()
+          correct, total = 0, 0
+          with torch.inference_mode():
+              for x, y in loader:
+                  x.to(device)
+                  preds = model(x).argmax(dim=1)
+                  correct += int((preds.cpu() == y).sum())
+                  total += len(y)
+          return correct / total if total > 0 else float("nan")
+    bug_lines: [12]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: reassigned
+          kind: requires_pattern
+          pattern: "x\\s*=\\s*x\\.to\\(\\s*device\\s*\\)"
+          message: "Reassign the moved tensor: x = x.to(device)."
+        - id: no_bare_to
+          kind: forbids_pattern
+          pattern: "^\\s*x\\.to\\("
+          message: "A bare x.to(device) discards the moved tensor."
+    fix_solution: |
+      from collections.abc import Iterable
+
+      import torch
+
+
+      def validate(model: torch.nn.Module, loader: Iterable[tuple[torch.Tensor, torch.Tensor]], device: torch.device) -> float:
+          """Accuracy on the validation loader."""
+          model.eval()
+          correct, total = 0, 0
+          with torch.inference_mode():
+              for x, y in loader:
+                  x = x.to(device)
+                  preds = model(x).argmax(dim=1)
+                  correct += int((preds.cpu() == y).sum())
+                  total += len(y)
+          return correct / total if total > 0 else float("nan")
+    wrong_answers:
+      - lines: [14]
+        feedback: "preds.cpu() is right: y stays on the CPU, so the comparison happens there."
+      - lines: [8]
+        feedback: "model.eval() is correct for validation."
+    hints:
+      - "Which line tries to move x?"
+      - "Does Tensor.to change x?"
+      - "Reassign it."
+    explanation: |
+      On the CPU, x and the model already share a device, so the bug hides. On the GPU, x never moved. Reassign: `x = x.to(device)`.
+
+recap:
+  - front: "Choose a device"
+    back: "Once, at the edge: cuda if available, then mps, then cpu. Pass it in."
+  - front: "Tensor.to vs Module.to"
+    back: "Tensor.to returns a new tensor (reassign). Module.to moves in place."
+  - front: "GPU tensor to NumPy"
+    back: "t.detach().cpu().numpy()."
+  - front: "Hardcoded .cuda()"
+    back: "Breaks on CPU machines and CI. Use .to(device)."
+
+claims:
+  - claim: "In PyTorch 2.14, Tensor.to returns a new tensor and leaves the original unchanged; Module.to moves parameters in place and returns the same module; mixing devices raises RuntimeError."
+    status: verified
+    source: "Run with torch 2.14.0 (CPU) in a scratch environment for this repository, using the meta device."

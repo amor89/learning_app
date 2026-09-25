@@ -1,0 +1,333 @@
+id: B18-L3
+title: Decision logs, so the reasons outlive the meeting
+
+concept: |
+  Every analysis rests on choices: the weighting scheme, the outlier rule, the metric, the cut-off, the fairness property. Six months later someone asks "why did we do it this way?". Without a record, the answer is a guess, and the choice gets reversed for the wrong reasons or kept for no reason.
+
+  A **decision log** is a list of short, dated entries, one per decision, kept in the repository (for example `docs/decisions/`). The format follows software architecture decision records:
+
+  ```text
+  ## D-007: Trim survey weights at 5
+  Date: 2026-09-12. Status: accepted.
+  Context: Four respondents had weights above 12 and moved brand share by 4 points.
+  Options considered:
+  - No trimming
+  - Trim at 5, redistribute to keep the weighted total
+  - Rake with bounded weights
+  Decision: Trim at 5 with redistribution. Raking deferred until the new panel design.
+  Consequences: Design effect falls from 2.1 to 1.6. Small bias towards the sample profile. Review at wave 20.
+  ```
+
+  Rules:
+
+  - **Write it when you decide**, in the same pull request as the code or config change.
+  - **List real options**, at least two, including "do nothing". A decision with one option was not a decision.
+  - **State the consequences**, including the costs you accept.
+  - **Never edit a past decision's reasoning.** When things change, add a new entry and mark the old one `superseded`, pointing to its replacement. The history of thinking is the value.
+  - **Link it**: from the config value it explains, from the model card (lesson B18-L2) and from the assumptions log (lesson B7-L3).
+
+  Keep entries short. Five to fifteen lines is enough for most analytical choices. A long, perfect document written after the fact helps less than a short one written on the day.
+
+why_it_matters: |
+  A new lead analyst removed the weight trimming from a tracker because it "looked arbitrary". The next wave's brand share jumped 5 points on four heavily weighted respondents, and the client asked why the trend broke. The original team had discussed exactly this case in a meeting two years earlier. Nothing was written down. A three-line decision entry linked from the config would have explained the rule in a minute.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      # config.yaml
+      weight_cap: 5   # don't change!!
+    annotations:
+      - find: "weight_cap: 5   # don't change!!"
+        note: "A warning with no reason invites either blind obedience or careless removal."
+  strong:
+    code: |
+      # config.yaml
+      weight_cap: 5   # D-007, docs/decisions/D-007-trim-weights.md
+
+      # docs/decisions/D-007-trim-weights.md
+      ## D-007: Trim survey weights at 5
+      Date: 2026-09-12. Status: accepted.
+      Options considered: no trimming; trim at 5 with redistribution; bounded raking.
+      Decision: trim at 5 with redistribution.
+      Consequences: design effect 2.1 to 1.6; review at wave 20.
+    annotations:
+      - find: "weight_cap: 5   # D-007, docs/decisions/D-007-trim-weights.md"
+        note: "The value links to its reasons."
+      - find: "Options considered: no trimming; trim at 5 with redistribution; bounded raking."
+        note: "Real alternatives, including doing nothing."
+      - find: "Consequences: design effect 2.1 to 1.6; review at wave 20."
+        note: "The cost accepted, and when to revisit."
+  takeaway: |
+    One short, dated entry per decision, with options, consequences and status, linked from the code it explains, and superseded rather than edited.
+
+exercises:
+  - id: B18-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A decision from last year no longer holds. What should you do with its log entry?
+    options:
+      - {id: a, text: "Edit it to describe the new decision."}
+      - {id: b, text: "Delete it."}
+      - {id: c, text: "Add a new entry, and mark the old one superseded with a link to the new one."}
+      - {id: d, text: "Leave both without links."}
+    answer: c
+    reasons:
+      - {id: r1, text: "The log keeps the history of reasoning. Each entry records what was known when it was written."}
+      - {id: r2, text: "Logs must never shrink for storage reasons."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Editing erases why the first choice made sense at the time."
+      - answer: b
+        feedback: "Deleting loses the history that explains past results."
+      - answer: d
+        feedback: "Without links, readers find the old entry and think it still applies."
+      - answer: c|r2
+        feedback: "Right answer, wrong reason. The point is preserving reasoning, not storage."
+    hints:
+      - "Why keep past reasoning?"
+      - "How would a reader know it no longer applies?"
+      - "Supersede and link."
+    explanation: |
+      Supersede, never rewrite. The chain of entries shows how and why thinking changed.
+
+  - id: B18-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      log = {
+          "D-003": {"status": "superseded", "superseded_by": "D-007"},
+          "D-007": {"status": "accepted"},
+      }
+      current = [k for k, v in log.items() if v["status"] == "accepted"]
+      print(current, log["D-003"]["superseded_by"] in log)
+    answer: "['D-007'] True"
+    wrong_answers:
+      - answer: "['D-003', 'D-007'] True"
+        feedback: "D-003 is superseded, so it is not a current decision."
+    hints:
+      - "Which entries are accepted?"
+      - "Does the superseded entry point to an existing one?"
+      - "Yes: D-007."
+    explanation: |
+      Current decisions are the accepted ones. Every superseded entry should point to an existing replacement.
+
+  - id: B18-L3-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the parts of a decision entry.
+    items:
+      - {id: title, text: "ID and title"}
+      - {id: meta, text: "Date and status"}
+      - {id: context, text: "Context: the problem and the evidence"}
+      - {id: options, text: "Options considered"}
+      - {id: decision, text: "Decision"}
+      - {id: consequences, text: "Consequences and review point"}
+    answer: [title, meta, context, options, decision, consequences]
+    wrong_answers:
+      - answer: [title, meta, decision, context, options, consequences]
+        feedback: "State the problem and options before the choice, so the reader can judge it."
+      - answer: [title, meta, context, decision, options, consequences]
+        feedback: "Options come before the decision that chooses among them."
+    hints:
+      - "Problem first."
+      - "Then the choices."
+      - "Then the pick and its cost."
+    explanation: |
+      Context, options, decision, consequences: the order of the reasoning itself.
+
+  - id: B18-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `decision_problems(entry: dict[str, object], log_ids: set[str]) -> list[str]` that checks one decision entry and returns problem messages, in this order:
+
+      1. `"status"` must be one of `"proposed"`, `"accepted"`, `"superseded"`. Otherwise add `"invalid status"`.
+      2. `"options"` must be a list with at least 2 items. Otherwise add `"fewer than two options"`.
+      3. `"consequences"` must be non-blank text. Otherwise add `"no consequences"`.
+      4. If status is `"superseded"`, `"superseded_by"` must be in `log_ids`. Otherwise add `"superseded without a valid replacement"`.
+    starter: |
+      def decision_problems(entry, log_ids):
+          return []
+    checker:
+      kind: python
+      setup: |
+        GOOD = {
+            "status": "accepted",
+            "options": ["no trimming", "trim at 5"],
+            "consequences": "Design effect falls to 1.6.",
+        }
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: decision_problems
+          typed: true
+          docstring: true
+          message: "Give `decision_problems` type hints and a docstring."
+      tests:
+        - id: clean
+          code: |
+            assert decision_problems(GOOD, {"D-001"}) == []
+          message: "A complete accepted entry has no problems."
+        - id: each_rule
+          code: |
+            assert decision_problems({**GOOD, "status": "done"}, set()) == ["invalid status"]
+            assert decision_problems({**GOOD, "options": ["trim at 5"]}, set()) == ["fewer than two options"]
+            assert decision_problems({**GOOD, "consequences": "  "}, set()) == ["no consequences"]
+          message: "Check status, options (at least 2) and non-blank consequences, one message each."
+        - id: superseded
+          code: |
+            sup = {**GOOD, "status": "superseded", "superseded_by": "D-009"}
+            assert decision_problems(sup, {"D-001"}) == ["superseded without a valid replacement"]
+            assert decision_problems(sup, {"D-009"}) == []
+          message: "A superseded entry must point to an ID that exists in the log."
+        - id: order_and_missing
+          code: |
+            assert decision_problems({"status": "superseded"}, set()) == [
+                "fewer than two options",
+                "no consequences",
+                "superseded without a valid replacement",
+            ]
+          message: "Missing keys count as problems, reported in the rule order."
+    solution: |
+      VALID_STATUS = {"proposed", "accepted", "superseded"}
+
+
+      def decision_problems(entry: dict[str, object], log_ids: set[str]) -> list[str]:
+          """Problems with one decision log entry, in rule order.
+
+          Args:
+              entry: Parsed decision entry.
+              log_ids: IDs of all entries in the log.
+
+          Returns:
+              Problem messages. Empty when the entry is complete.
+          """
+          problems = []
+          status = entry.get("status")
+          if status not in VALID_STATUS:
+              problems.append("invalid status")
+          options = entry.get("options")
+          if not isinstance(options, list) or len(options) < 2:
+              problems.append("fewer than two options")
+          consequences = entry.get("consequences")
+          if not isinstance(consequences, str) or not consequences.strip():
+              problems.append("no consequences")
+          if status == "superseded" and entry.get("superseded_by") not in log_ids:
+              problems.append("superseded without a valid replacement")
+          return problems
+    seeded_bugs:
+      - |
+        def decision_problems(entry: dict[str, object], log_ids: set[str]) -> list[str]:
+            """Accepts a single option."""
+            problems = []
+            if entry.get("status") not in {"proposed", "accepted", "superseded"}:
+                problems.append("invalid status")
+            options = entry.get("options")
+            if not isinstance(options, list) or len(options) < 1:
+                problems.append("fewer than two options")
+            consequences = entry.get("consequences")
+            if not isinstance(consequences, str) or not consequences.strip():
+                problems.append("no consequences")
+            if entry.get("status") == "superseded" and entry.get("superseded_by") not in log_ids:
+                problems.append("superseded without a valid replacement")
+            return problems
+      - |
+        def decision_problems(entry: dict[str, object], log_ids: set[str]) -> list[str]:
+            """Only checks that superseded_by is present."""
+            problems = []
+            if entry.get("status") not in {"proposed", "accepted", "superseded"}:
+                problems.append("invalid status")
+            options = entry.get("options")
+            if not isinstance(options, list) or len(options) < 2:
+                problems.append("fewer than two options")
+            consequences = entry.get("consequences")
+            if not isinstance(consequences, str) or not consequences.strip():
+                problems.append("no consequences")
+            if entry.get("status") == "superseded" and not entry.get("superseded_by"):
+                problems.append("superseded without a valid replacement")
+            return problems
+    wrong_answers:
+      - answer: |
+          def decision_problems(entry: dict[str, object], log_ids: set[str]) -> list[str]:
+              """Only checks that superseded_by is present."""
+              problems = []
+              if entry.get("status") not in {"proposed", "accepted", "superseded"}:
+                  problems.append("invalid status")
+              options = entry.get("options")
+              if not isinstance(options, list) or len(options) < 2:
+                  problems.append("fewer than two options")
+              consequences = entry.get("consequences")
+              if not isinstance(consequences, str) or not consequences.strip():
+                  problems.append("no consequences")
+              if entry.get("status") == "superseded" and not entry.get("superseded_by"):
+                  problems.append("superseded without a valid replacement")
+              return problems
+        triggers: superseded
+    hints:
+      - "Use entry.get(...) so missing keys do not raise."
+      - "Check the rules in the order given and append a message for each failure."
+      - "For superseded entries, test membership in log_ids."
+    explanation: |
+      A validator in CI keeps the log useful: every entry has real options and consequences, and every superseded entry leads somewhere.
+
+  - id: B18-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Decide how the team handles decision records.
+    slots:
+      - id: where
+        label: "Where entries live"
+        options:
+          - {id: repo, text: "docs/decisions/ in the repository, one file per decision"}
+          - {id: slides, text: "Slides from the steering meeting"}
+        answer: repo
+      - id: when
+        label: "When an entry is written"
+        options:
+          - {id: same_pr, text: "In the same pull request as the code or config change"}
+          - {id: later, text: "At the end of the project"}
+        answer: same_pr
+      - id: link
+        label: "How readers find it"
+        options:
+          - {id: linked, text: "Linked from the config value, model card and assumptions log"}
+          - {id: search, text: "Readers search the folder when curious"}
+        answer: linked
+    model_answer: |
+      - In the repository, versioned with the code it explains.
+      - Written with the change, while the reasons are fresh.
+      - Linked from where people meet the decision.
+    wrong_answers:
+      - answer: {where: slides}
+        feedback: "Slides are hard to find, hard to search and not versioned with the code."
+      - answer: {when: later}
+        feedback: "By the end, the options and reasons are half forgotten."
+      - answer: {link: search}
+        feedback: "People do not search for a record they do not know exists. Link it from the value."
+    hints:
+      - "Where does the next analyst look?"
+      - "When are the reasons clearest?"
+      - "How does a reader meet the decision?"
+    explanation: |
+      Records are useful when they are versioned, timely and linked.
+
+recap:
+  - front: "Parts of a decision entry"
+    back: "ID and title, date and status, context, options considered, decision, consequences."
+  - front: "When a decision changes"
+    back: "Add a new entry. Mark the old one superseded and link to the new one."
+  - front: "Where and when to write"
+    back: "In the repository, in the same pull request as the change."
+  - front: "Make it findable"
+    back: "Link from the config value, the model card and the assumptions log."
+
+claims: []

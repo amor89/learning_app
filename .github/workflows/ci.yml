@@ -40,6 +40,25 @@ jobs:
       - name: JavaScript quality gates
         run: node --test tests/app/checkers.test.mjs tests/app/store.test.mjs
 
+  parity:
+    # Reruns every checker test on the package versions Pyodide 314.0.7 ships,
+    # so a solution that passes here also passes in the browser.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install system libraries for WeasyPrint
+        run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
+      - name: Install the Pyodide package versions
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pandas==3.0.2 numpy==2.4.6 scikit-learn==1.8.0 polars==1.33.1 duckdb==1.5.1 \
+            scipy==1.18.0 statsmodels==0.14.6 matplotlib==3.10.8 pyarrow==22.0.0 pydantic==2.12.5 pytest==9.0.2
+      - name: Checker tests on Pyodide versions
+        run: pytest
+
   practice:
     runs-on: ubuntu-24.04
     steps:

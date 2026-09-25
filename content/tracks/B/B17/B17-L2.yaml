@@ -1,0 +1,288 @@
+id: B17-L2
+title: Property-based tests with Hypothesis
+
+concept: |
+  Example tests check the cases you thought of. **Property-based tests** check a rule against hundreds of generated inputs, including ones you did not think of. **Hypothesis** generates the inputs, and when a test fails it **shrinks** the input to the smallest failing case. Examples use Hypothesis 6.168.
+
+  ```python
+  from hypothesis import given, strategies as st
+
+  @given(st.lists(st.tuples(st.floats(-1e6, 1e6), st.floats(0, 10)), min_size=1))
+  def test_weighted_mean_within_range(pairs):
+      values = [v for v, _ in pairs]
+      weights = [w for _, w in pairs]
+      m = weighted_mean(values, weights)
+      assert m is None or min(values) - 1e-6 <= m <= max(values) + 1e-6
+  ```
+
+  Run against a `weighted_mean` without a zero guard, this test failed in this course's build with `ZeroDivisionError`, and Hypothesis shrank the input to `pairs=[(0.0, 0.0)]`: one value, one zero weight.
+
+  Properties that suit data code:
+
+  - **Bounds.** A mean lies between the minimum and maximum. A share lies in [0, 1].
+  - **Invariance.** Shuffling rows does not change a total. Renaming a category does not change counts.
+  - **Round trip.** Writing then reading a file gives back the same frame.
+  - **Idempotence.** Deduplicating twice equals deduplicating once.
+  - **Grain.** The output has exactly one row per key.
+  - **Agreement.** A fast implementation equals a slow, obviously correct one.
+
+  Choose strategies deliberately. `st.floats()` generates `nan` and infinities by default. Bound it (`st.floats(-1e6, 1e6)`) or pass `allow_nan=False` unless your function must handle them, and then test that behaviour on purpose. `hypothesis.extra.pandas` builds DataFrames with `data_frames` and `column`.
+
+  Use `@settings(max_examples=...)` to trade speed for coverage. Hypothesis saves failing examples in a local `.hypothesis/` directory and replays them first on the next run. Add it to `.gitignore`.
+
+  Hypothesis does not run in this app's browser runtime. The exercises check your code's structure.
+
+why_it_matters: |
+  A deduplication step kept the latest record per respondent. Its example tests used three tidy rows. In production, two records for one respondent had the **same** timestamp, and the function kept both, so the respondent was counted twice. A Hypothesis test of the grain, "the output has exactly one row per respondent", fails on this bug at once. In this course's build it shrank the failure to `rows=[('a', 0), ('a', 0)]`: two identical rows.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      @given(st.floats(), st.floats())
+      def test_share_in_range(part, total):
+          assert 0 <= share(part, total) <= 1
+    annotations:
+      - find: "@given(st.floats(), st.floats())"
+        note: "Unbounded floats include nan, infinities and negatives the function never promised to handle."
+      - find: "assert 0 <= share(part, total) <= 1"
+        note: "Ignores the None branch, so the property is false for a correct function."
+  strong:
+    code: |
+      from hypothesis import given, strategies as st
+
+      counts = st.integers(min_value=0, max_value=10_000)
+
+
+      @given(counts, counts)
+      def test_share_in_unit_interval(a: int, b: int) -> None:
+          part, total = min(a, b), max(a, b)
+          result = share(part, total)
+          if total == 0:
+              assert result is None
+          else:
+              assert result is not None and 0.0 <= result <= 1.0
+    annotations:
+      - find: "counts = st.integers(min_value=0, max_value=10_000)"
+        note: "Inputs the function promises to handle: non-negative counts."
+      - find: "part, total = min(a, b), max(a, b)"
+        note: "Builds valid inputs (part <= total) instead of filtering most examples away."
+      - find: "assert result is None"
+        note: "The zero branch is part of the property."
+  takeaway: |
+    State a rule that must always hold, generate inputs from the domain the function promises, and let Hypothesis find and shrink the counterexample.
+
+exercises:
+  - id: B17-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A Hypothesis test fails. What does Hypothesis report?
+    options:
+      - {id: a, text: "The first random input that failed."}
+      - {id: b, text: "A shrunk input: the simplest example it found that still fails."}
+      - {id: c, text: "Every failing input it tried."}
+      - {id: d, text: "Only the exception, without the input."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Shrinking turns a messy random failure into a minimal case you can read."}
+      - {id: r2, text: "Hypothesis only ever generates simple inputs."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Hypothesis keeps simplifying the failing input before reporting it."
+      - answer: c
+        feedback: "It reports one minimal example, not the whole search."
+      - answer: d
+        feedback: "The failing example is shown, such as pairs=[(0.0, 0.0)]."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. It generates complex inputs, then shrinks the failure."
+    hints:
+      - "What makes a failure easy to debug?"
+      - "A small input."
+      - "Shrinking."
+    explanation: |
+      Shrinking reduced a weighted-mean failure to one value with one zero weight.
+
+  - id: B17-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      This property test runs with Hypothesis 6.168. Does it pass or fail?
+    code: |
+      from hypothesis import given, strategies as st
+
+
+      @given(st.floats())
+      def test_equal_to_itself(x):
+          assert x == x
+    answer: "fail"
+    wrong_answers:
+      - answer: "pass"
+        feedback: "st.floats() generates nan by default, and nan == nan is False."
+    hints:
+      - "What special values can st.floats() produce?"
+      - "Is nan equal to itself?"
+      - "No."
+    explanation: |
+      The test fails on `x=nan`. Bound the strategy or pass `allow_nan=False` unless the function must handle nan.
+
+  - id: B17-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Generate bounded floats without nan, and run 500 examples.
+    template: |
+      @[[g1]](max_examples=500)
+      @given(st.floats(min_value=-1e6, max_value=1e6, [[g2]]=False))
+      def test_round_trip(x):
+          assert parse(format(x)) == x
+    gaps:
+      g1: {accepted: [settings]}
+      g2: {accepted: [allow_nan]}
+    wrong_answers:
+      - answer: {g2: allow_infinity}
+        feedback: "Bounds already exclude infinities. The gap is for nan."
+    hints:
+      - "The decorator that configures a test."
+      - "The floats argument for nan."
+      - "`settings` and `allow_nan`."
+    explanation: |
+      `@settings(max_examples=500)` raises the search budget. `allow_nan=False` keeps nan out when the function does not promise to handle it.
+
+  - id: B17-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write a Hypothesis test `test_dedupe_idempotent` for `dedupe(rows: list[tuple[str, int]]) -> list[tuple[str, int]]`. Generate `rows` as lists of `(id, timestamp)` tuples with `st.lists(st.tuples(st.sampled_from(["a", "b", "c"]), st.integers(0, 5)))`. Assert that `dedupe(dedupe(rows)) == dedupe(rows)`.
+
+      Hypothesis does not run in the browser. The checker reads your code. Run it locally with pytest.
+    starter: |
+      from hypothesis import given, strategies as st
+
+
+      def test_dedupe_idempotent():
+          rows = [("a", 1), ("a", 1)]
+          assert dedupe(rows) == [("a", 1)]
+    checker:
+      kind: python
+      ast_rules:
+        - id: named
+          kind: requires_function
+          name: test_dedupe_idempotent
+          message: "Name the test test_dedupe_idempotent."
+        - id: given
+          kind: requires_pattern
+          pattern: "@given\\("
+          message: "Decorate the test with @given(...)."
+        - id: strategy
+          kind: requires_pattern
+          pattern: "st\\.lists\\(\\s*st\\.tuples\\(\\s*st\\.sampled_from\\([^)]*\\)\\s*,\\s*st\\.integers\\("
+          message: "Generate rows with st.lists(st.tuples(st.sampled_from([...]), st.integers(...)))."
+        - id: property
+          kind: requires_pattern
+          pattern: "dedupe\\(\\s*dedupe\\(\\s*rows\\s*\\)\\s*\\)\\s*==\\s*dedupe\\(\\s*rows\\s*\\)"
+          message: "Assert dedupe(dedupe(rows)) == dedupe(rows)."
+    solution: |
+      from hypothesis import given, strategies as st
+
+
+      @given(st.lists(st.tuples(st.sampled_from(["a", "b", "c"]), st.integers(0, 5))))
+      def test_dedupe_idempotent(rows: list[tuple[str, int]]) -> None:
+          assert dedupe(dedupe(rows)) == dedupe(rows)
+    seeded_bugs:
+      - |
+        from hypothesis import given, strategies as st
+
+
+        def test_dedupe_idempotent() -> None:
+            rows = [("a", 1), ("b", 2)]
+            assert dedupe(dedupe(rows)) == dedupe(rows)
+      - |
+        from hypothesis import given, strategies as st
+
+
+        @given(st.lists(st.tuples(st.sampled_from(["a", "b", "c"]), st.integers(0, 5))))
+        def test_dedupe_idempotent(rows: list[tuple[str, int]]) -> None:
+            assert len(dedupe(rows)) <= len(rows)
+    wrong_answers:
+      - answer: |
+          from hypothesis import given, strategies as st
+
+
+          @given(st.lists(st.tuples(st.sampled_from(["a", "b", "c"]), st.integers(0, 5))))
+          def test_dedupe_idempotent(rows: list[tuple[str, int]]) -> None:
+              assert len(dedupe(rows)) <= len(rows)
+        triggers: property
+    hints:
+      - "Decorate with @given and the strategy from the prompt."
+      - "The test receives rows as its argument."
+      - "Compare dedupe applied twice with dedupe applied once."
+    explanation: |
+      A small id alphabet and small timestamps make duplicates and ties likely. Idempotence is one property. Pair it with a grain property, one row per id, which catches a dedupe that keeps ties: that bug is idempotent, so idempotence alone misses it.
+
+  - id: B17-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Pick a property for each function.
+    slots:
+      - id: total
+        label: "weighted_total(df): sum of value × weight"
+        options: &props
+          - {id: invariance, text: "Shuffling rows does not change the result"}
+          - {id: round_trip, text: "Write then read returns the same frame"}
+          - {id: bounds, text: "Result lies between the minimum and maximum input"}
+          - {id: agreement, text: "Equals a slow, obviously correct version"}
+        answer: invariance
+      - id: io
+        label: "save_parquet and load_parquet"
+        options: *props
+        answer: round_trip
+      - id: mean
+        label: "weighted_mean(values, weights) with positive weights"
+        options: *props
+        answer: bounds
+      - id: fast
+        label: "A vectorised rewrite of a row-by-row scoring loop"
+        options: *props
+        answer: agreement
+    model_answer: |
+      - Totals do not depend on row order.
+      - Saving and loading must not lose data or dtypes.
+      - A weighted mean stays within the range of its inputs.
+      - A rewrite must agree with the code it replaces.
+    wrong_answers:
+      - answer: {total: bounds}
+        feedback: "A total can exceed every input value. Order invariance is the property that holds."
+      - answer: {io: invariance}
+        feedback: "For I/O the key promise is that nothing is lost: a round trip."
+      - answer: {fast: bounds}
+        feedback: "Bounds would pass many wrong rewrites. Compare with the trusted version."
+    hints:
+      - "What must never change?"
+      - "What must come back?"
+      - "What can be compared?"
+    explanation: |
+      Good properties come from what the function promises: invariance, round trips, bounds and agreement.
+
+recap:
+  - front: "Property-based test"
+    back: "A rule checked against many generated inputs, with failing inputs shrunk to a minimal case."
+  - front: "Four data-code properties"
+    back: "Bounds, invariance, round trip, idempotence, grain, and agreement with a slow version."
+  - front: "st.floats() default"
+    back: "Includes nan and infinities. Bound it or pass allow_nan=False on purpose."
+  - front: "Hypothesis example database"
+    back: ".hypothesis/ replays past failures. Keep it out of Git."
+
+claims:
+  - claim: "A grain property found a dedupe that keeps timestamp ties and shrank it to rows=[('a', 0), ('a', 0)]."
+    status: verified
+    source: "Run with Hypothesis 6.168.1 and pytest in this repository."
+  - claim: "Hypothesis 6.168 found a ZeroDivisionError in an unguarded weighted mean and shrank it to pairs=[(0.0, 0.0)]; st.floats() generated nan and failed x == x."
+    status: verified
+    source: "Run with Hypothesis 6.168.1 and pytest in this repository."

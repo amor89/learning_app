@@ -2,7 +2,7 @@
 
 A personal, offline-capable course with four tracks: Databricks pipeline engineering, Python for data science, Microsoft Fabric, and finding errors in code. It runs as a static site on GitHub Pages and installs on an iPhone home screen.
 
-Status: Phase 2 complete. Track A (Databricks pipeline engineering) has all 30 lessons. Tracks B, C and D each have one sample lesson.
+Status: Phase 3 complete. Track A (Databricks pipeline engineering) has all 30 lessons, and Track B (Python for data science) has all 54. Tracks C and D each have one sample lesson.
 
 ## Layout
 
@@ -40,6 +40,10 @@ node --test tests/app/checkers.test.mjs tests/app/store.test.mjs
 WeasyPrint needs Pango. On macOS: `brew install pango`. On Ubuntu: `apt install libpango-1.0-0 libpangoft2-1.0-0`.
 
 Run the app locally: `python -m http.server -d site 8000`, then open http://localhost:8000.
+
+Browser exercises run on the package versions that Pyodide 314.0.7 ships, which are older than the `dev` pins. The CI `parity` job reruns `pytest` on those versions (see `.github/workflows/ci.yml` for the exact pins). To run it locally, create another virtual environment on Python 3.13 and install the same pins.
+
+Some Track B lessons teach libraries that neither Pyodide nor the `dev` group includes: MLflow, shap (in `dev`, not in Pyodide), PyTorch and sentence-transformers. Their code exercises check structure only. Install them yourself to run the examples.
 
 ## Laptop practice with Spark
 

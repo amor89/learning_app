@@ -1,0 +1,367 @@
+id: B17-L3
+title: Measure before you optimise
+
+concept: |
+  Most slow data code spends its time in one or two places, and they are rarely where you guess. Measure first, change one thing, measure again. All tools here are in the Python standard library.
+
+  **Profile to find where time goes.** `cProfile` counts calls and time per function:
+
+  ```python
+  import cProfile, pstats
+  cProfile.run("main()", "profile.out")
+  pstats.Stats("profile.out").sort_stats("cumulative").print_stats(10)
+  ```
+
+  Sort by `cumulative` to see which of your functions, including everything they call, takes longest. In this course's build, a job calling a pure-Python sum of squares and a NumPy version over 200,000 numbers showed 0.037 s cumulative for the Python one and 0.002 s for NumPy. In a notebook, `%prun main()` does the same.
+
+  **Time a candidate change with `timeit`.** `timeit.repeat(fn, repeat=5, number=100)` returns five totals, each for 100 calls. Report the **minimum** divided by `number`: other processes can only slow a run down, so the fastest run is the best estimate of the code's own cost. Use `time.perf_counter()`, not `time.time()`, for manual timing.
+
+  **Measure memory when that is the limit.** `tracemalloc` reports current and peak allocation: one million float64 values showed a peak of 8.0 MB, as expected at 8 bytes each. For pandas, `df.memory_usage(deep=True)` counts the contents of text columns, not just the pointers.
+
+  Rules:
+
+  - Profile with realistic data sizes. A 100-row sample hides what dominates at 10 million rows.
+  - Keep setup out of the timed region: reading files, building inputs, copying frames.
+  - Fix the biggest cost first. Speeding up a function that takes 2% of the runtime cannot save more than 2%.
+  - Keep a test around the code you optimise (lesson B17-L1), so faster does not become wrong.
+
+why_it_matters: |
+  An analyst spent two days rewriting a weighting function in Numba because "loops are slow in Python". The job still took 40 minutes. A profile, run afterwards, showed 36 of those minutes in reading 300 CSV files one at a time with default type inference. Switching to one Parquet read with explicit dtypes cut the job to 5 minutes. The Numba rewrite saved 20 seconds.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      start = time.time()
+      for _ in range(10):
+          df = pd.read_csv("big.csv")
+          result = transform(df)
+      print("transform takes", (time.time() - start) / 10)
+    annotations:
+      - find: "start = time.time()"
+        note: "Wall-clock time with low resolution. Use time.perf_counter()."
+      - find: 'df = pd.read_csv("big.csv")'
+        note: "The file read sits inside the timed loop, so the number is mostly I/O."
+      - find: 'print("transform takes", (time.time() - start) / 10)'
+        note: "An average over runs, inflated by any background activity."
+  strong:
+    code: |
+      import time
+      from collections.abc import Callable
+
+
+      def best_time(fn: Callable[[], object], repeat: int = 5, number: int = 10) -> float:
+          """Best per-call time in seconds over `repeat` rounds of `number` calls."""
+          if repeat < 1 or number < 1:
+              raise ValueError("repeat and number must be at least 1")
+          best = float("inf")
+          for _ in range(repeat):
+              start = time.perf_counter()
+              for _ in range(number):
+                  fn()
+              best = min(best, (time.perf_counter() - start) / number)
+          return best
+    annotations:
+      - find: "start = time.perf_counter()"
+        note: "A high-resolution clock meant for measuring intervals."
+      - find: "best = min(best, (time.perf_counter() - start) / number)"
+        note: "Keep the fastest round: noise only ever adds time."
+  takeaway: |
+    Profile to find the cost, time the change with perf_counter or timeit, keep setup out of the timing, and fix the biggest cost first.
+
+exercises:
+  - id: B17-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A job takes 40 minutes. A profile shows 36 minutes in file reading and 1 minute in the weighting function. What should you optimise first?
+    options:
+      - {id: a, text: "The weighting function, because loops are slow."}
+      - {id: b, text: "File reading."}
+      - {id: c, text: "Both equally."}
+      - {id: d, text: "Neither: buy a faster machine."}
+    answer: b
+    reasons:
+      - {id: r1, text: "A 1-minute function can save at most 1 minute. Reading holds 90% of the time."}
+      - {id: r2, text: "I/O is always the bottleneck."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Even an infinitely fast weighting function saves only 1 minute of 40."
+      - answer: c
+        feedback: "Effort should follow cost. One of them holds 36 of 40 minutes."
+      - answer: d
+        feedback: "Hardware is a last resort once the code's own costs are known."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Here the profile says I/O. Elsewhere it may not."
+    hints:
+      - "What is the most a speed-up of each part can save?"
+      - "Compare 36 with 1."
+      - "Follow the profile."
+    explanation: |
+      Fix the biggest measured cost first. Guesses about "slow loops" waste days.
+
+  - id: B17-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      import timeit
+
+      rounds = timeit.repeat(lambda: sum(range(1000)), repeat=5, number=100)
+      print(len(rounds))
+    answer: "5"
+    wrong_answers:
+      - answer: "100"
+        feedback: "number is the calls per round. repeat is the number of rounds returned."
+      - answer: "500"
+        feedback: "repeat returns one total per round, not one per call."
+    hints:
+      - "What does repeat control?"
+      - "What does number control?"
+      - "One total per round."
+    explanation: |
+      Five rounds, each the total time for 100 calls. Report `min(rounds) / 100` as the per-call time.
+
+  - id: B17-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Profile `main()` and print the 10 functions with the highest cumulative time.
+    template: |
+      cProfile.run("main()", "profile.out")
+      pstats.Stats("profile.out").sort_stats("[[g1]]").[[g2]](10)
+    gaps:
+      g1: {accepted: [cumulative]}
+      g2: {accepted: [print_stats]}
+    wrong_answers:
+      - answer: {g1: calls}
+        feedback: "Sorting by call count shows busy functions, not expensive ones. Sort by cumulative time."
+    hints:
+      - "Time including everything a function calls."
+      - "The Stats method that prints rows."
+      - "`cumulative` and `print_stats`."
+    explanation: |
+      Cumulative time points to the high-level function that owns the cost. Then drill into it.
+
+  - id: B17-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `best_time(fn, repeat=5, number=10) -> float`. Run `repeat` rounds. In each round, call `fn()` `number` times, timed with `time.perf_counter()`, and compute the per-call time. Return the smallest per-call time. Raise `ValueError` if `repeat` or `number` is below 1.
+    starter: |
+      import time
+
+
+      def best_time(fn, repeat=5, number=10):
+          start = time.time()
+          fn()
+          return time.time() - start
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: best_time
+          typed: true
+          docstring: true
+          message: "Give `best_time` type hints and a docstring."
+        - id: perf_counter
+          kind: requires_call
+          name: time.perf_counter
+          message: "Time with time.perf_counter()."
+        - id: no_time_time
+          kind: forbids_call
+          name: time.time
+          message: "time.time() is wall-clock time with low resolution. Use perf_counter."
+      tests:
+        - id: calls
+          code: |
+            calls = []
+            result = best_time(lambda: calls.append(1), repeat=3, number=4)
+            assert len(calls) == 12
+            assert isinstance(result, float) and result >= 0.0
+          message: "Call fn number times in each of repeat rounds (3 × 4 = 12 calls), and return a float."
+        - id: min_per_call
+          code: |
+            import time as _t
+            _clock = iter([0.0, 2.0, 10.0, 11.0, 20.0, 23.0])
+            _real = _t.perf_counter
+            _t.perf_counter = lambda: next(_clock)
+            try:
+                assert best_time(lambda: None, repeat=3, number=2) == 0.5
+            finally:
+                _t.perf_counter = _real
+          message: "Return the smallest round time divided by number: rounds of 2, 1 and 3 seconds over 2 calls give 0.5."
+        - id: invalid
+          code: |
+            for args in [(0, 1), (1, 0)]:
+                try:
+                    best_time(lambda: None, *args)
+                except ValueError:
+                    continue
+                raise AssertionError(args)
+          message: "repeat or number below 1 must raise ValueError."
+    solution: |
+      import time
+      from collections.abc import Callable
+
+
+      def best_time(fn: Callable[[], object], repeat: int = 5, number: int = 10) -> float:
+          """Best per-call time over several rounds.
+
+          Args:
+              fn: Function to time, called with no arguments.
+              repeat: Number of rounds.
+              number: Calls per round.
+
+          Returns:
+              The smallest per-call time in seconds.
+
+          Raises:
+              ValueError: If repeat or number is below 1.
+          """
+          if repeat < 1 or number < 1:
+              raise ValueError("repeat and number must be at least 1")
+          best = float("inf")
+          for _ in range(repeat):
+              start = time.perf_counter()
+              for _ in range(number):
+                  fn()
+              best = min(best, (time.perf_counter() - start) / number)
+          return best
+    seeded_bugs:
+      - |
+        import time
+        from collections.abc import Callable
+
+
+        def best_time(fn: Callable[[], object], repeat: int = 5, number: int = 10) -> float:
+            """Averages rounds instead of taking the best."""
+            if repeat < 1 or number < 1:
+                raise ValueError("repeat and number must be at least 1")
+            total = 0.0
+            for _ in range(repeat):
+                start = time.perf_counter()
+                for _ in range(number):
+                    fn()
+                total += (time.perf_counter() - start) / number
+            return total / repeat
+      - |
+        import time
+        from collections.abc import Callable
+
+
+        def best_time(fn: Callable[[], object], repeat: int = 5, number: int = 10) -> float:
+            """Does not divide by number."""
+            if repeat < 1 or number < 1:
+                raise ValueError("repeat and number must be at least 1")
+            best = float("inf")
+            for _ in range(repeat):
+                start = time.perf_counter()
+                for _ in range(number):
+                    fn()
+                best = min(best, time.perf_counter() - start)
+            return best
+    wrong_answers:
+      - answer: |
+          import time
+          from collections.abc import Callable
+
+
+          def best_time(fn: Callable[[], object], repeat: int = 5, number: int = 10) -> float:
+              """Averages rounds instead of taking the best."""
+              if repeat < 1 or number < 1:
+                  raise ValueError("repeat and number must be at least 1")
+              total = 0.0
+              for _ in range(repeat):
+                  start = time.perf_counter()
+                  for _ in range(number):
+                      fn()
+                  total += (time.perf_counter() - start) / number
+              return total / repeat
+        triggers: min_per_call
+    hints:
+      - "Validate repeat and number first."
+      - "Time each round with perf_counter before and after the inner loop."
+      - "Keep the minimum of round_time / number."
+    explanation: |
+      The minimum over rounds estimates the code's own cost, because interference only adds time. Dividing by `number` gives a per-call figure you can compare.
+
+  - id: B17-L3-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      This benchmark says `add_features` takes 1.8 seconds. The function itself takes about 0.1 seconds. Tap the line that distorts the measurement.
+    code: |
+      import time
+
+      import pandas as pd
+
+
+      def benchmark(path: str, rounds: int) -> float:
+          """Best time of add_features over rounds."""
+          best = float("inf")
+          for _ in range(rounds):
+              start = time.perf_counter()
+              df = pd.read_parquet(path)
+              add_features(df)
+              best = min(best, time.perf_counter() - start)
+          return best
+    bug_lines: [11]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: read_outside
+          kind: forbids_pattern
+          pattern: "perf_counter\\(\\)\\s*\\n\\s*df\\s*=\\s*pd\\.read_parquet"
+          message: "Read the file before starting the clock."
+        - id: reads_once
+          kind: max_calls
+          name: pd.read_parquet
+          max: 1
+          message: "Read the file once, outside the timed loop."
+    fix_solution: |
+      import time
+
+      import pandas as pd
+
+
+      def benchmark(path: str, rounds: int) -> float:
+          """Best time of add_features over rounds."""
+          df = pd.read_parquet(path)
+          best = float("inf")
+          for _ in range(rounds):
+              start = time.perf_counter()
+              add_features(df)
+              best = min(best, time.perf_counter() - start)
+          return best
+    wrong_answers:
+      - lines: [13]
+        feedback: "Taking the minimum is right. The timed region includes more than the function."
+    hints:
+      - "What runs between start and the end of the round?"
+      - "Is reading the file part of add_features?"
+      - "Move setup out of the timed region."
+    explanation: |
+      The file read is setup, and it dominates the timing. Read once before the loop, then time only the function.
+
+recap:
+  - front: "Find where time goes"
+    back: "cProfile with pstats sorted by cumulative, or %prun in a notebook."
+  - front: "Time a small change"
+    back: "timeit.repeat or perf_counter. Report the minimum per call."
+  - front: "Measure memory"
+    back: "tracemalloc peak, and df.memory_usage(deep=True) for pandas."
+  - front: "The order of work"
+    back: "Profile, fix the biggest cost, re-measure, keep a test around the change."
+
+claims:
+  - claim: "cProfile showed 0.037 s cumulative for a pure-Python sum of squares over 200,000 numbers and 0.002 s for NumPy; tracemalloc peak for one million float64 values was 8.0 MB."
+    status: verified
+    source: "Run on Python 3.11 with NumPy 2.4.6 in this repository."

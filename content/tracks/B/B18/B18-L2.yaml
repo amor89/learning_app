@@ -1,0 +1,256 @@
+id: B18-L2
+title: Model cards that state limits as clearly as scores
+
+concept: |
+  A **model card** is a short document that travels with a model. It tells users what the model is for, how well it works, for whom, and where it should not be used. The format comes from Mitchell et al., "Model Cards for Model Reporting" (2019). Keep it in the repository next to the training code, and link it from the registered model version (lesson B14-L2).
+
+  Sections to include:
+
+  - **Model details**: name, version, registry alias, owners, training date, run ID.
+  - **Intended use**: the decision it supports and who uses it.
+  - **Out-of-scope uses**: uses it must not serve, stated plainly.
+  - **Training data**: source, period, grain, known gaps.
+  - **Evaluation**: the honest metric (lesson B11-L3), with the test period and prevalence.
+  - **Subgroup results**: rates per group with counts (lesson B13-L3), including the weakest group.
+  - **Limitations and risks**: known failure modes, drift risks, proxies.
+  - **Monitoring and review**: what is tracked, alert thresholds, next review date.
+
+  Write numbers with their context: "AUC 0.78 on October to December 2026 customers, 2.4% positive rate, 51,000 rows". A bare "AUC 0.78" invites misuse.
+
+  State limits as clearly as strengths. "Recall for customers over 70 is 0.28 against 0.62 overall. Do not use for outreach targeting of this group without human review" protects the people affected and the team that built the model.
+
+  Treat the card as code: a template with required sections, reviewed in the same pull request as the model change. A check in CI can refuse a card with missing sections.
+
+why_it_matters: |
+  A propensity model built for marketing emails was later reused by another team to prioritise collections calls. Nobody had written down that it was trained only on customers who had opted in to marketing, a group with very different payment behaviour. Collections priorities were wrong for months. An "Out-of-scope uses" line, "Not validated for credit or collections decisions", would have stopped the reuse at the first review.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Churn model v4
+      AUC: 0.78
+      Owner: Sam
+      Works well, use for retention.
+    annotations:
+      - find: "AUC: 0.78"
+        note: "No test period, prevalence or subgroup results."
+      - find: "Owner: Sam"
+        note: "A person, not a team. Sam may leave."
+      - find: "Works well, use for retention."
+        note: "No limits, no out-of-scope uses, no monitoring."
+  strong:
+    code: |
+      Model details: churn_model v4 (@champion), owner Retention Analytics, run 4da8..., trained 2026-09-01
+      Intended use: rank active customers for the monthly retention call list (top 500)
+      Out of scope: credit, collections or pricing decisions; customers with under 3 months' tenure
+      Training data: CRM extract Jan 2024 to Jun 2026, one row per customer-month
+      Evaluation: AUC 0.78, average precision 0.21 (prevalence 2.4%), test Oct to Dec 2026, 51,000 rows
+      Subgroups: recall at top 500 is 0.62 overall, 0.28 for customers over 70 (n positives = 64)
+      Limitations: sparse digital activity lowers recall for older customers; tenure proxies contract type
+      Monitoring: monthly AUC and calibration, alert below 0.72; next review 2027-03-01
+    annotations:
+      - find: "Out of scope: credit, collections or pricing decisions; customers with under 3 months' tenure"
+        note: "Stops reuse the model was never validated for."
+      - find: "Evaluation: AUC 0.78, average precision 0.21 (prevalence 2.4%), test Oct to Dec 2026, 51,000 rows"
+        note: "Each number with its period, baseline and size."
+      - find: "Subgroups: recall at top 500 is 0.62 overall, 0.28 for customers over 70 (n positives = 64)"
+        note: "The weakest group, stated with its count."
+  takeaway: |
+    A model card states purpose, limits, data, honest metrics, subgroup results and monitoring, and is reviewed with every model change.
+
+exercises:
+  - id: B18-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which model card section would most directly have prevented a marketing model being reused for collections?
+    options:
+      - {id: a, text: "Model details"}
+      - {id: b, text: "Out-of-scope uses"}
+      - {id: c, text: "Evaluation"}
+      - {id: d, text: "Monitoring"}
+    answer: b
+    reasons:
+      - {id: r1, text: "It names the uses the model was not built or validated for."}
+      - {id: r2, text: "It is the longest section."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Details identify the model. They do not say where it must not be used."
+      - answer: c
+        feedback: "Evaluation shows how it performs on its intended task, not on others."
+      - answer: d
+        feedback: "Monitoring tracks the model in use. It does not stop misuse."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Length does not matter. Its purpose does."
+    hints:
+      - "Which section says 'do not use for'?"
+      - "Reuse is a scope question."
+      - "Out of scope."
+    explanation: |
+      Out-of-scope uses turn assumptions in the builders' heads into a rule readers see.
+
+  - id: B18-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      REQUIRED = ["intended_use", "out_of_scope", "evaluation", "subgroups", "limitations"]
+      card = {"intended_use": "retention list", "evaluation": "AUC 0.78", "limitations": ""}
+      print([s for s in REQUIRED if not str(card.get(s, "")).strip()])
+    answer: "['out_of_scope', 'subgroups', 'limitations']"
+    wrong_answers:
+      - answer: "['out_of_scope', 'subgroups']"
+        feedback: "limitations exists but is empty. The check treats blank text as missing."
+    hints:
+      - "Which keys are absent?"
+      - "Which are present but blank?"
+      - "Both count."
+    explanation: |
+      Empty sections are as unhelpful as missing ones. A CI check should reject both.
+
+  - id: B18-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the evaluation line so the metric has its context.
+    template: |
+      Evaluation: AUC 0.78, average precision 0.21 ([[g1]] 2.4%), test Oct to Dec 2026, 51,000 [[g2]]
+    gaps:
+      g1: {accepted: [prevalence, "positive rate"]}
+      g2: {accepted: [rows, customers]}
+    wrong_answers:
+      - answer: {g1: accuracy}
+        feedback: "Accuracy is another metric. Average precision needs the prevalence as its baseline."
+    hints:
+      - "The baseline for average precision."
+      - "How much evidence stands behind the number?"
+      - "Prevalence and row count."
+    explanation: |
+      Prevalence gives the baseline and the row count gives the evidence behind the metric.
+
+  - id: B18-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `missing_sections(card: dict[str, str], required: list[str]) -> list[str]`. Return the required section names, in the order of `required`, that are absent from `card` or contain only whitespace. CI will fail the build when the list is not empty.
+    starter: |
+      def missing_sections(card, required):
+          return [s for s in required if s not in card]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: missing_sections
+          typed: true
+          docstring: true
+          message: "Give `missing_sections` type hints and a docstring."
+      tests:
+        - id: absent
+          code: |
+            assert missing_sections({"a": "x"}, ["a", "b"]) == ["b"]
+          message: "Absent sections must be listed."
+        - id: blank
+          code: |
+            assert missing_sections({"a": "x", "b": "   \n"}, ["a", "b"]) == ["b"]
+          message: "Sections with only whitespace count as missing."
+        - id: order
+          code: |
+            assert missing_sections({}, ["z", "a", "m"]) == ["z", "a", "m"]
+          message: "Keep the order of required."
+    solution: |
+      def missing_sections(card: dict[str, str], required: list[str]) -> list[str]:
+          """Required model card sections that are absent or blank.
+
+          Args:
+              card: Section name to text.
+              required: Section names that must have content.
+
+          Returns:
+              Missing section names, in the order of required.
+          """
+          return [name for name in required if not card.get(name, "").strip()]
+    seeded_bugs:
+      - |
+        def missing_sections(card: dict[str, str], required: list[str]) -> list[str]:
+            """Ignores blank sections."""
+            return [name for name in required if name not in card]
+      - |
+        def missing_sections(card: dict[str, str], required: list[str]) -> list[str]:
+            """Sorted, not in required order."""
+            return sorted(name for name in required if not card.get(name, "").strip())
+    wrong_answers:
+      - answer: |
+          def missing_sections(card: dict[str, str], required: list[str]) -> list[str]:
+              """Ignores blank sections."""
+              return [name for name in required if name not in card]
+        triggers: blank
+    hints:
+      - "Loop over required, not over card."
+      - "card.get(name, \"\") handles absent keys."
+      - "Use .strip() to treat whitespace as empty."
+    explanation: |
+      A small, strict check turns the template into a gate: no model ships with an empty limitations section.
+
+  - id: B18-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Write the subgroup and limitations parts of a card for a hardship-support model.
+    slots:
+      - id: subgroups
+        label: "Subgroup results"
+        options:
+          - {id: all_with_n, text: "Recall and false positive rate per age band, with counts, weakest group first"}
+          - {id: overall, text: "Overall recall only"}
+        answer: all_with_n
+      - id: limit
+        label: "Known weakness for customers over 70"
+        options:
+          - {id: plain, text: "State the gap, its likely cause, and require human review for this group"}
+          - {id: omit, text: "Leave it out to avoid alarming users"}
+        answer: plain
+      - id: review
+        label: "Review"
+        options:
+          - {id: dated, text: "A named team and a review date"}
+          - {id: adhoc, text: "Review when someone has time"}
+        answer: dated
+    model_answer: |
+      - Per-group rates with counts, so the weakest group is visible.
+      - The gap stated plainly with a mitigation.
+      - A team and a date that make review happen.
+    wrong_answers:
+      - answer: {subgroups: overall}
+        feedback: "An overall rate hides a group at half the recall (lesson B12-L3)."
+      - answer: {limit: omit}
+        feedback: "Hiding a known weakness moves the harm onto the people the model serves."
+      - answer: {review: adhoc}
+        feedback: "Without a date and an owner, reviews do not happen."
+    hints:
+      - "What must users know to use the model safely?"
+      - "What happens to hidden weaknesses?"
+      - "Who reviews, and when?"
+    explanation: |
+      A card is useful when it makes weaknesses and responsibilities impossible to miss.
+
+recap:
+  - front: "Model card sections"
+    back: "Details, intended use, out-of-scope uses, training data, evaluation, subgroups, limitations, monitoring."
+  - front: "How to report a metric on a card"
+    back: "With test period, prevalence and row count."
+  - front: "Why out-of-scope uses"
+    back: "They stop reuse for decisions the model was never validated for."
+  - front: "Keep cards honest"
+    back: "Template with required sections, reviewed in the model's pull request, checked in CI."
+
+claims:
+  - claim: "The model card format comes from Mitchell et al. (2019), Model Cards for Model Reporting."
+    status: verified
+    source: "Mitchell et al., Proceedings of FAT* 2019, pages 220 to 229."

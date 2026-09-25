@@ -1,0 +1,341 @@
+id: B18-L1
+title: Docstrings and READMEs that answer the next person's questions
+
+concept: |
+  The next person to read your code, often you in six months, has three questions: what does this do, how do I run it, and what will surprise me? Docstrings answer them for a function. The README answers them for the project.
+
+  **Docstrings.** This course uses the Google style (CLAUDE.md), which tools such as Sphinx and mkdocstrings read:
+
+  ```python
+  def weighted_share(df: pd.DataFrame, value: str, weight: str) -> float | None:
+      """Weighted mean of a 0/1 column. Grain: one row per respondent.
+
+      Args:
+          df: Respondent-level data.
+          value: 0/1 column to average.
+          weight: Non-negative weight column. Rows with a missing value or weight are dropped.
+
+      Returns:
+          The weighted share, or None when no rows remain or weights sum to 0.
+
+      Raises:
+          KeyError: If a named column is missing.
+      """
+  ```
+
+  Put in the docstring what the signature cannot say: the **grain**, **units**, how **missing values** and **zeros** are handled, and what `None` means. Leave out what the code already says plainly, such as "loops over the rows".
+
+  `help(weighted_share)` and `weighted_share.__doc__` show the docstring. Editors show it on hover.
+
+  **README.** One page at the project root, in this order:
+
+  1. **Purpose**: one paragraph, including who uses the output.
+  2. **Quick start**: the exact commands to install and run, copied from a working terminal.
+  3. **Inputs and outputs**: sources, tables or files, their grain and schedule.
+  4. **Configuration**: where settings live and which ones matter.
+  5. **Tests and checks**: how to run them, and what CI enforces.
+  6. **Owners and support**: a team, not a person who might leave.
+
+  Keep both close to the truth. Update the docstring in the same commit as the code, and test the README's quick start in CI where you can.
+
+why_it_matters: |
+  A weighting function returned `None` for empty cells. Its docstring said "Returns the weighted share." A dashboard developer read that, assumed a float, and wrote `round(share * 100)`. The first empty cell crashed the nightly refresh. One line in the docstring, "or None when no rows remain", would have told them to handle it.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def calc(df, v, w):
+          # calculate
+          d = df[[v, w]].dropna()
+          return (d[v] * d[w]).sum() / d[w].sum() if d[w].sum() else None
+    annotations:
+      - find: "def calc(df, v, w):"
+        note: "Name, parameters and types say nothing about purpose or inputs."
+      - find: "# calculate"
+        note: "A comment that restates the obvious and hides what matters."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def weighted_share(df: pd.DataFrame, value: str, weight: str) -> float | None:
+          """Weighted mean of a 0/1 column. Grain: one row per respondent.
+
+          Args:
+              df: Respondent-level data.
+              value: 0/1 column to average.
+              weight: Non-negative weight column. Rows missing value or weight are dropped.
+
+          Returns:
+              The weighted share, or None when no rows remain or weights sum to 0.
+
+          Raises:
+              KeyError: If a named column is missing.
+          """
+          d = df[[value, weight]].dropna()
+          total = d[weight].sum()
+          if len(d) == 0 or total == 0:
+              return None
+          return float((d[value] * d[weight]).sum() / total)
+    annotations:
+      - find: '"""Weighted mean of a 0/1 column. Grain: one row per respondent.'
+        note: "One-line summary with the grain."
+      - find: "The weighted share, or None when no rows remain or weights sum to 0."
+        note: "What None means, so callers handle it."
+      - find: "KeyError: If a named column is missing."
+        note: "The failure a caller might need to catch."
+  takeaway: |
+    Docstrings state grain, units, missing values and what None means. The README states purpose, quick start, inputs, config, tests and owners.
+
+exercises:
+  - id: B18-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which line adds the most value to a function's docstring?
+    options:
+      - {id: a, text: "\"Loops over rows and sums values.\""}
+      - {id: b, text: "\"Returns None when the weights sum to 0.\""}
+      - {id: c, text: "\"Written by the analytics team.\""}
+      - {id: d, text: "\"This is a function.\""}
+    answer: b
+    reasons:
+      - {id: r1, text: "It tells callers about a behaviour the signature and name cannot show."}
+      - {id: r2, text: "Short lines are better."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The code already shows that. Docstrings explain what the code cannot."
+      - answer: c
+        feedback: "Ownership belongs in the README or CODEOWNERS, not every docstring."
+      - answer: d
+        feedback: "It adds nothing."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Value comes from information, not length."
+    hints:
+      - "What would surprise a caller?"
+      - "What can the signature not say?"
+      - "Edge behaviour."
+    explanation: |
+      Document what a caller must know and cannot see: edge cases, units, grain.
+
+  - id: B18-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      def share(part: float, total: float) -> float | None:
+          """part / total, or None when total is 0."""
+          return None if total == 0 else part / total
+
+
+      print(share.__doc__)
+    answer: "part / total, or None when total is 0."
+    wrong_answers:
+      - answer: "None"
+        feedback: "A string literal as the first statement of a function becomes its __doc__."
+    hints:
+      - "Where does Python store a function's docstring?"
+      - "In __doc__."
+      - "It prints the string."
+    explanation: |
+      The first string in the body is the docstring. `help()`, editors and documentation tools read it from `__doc__`.
+
+  - id: B18-L1-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the sections of a project README.
+    items:
+      - {id: purpose, text: "Purpose and users"}
+      - {id: quick, text: "Quick start: install and run commands"}
+      - {id: io, text: "Inputs and outputs, with grain and schedule"}
+      - {id: config, text: "Configuration"}
+      - {id: tests, text: "Tests and checks"}
+      - {id: owners, text: "Owners and support"}
+    answer: [purpose, quick, io, config, tests, owners]
+    wrong_answers:
+      - answer: [quick, purpose, io, config, tests, owners]
+        feedback: "Say what the project is before telling people to run it."
+      - answer: [purpose, io, config, tests, owners, quick]
+        feedback: "The quick start is what most readers came for. Put it near the top."
+    hints:
+      - "What does a newcomer need first?"
+      - "Then how to run it."
+      - "Details after."
+    explanation: |
+      Purpose, run, data, settings, checks, contacts: the order a newcomer's questions arrive in.
+
+  - id: B18-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Add a Google-style docstring to `cap_weights`. It must have a one-line summary, an `Args:` section naming `weights` and `cap`, a `Returns:` section, and a `Raises:` section with `ValueError` for a cap below 1. Mention that missing weights stay missing. Keep the code as it is.
+    starter: |
+      import pandas as pd
+
+
+      def cap_weights(weights: pd.Series, cap: float) -> pd.Series:
+          if cap < 1:
+              raise ValueError("cap must be at least 1")
+          return weights.clip(upper=cap)
+    checker:
+      kind: python
+      ast_rules:
+        - id: documented
+          kind: requires_function
+          name: cap_weights
+          typed: true
+          docstring: true
+          message: "Add a docstring to cap_weights."
+      tests:
+        - id: sections
+          code: |
+            doc = cap_weights.__doc__ or ""
+            for part in ("Args:", "Returns:", "Raises:"):
+                assert part in doc, part
+          message: "Include Args:, Returns: and Raises: sections."
+        - id: names
+          code: |
+            doc = cap_weights.__doc__ or ""
+            assert "weights" in doc.split("Args:")[1] and "cap" in doc.split("Args:")[1]
+            assert "ValueError" in doc.split("Raises:")[1]
+          message: "Name both parameters under Args:, and ValueError under Raises:."
+        - id: missing
+          code: |
+            doc = (cap_weights.__doc__ or "").lower()
+            assert "missing" in doc
+          message: "Say what happens to missing weights."
+        - id: summary
+          code: |
+            first = (cap_weights.__doc__ or "").strip().splitlines()[0]
+            assert first and not first.endswith(":")
+          message: "Start with a one-line summary."
+    solution: |
+      import pandas as pd
+
+
+      def cap_weights(weights: pd.Series, cap: float) -> pd.Series:
+          """Cap survey weights at a maximum value.
+
+          Args:
+              weights: One weight per respondent. Missing weights stay missing.
+              cap: Largest allowed weight, at least 1.
+
+          Returns:
+              A new Series with every weight above cap set to cap.
+
+          Raises:
+              ValueError: If cap is below 1.
+          """
+          if cap < 1:
+              raise ValueError("cap must be at least 1")
+          return weights.clip(upper=cap)
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def cap_weights(weights: pd.Series, cap: float) -> pd.Series:
+            """Cap survey weights at a maximum value."""
+            if cap < 1:
+                raise ValueError("cap must be at least 1")
+            return weights.clip(upper=cap)
+      - |
+        import pandas as pd
+
+
+        def cap_weights(weights: pd.Series, cap: float) -> pd.Series:
+            """Cap survey weights at a maximum value.
+
+            Args:
+                weights: One weight per respondent.
+                cap: Largest allowed weight.
+
+            Returns:
+                Capped weights.
+
+            Raises:
+                ValueError: If cap is below 1.
+            """
+            if cap < 1:
+                raise ValueError("cap must be at least 1")
+            return weights.clip(upper=cap)
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def cap_weights(weights: pd.Series, cap: float) -> pd.Series:
+              """Cap survey weights at a maximum value."""
+              if cap < 1:
+                  raise ValueError("cap must be at least 1")
+              return weights.clip(upper=cap)
+        triggers: sections
+    hints:
+      - "Summary line, blank line, then Args:, Returns:, Raises:."
+      - "Indent each entry under its section."
+      - "Mention missing weights under weights."
+    explanation: |
+      The docstring now tells a caller the bounds, the edge behaviour and the failure mode, none of which the signature shows.
+
+  - id: B18-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Decide where each piece of information belongs.
+    slots:
+      - id: none_meaning
+        label: "The function returns None for empty cells"
+        options: &places
+          - {id: docstring, text: "Docstring"}
+          - {id: readme, text: "README"}
+          - {id: comment, text: "Inline comment"}
+          - {id: config, text: "Config file"}
+        answer: docstring
+      - id: run
+        label: "The command to run the monthly job"
+        options: *places
+        answer: readme
+      - id: why_line
+        label: "Why one line uses a workaround for a library bug, with the issue link"
+        options: *places
+        answer: comment
+      - id: threshold
+        label: "The minimum reporting base of 50"
+        options: *places
+        answer: config
+    model_answer: |
+      - Behaviour a caller must handle: the docstring.
+      - How to run the project: the README.
+      - Why a specific line is unusual: an inline comment next to it.
+      - A setting that may change: config (lesson A1-L3), described in the README.
+    wrong_answers:
+      - answer: {none_meaning: readme}
+        feedback: "Callers read the function's docstring, often in their editor, not the README."
+      - answer: {threshold: docstring}
+        feedback: "A value that can change belongs in config. Hardcoding it in prose invites drift."
+      - answer: {why_line: docstring}
+        feedback: "A workaround on one line is explained best right beside that line."
+    hints:
+      - "Who reads it, and where?"
+      - "Will the value change?"
+      - "How local is the explanation?"
+    explanation: |
+      Put information where its reader looks, and settings where they can change without editing text.
+
+recap:
+  - front: "Google-style docstring sections"
+    back: "One-line summary, then Args:, Returns:, Raises:."
+  - front: "What a data docstring must state"
+    back: "Grain, units, missing and zero handling, and what None means."
+  - front: "README sections"
+    back: "Purpose, quick start, inputs and outputs, configuration, tests, owners."
+  - front: "Keeping docs true"
+    back: "Update docstrings in the same commit as the code. Test the quick start where possible."
+
+claims: []

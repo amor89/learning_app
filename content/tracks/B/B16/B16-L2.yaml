@@ -1,0 +1,317 @@
+id: B16-L2
+title: A training loop that does what you think
+
+concept: |
+  PyTorch leaves the training loop to you. That gives control, and five ways to get it silently wrong. The standard loop, PyTorch 2.14:
+
+  ```python
+  for epoch in range(max_epochs):
+      model.train()
+      for x, y in train_loader:
+          x, y = x.to(device), y.to(device)
+          optimizer.zero_grad()
+          loss = loss_fn(model(x), y)
+          loss.backward()
+          optimizer.step()
+      val_loss = evaluate(model, val_loader, loss_fn, device)   # model.eval() + torch.inference_mode()
+  ```
+
+  The five traps:
+
+  1. **Missing `optimizer.zero_grad()`.** Gradients **add up** across `backward()` calls. In this course's build, three backward passes on `2 * w` left a gradient of 6.0 instead of 2.0. Training still runs, with steps that grow each batch.
+  2. **Missing `model.eval()` for validation.** Dropout stays active and batch norm keeps updating its statistics. Two predictions for the same input differed in train mode and matched in eval mode.
+  3. **Missing `torch.inference_mode()`** (or `torch.no_grad()`) during validation. PyTorch builds a graph it never uses, wasting memory.
+  4. **Softmax before `CrossEntropyLoss`.** The loss applies log-softmax itself and expects raw **logits**. For logits `[2.0, 0.5]` and class 0, the correct loss is 0.2014. Passing softmax outputs gave 0.4252, a different loss with weaker gradients.
+  5. **Summing loss tensors for logging.** `total += loss` keeps every batch's graph alive, and memory grows each step. Use `total += loss.item()`.
+
+  **Early stopping.** Track validation loss each epoch. Stop when it has not improved by at least `min_delta` for `patience` epochs, and keep a copy of the best weights (`copy.deepcopy(model.state_dict())`), not the last ones.
+
+  Log the loss curve for both training and validation (lesson B14-L1). A validation loss that rises while training loss falls is overfitting. Both flat from the start usually means a bug, such as frozen parameters or a learning rate of zero.
+
+why_it_matters: |
+  A text classifier trained for 30 epochs showed a smooth, falling training loss and a validation accuracy stuck at 51%. The code applied `softmax` in the model's `forward` and then used `CrossEntropyLoss`. Gradients were small and the model barely learned. Removing one line lifted validation accuracy to 78% in six epochs. The previous two weeks of hyperparameter tuning had been on a broken loss.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      for x, y in loader:
+          out = torch.softmax(model(x), dim=1)
+          loss = nn.CrossEntropyLoss()(out, y)
+          loss.backward()
+          optimizer.step()
+          total += loss
+    annotations:
+      - find: "out = torch.softmax(model(x), dim=1)"
+        note: "CrossEntropyLoss expects logits. Softmax here changes the loss and flattens gradients."
+      - find: "loss.backward()"
+        note: "No zero_grad before it: gradients accumulate across batches."
+      - find: "total += loss"
+        note: "Keeps each batch's graph alive. Use loss.item()."
+  strong:
+    code: |
+      def should_stop(val_losses: list[float], patience: int, min_delta: float = 0.0) -> bool:
+          """True when the last `patience` epochs did not beat the earlier best by min_delta."""
+          if patience < 1:
+              raise ValueError("patience must be at least 1")
+          if len(val_losses) <= patience:
+              return False
+          best_before = min(val_losses[:-patience])
+          return min(val_losses[-patience:]) > best_before - min_delta
+    annotations:
+      - find: "if len(val_losses) <= patience:"
+        note: "Too few epochs to judge: keep training."
+      - find: "return min(val_losses[-patience:]) > best_before - min_delta"
+        note: "Stop only when recent epochs failed to improve on the earlier best."
+  takeaway: |
+    zero_grad, train and eval modes, inference_mode for validation, logits into CrossEntropyLoss, loss.item() for logs, and early stopping on validation loss.
+
+exercises:
+  - id: B16-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A loop calls `loss.backward()` and `optimizer.step()` but never `optimizer.zero_grad()`. What happens?
+    options:
+      - {id: a, text: "Nothing. PyTorch clears gradients automatically."}
+      - {id: b, text: "Gradients accumulate across batches, so steps use the sum of all earlier gradients."}
+      - {id: c, text: "backward() raises an error on the second batch."}
+      - {id: d, text: "The model stops learning."}
+    answer: b
+    reasons:
+      - {id: r1, text: "backward() adds into .grad. Only zero_grad() resets it."}
+      - {id: r2, text: "Optimizers ignore gradients without zero_grad."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "PyTorch accumulates on purpose, for gradient accumulation. Clearing is your job."
+      - answer: c
+        feedback: "No error: training runs with growing, wrong updates."
+      - answer: d
+        feedback: "It keeps changing, with updates that grow each batch."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The optimizer uses the accumulated gradients."
+    hints:
+      - "Does backward overwrite or add?"
+      - "It adds."
+      - "zero_grad resets."
+    explanation: |
+      Call `optimizer.zero_grad()` before each backward pass.
+
+  - id: B16-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.14)
+    code: |
+      import torch
+
+      w = torch.tensor([1.0], requires_grad=True)
+      for _ in range(3):
+          loss = (w * 2).sum()
+          loss.backward()
+      print(w.grad.item())
+    answer: "6.0"
+    wrong_answers:
+      - answer: "2.0"
+        feedback: "Each backward adds 2.0 to w.grad. Three calls without zeroing give 6.0."
+    hints:
+      - "The gradient of 2w is 2."
+      - "How many backward calls?"
+      - "They add up."
+    explanation: |
+      Three accumulations of 2.0. With `zero_grad()` each iteration it would print 2.0.
+
+  - id: B16-L2-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the steps inside one training iteration.
+    items:
+      - {id: move, text: "x, y = x.to(device), y.to(device)"}
+      - {id: zero, text: "optimizer.zero_grad()"}
+      - {id: forward, text: "loss = loss_fn(model(x), y)"}
+      - {id: backward, text: "loss.backward()"}
+      - {id: step, text: "optimizer.step()"}
+    answer: [move, zero, forward, backward, step]
+    wrong_answers:
+      - answer: [move, forward, backward, zero, step]
+        feedback: "zero_grad after backward erases the gradients the step needs."
+      - answer: [move, zero, forward, step, backward]
+        feedback: "step before backward uses stale or empty gradients."
+    hints:
+      - "Data first."
+      - "Clear gradients before computing new ones."
+      - "Compute, then apply."
+    explanation: |
+      Move, clear, forward, backward, step. zero_grad can also sit at the end of the iteration, as long as it runs between steps.
+
+  - id: B16-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `should_stop(val_losses: list[float], patience: int, min_delta: float = 0.0) -> bool`. Return `True` when the best loss in the last `patience` epochs is not lower than the best loss before them by more than `min_delta`. Return `False` when there are `patience` or fewer losses. Raise `ValueError` if `patience < 1`.
+    starter: |
+      def should_stop(val_losses, patience, min_delta=0.0):
+          return val_losses[-1] > val_losses[-2]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: should_stop
+          typed: true
+          docstring: true
+          message: "Give `should_stop` type hints and a docstring."
+      tests:
+        - id: stops
+          code: |
+            assert should_stop([1.0, 0.9, 0.91, 0.92], 2) is True
+          message: "No improvement on 0.9 in the last 2 epochs: stop."
+        - id: continues
+          code: |
+            assert should_stop([1.0, 0.9, 0.95, 0.85], 2) is False
+            assert should_stop([1.0, 0.9, 0.8, 0.95], 2) is False
+            assert should_stop([1.0, 0.9], 2) is False
+          message: "An improvement in the window, or too few epochs, means continue."
+        - id: min_delta
+          code: |
+            assert should_stop([1.0, 0.9, 0.899, 0.898], 2, min_delta=0.01) is True
+            assert should_stop([1.0, 0.9, 0.899, 0.898], 2) is False
+          message: "Improvements smaller than min_delta do not count."
+        - id: invalid
+          code: |
+            try:
+                should_stop([1.0], 0)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "patience below 1 must raise ValueError."
+    solution: |
+      def should_stop(val_losses: list[float], patience: int, min_delta: float = 0.0) -> bool:
+          """Early-stopping rule on validation losses, one per epoch.
+
+          Args:
+              val_losses: Validation loss per epoch, oldest first.
+              patience: Epochs allowed without improvement.
+              min_delta: Smallest decrease that counts as improvement.
+
+          Returns:
+              True when training should stop.
+
+          Raises:
+              ValueError: If patience is below 1.
+          """
+          if patience < 1:
+              raise ValueError("patience must be at least 1")
+          if len(val_losses) <= patience:
+              return False
+          best_before = min(val_losses[:-patience])
+          return min(val_losses[-patience:]) > best_before - min_delta
+    seeded_bugs:
+      - |
+        def should_stop(val_losses: list[float], patience: int, min_delta: float = 0.0) -> bool:
+            """Compares with the last loss only."""
+            if patience < 1:
+                raise ValueError("patience must be at least 1")
+            if len(val_losses) <= patience:
+                return False
+            return val_losses[-1] > val_losses[-1 - patience] - min_delta
+      - |
+        def should_stop(val_losses: list[float], patience: int, min_delta: float = 0.0) -> bool:
+            """Ignores min_delta."""
+            if patience < 1:
+                raise ValueError("patience must be at least 1")
+            if len(val_losses) <= patience:
+                return False
+            return min(val_losses[-patience:]) > min(val_losses[:-patience])
+    wrong_answers:
+      - answer: |
+          def should_stop(val_losses: list[float], patience: int, min_delta: float = 0.0) -> bool:
+              """Compares with the last loss only."""
+              if patience < 1:
+                  raise ValueError("patience must be at least 1")
+              if len(val_losses) <= patience:
+                  return False
+              return val_losses[-1] > val_losses[-1 - patience] - min_delta
+        triggers: continues
+    hints:
+      - "Split the list: before the window and the window."
+      - "Compare the window's best with the earlier best."
+      - "Subtract min_delta from the earlier best."
+    explanation: |
+      Comparing best against best ignores noisy single epochs. min_delta stops training from continuing on improvements too small to matter.
+
+  - id: B16-L2-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      Validation accuracy is stuck near chance while training loss falls slowly. Tap the line that breaks the loss.
+    code: |
+      import torch
+      from torch import nn
+
+
+      class Classifier(nn.Module):
+          """Two-layer classifier. Train with nn.CrossEntropyLoss."""
+
+          def __init__(self, n_in: int, n_classes: int) -> None:
+              super().__init__()
+              self.net = nn.Sequential(nn.Linear(n_in, 32), nn.ReLU(), nn.Linear(32, n_classes))
+
+          def forward(self, x: torch.Tensor) -> torch.Tensor:
+              return torch.softmax(self.net(x), dim=1)
+    bug_lines: [13]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_softmax
+          kind: forbids_pattern
+          pattern: "softmax"
+          message: "Return logits. CrossEntropyLoss applies log-softmax itself."
+        - id: returns_net
+          kind: requires_pattern
+          pattern: "return\\s+self\\.net\\(x\\)"
+          message: "forward should return self.net(x), the raw logits."
+    fix_solution: |
+      import torch
+      from torch import nn
+
+
+      class Classifier(nn.Module):
+          """Two-layer classifier. Train with nn.CrossEntropyLoss."""
+
+          def __init__(self, n_in: int, n_classes: int) -> None:
+              super().__init__()
+              self.net = nn.Sequential(nn.Linear(n_in, 32), nn.ReLU(), nn.Linear(32, n_classes))
+
+          def forward(self, x: torch.Tensor) -> torch.Tensor:
+              return self.net(x)
+    wrong_answers:
+      - lines: [10]
+        feedback: "The architecture is fine. The output passed to the loss is the problem."
+    hints:
+      - "What does CrossEntropyLoss expect as input?"
+      - "What does forward return?"
+      - "Logits, not probabilities."
+    explanation: |
+      Softmax squeezes outputs into [0, 1], and CrossEntropyLoss then applies log-softmax again. The loss and its gradients are wrong. Apply softmax only when you need probabilities for reporting.
+
+recap:
+  - front: "The training iteration"
+    back: "to(device), zero_grad, forward and loss, backward, step."
+  - front: "Validation mode"
+    back: "model.eval() and torch.inference_mode(). Back to model.train() after."
+  - front: "CrossEntropyLoss input"
+    back: "Raw logits. It applies log-softmax itself."
+  - front: "Early stopping"
+    back: "Stop when validation loss has not improved by min_delta for patience epochs. Keep the best weights."
+
+claims:
+  - claim: "Three backward passes on 2*w leave w.grad = 6.0; dropout outputs differ in train mode and match in eval mode; CrossEntropyLoss on logits [2.0, 0.5] with target 0 is 0.2014, and 0.4252 on their softmax."
+    status: verified
+    source: "Run with torch 2.14.0 (CPU) in a scratch environment for this repository."

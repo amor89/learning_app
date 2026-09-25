@@ -37,13 +37,27 @@ Checked on 25 September 2026. Status key:
 | python-docx | 1.2.0 | 1.2.x | Verified (PyPI) |
 | WeasyPrint (PDF build) | 70.0 | 70.x | Verified (PyPI) |
 
+## Track B libraries (tested, not pinned for the app)
+
+| Package | Version tested | Where | Status |
+|---|---|---|---|
+| matplotlib | 3.11.2 (dev), 3.10.8 (parity) | dev and parity environments | Verified (local run) |
+| SciPy | 1.17.1 | dev environment (Python 3.11 cannot install 1.18) | Verified (local run) |
+| statsmodels | 0.15.0 (dev), 0.14.6 (parity) | dev and parity environments | Verified (local run) |
+| Hypothesis | 6.168.1 | dev environment only; not in Pyodide | Verified (local run) |
+| MLflow | 3.16.1 | scratch environment, Python 3.12 | Verified (local run). Not in the dev group: too large for CI, and not in Pyodide |
+| shap | 0.51.0 | dev environment | Verified (local run) |
+| PyTorch | 2.14.0, CPU | scratch environment, Python 3.12, PyPI wheel | Verified (local run). Not in the dev group or Pyodide |
+| sentence-transformers | Not installed | none | Unverified. Its API in B15-L1 comes from the library documentation |
+| uv | 0.8.17 | build machine | Verified (local run) |
+
 ## Browser runtime
 
 | Item | Version | Status | Notes |
 |---|---|---|---|
-| Pyodide | 314.0.7 | Verified (npm package and its pyodide-lock.json) | Bundles Python 3.14.2, pandas 3.0.2, NumPy 2.4.6, scikit-learn 1.8.0. CDN path `https://cdn.jsdelivr.net/pyodide/v314.0.7/full/` taken from the package's own loader. Pyodide 314 runs in module workers only. |
+| Pyodide | 314.0.7 | Verified (npm package and its pyodide-lock.json) | Bundles Python 3.14.2, pandas 3.0.2, NumPy 2.4.6, scikit-learn 1.8.0, Polars 1.33.1, DuckDB 1.5.1, SciPy 1.18.0, statsmodels 0.14.6, matplotlib 3.10.8, pyarrow 22.0.0, pydantic 2.12.5, pytest 9.0.2. No Hypothesis, pandera, MLflow, shap or PyTorch. CDN path `https://cdn.jsdelivr.net/pyodide/v314.0.7/full/` taken from the package's own loader. Pyodide 314 runs in module workers only. |
 
-Browser exercises run on the Pyodide versions. Laptop and CI tests run on the pins above. The pandas behaviour taught in Track B is the same in 3.0.2 and 3.0.6.
+Browser exercises run on the Pyodide versions. Laptop and CI tests run on the pins above, and the CI `parity` job reruns every checker test on the Pyodide package versions (Python 3.13, because Pyodide's Python 3.14 build has no matching CPython wheels for every pin). The pandas behaviour taught in Track B is the same in 3.0.2 and 3.0.6.
 
 ## Fabric feature status
 
@@ -102,3 +116,29 @@ Checked on 25 September 2026. "Local" means run on PySpark 4.0.4 with delta-spar
 | PySpark 4.0.4 with pandas 3.0.6 fails on `pyspark.testing.assertDataFrameEqual` and pandas-on-Spark imports: `ImportError: cannot import name '_builtin_table' from 'pandas.core.common'`. With pandas 2.3.3 it works. The `spark` dependency group pins pandas 2.x and runs in its own environment. | Verified | Local |
 | `assertDataFrameEqual` ignores row order by default (`checkRowOrder=False`), compares floats with `rtol=1e-5`, fails on schema differences such as INT against BIGINT (`DIFFERENT_SCHEMA`) and on duplicate rows. `PySparkAssertionError` subclasses `AssertionError`. | Verified | Local, pandas 2.3.3 |
 | pytest 9.0.2, pydantic 2.12.5, Polars 1.33.1, DuckDB 1.5.1, SciPy 1.18.0, statsmodels 0.14.6 ship with Pyodide 314.0.7. Hypothesis and pandera do not. | Verified | pyodide-lock.json |
+
+## Track B facts
+
+Every Track B lesson lists its claims with a status. Measured numbers come from runs in this repository and are quoted with the versions used.
+
+| Fact | Status | Source |
+|---|---|---|
+| pandas 3.0: `str` default text dtype, Copy-on-Write always on, `ChainedAssignmentError` warning, setting 1.5 into `int64` raises `TypeError`, `SettingWithCopyWarning` removed. | Verified | Local, pandas 3.0.6 and 3.0.2 |
+| `Series.str.contains` returns None for missing values on pandas 2.3 and False on pandas 3.0. | Verified | Local |
+| Polars `sum()` of an all-null group returns 0. `pl.from_pandas` drops the index by default. | Verified | Local, Polars 1.33.1 and 1.44.2 |
+| DuckDB `?` and `$name` parameters; an f-string filter with `w1' or '1'='1` returned every row. | Verified | Local, DuckDB 1.5.1 and 1.5.5 |
+| pandera 0.33: `SchemaErrors` is not a subclass of `SchemaError`; a strict violation raises `SchemaErrors` without `lazy`. | Verified | Local |
+| `import pandera.pandas as pa` is the documented import. | Search only | pandera docs |
+| pydantic 2: default `extra="ignore"`; lax mode converts "30" and True to int; `model_copy(update=...)` skips validation. | Verified | Local, 2.12.5 and 2.13.5 |
+| `uv sync --locked` fails with a stale lock. | Verified | Local, uv 0.8.17 |
+| `pip-compile --generate-hashes`, `pip install --require-hashes`. | Search only | pip-tools and pip docs |
+| Wilson interval, SRM chi-square, Holm and BH results, power 1,534 per group for 40% vs 45%. | Verified | Local, statsmodels and SciPy |
+| SRM investigation threshold p < 0.001. | Search only | Fabijan et al. (2019) |
+| Feature selection leak (0.85 vs 0.48), group leak (0.995 vs 0.468), best_score_ optimism (0.598 vs 0.515), balanced weights and calibration (mean p 0.024 to 0.42). | Verified | Local, scikit-learn 1.8.0 and 1.9.1 |
+| OneHotEncoder `handle_unknown="error"` and ColumnTransformer `remainder="drop"` defaults; HDBSCAN `copy` default changes in 1.10. | Verified | Local, scikit-learn 1.8.0 |
+| Impurity importance bias (random ID 0.335 vs permutation 0.004); SHAP additivity per output space. | Verified | Local, scikit-learn 1.9.1, shap 0.51.0 |
+| MLflow 3.16: SQLite default store, params as strings and immutable, `log_model(name=...)`, aliases, stages deprecated since 2.9, skops format for sklearn. | Verified | Local, MLflow 3.16.1 |
+| Unity Catalog models use three-level names with `databricks-uc` and do not support stages. | Search only | Databricks docs |
+| PyTorch 2.14: `Tensor.to` returns a copy, `Module.to` is in place, gradients accumulate, weights-only `torch.load`, same-seed CPU runs identical. | Verified | Local, torch 2.14.0 CPU |
+| PyTorch `worker_init_fn` seeding and `CUBLAS_WORKSPACE_CONFIG` for deterministic CUDA. | Search only | PyTorch reproducibility notes |
+| sentence-transformers `encode(..., normalize_embeddings=True)`, 384 dimensions for all-MiniLM-L6-v2. | Unverified | Library docs and model card; not run |

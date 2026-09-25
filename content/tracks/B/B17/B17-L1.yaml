@@ -1,0 +1,370 @@
+id: B17-L1
+title: Unit tests for data code that catch real bugs
+
+concept: |
+  A test is worth writing if it fails when the code is wrong. For data code, most bugs sit at the edges: empty input, missing values, zero denominators, one row, duplicate keys. Test those on purpose.
+
+  With pytest 9, a test is a function whose name starts with `test_` and which uses plain `assert`:
+
+  ```python
+  import pytest
+
+
+  def test_share_zero_total_is_none():
+      assert share(3, 0) is None
+
+
+  @pytest.mark.parametrize(("part", "total", "expected"), [(1, 4, 0.25), (0, 5, 0.0), (5, 5, 1.0)])
+  def test_share_values(part, total, expected):
+      assert share(part, total) == expected
+  ```
+
+  Habits that make tests catch bugs:
+
+  - **Test pure functions** (lesson B2-L1). No files, clocks or databases, so tests are fast and exact.
+  - **Build tiny, explicit inputs** in the test itself: three rows, written out. A reader sees the input and the expected answer together.
+  - **One behaviour per test**, named for it: `test_zero_total_returns_none`, not `test_share_2`.
+  - **Compare DataFrames with `pd.testing.assert_frame_equal`**. It checks values, dtypes, column order and index, and prints a clear difference.
+  - **Compare floats with `pytest.approx`** when the value comes from arithmetic: `assert mean == pytest.approx(0.3)`.
+  - **Use `tmp_path`** for anything that writes files. pytest gives each test a fresh temporary directory.
+
+  Check that each test can fail. Break the code on purpose, once, and watch the test go red. A test that stays green whatever you do protects nothing. This course's own quality gate does the same: every seeded bug must fail its checker.
+
+  Run the tests in CI on every push (lesson A10-L3), and fix a failing test before merging anything else.
+
+why_it_matters: |
+  A share function had a test, `assert share(1, 4) == 0.25`, and 100% line coverage. The zero-total branch returned `0.0` instead of `None`. Dashboards showed empty segments as "0% of respondents", which the client read as a real finding. A four-word test, `assert share(3, 0) is None`, would have failed on the first run.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def test_share():
+          result = share(1, 4)
+          assert result
+    annotations:
+      - find: "assert result"
+        note: "Passes for any truthy value: 0.25, 99 or 'oops'. And 0.0 would fail a correct result."
+  strong:
+    code: |
+      import pytest
+
+
+      def share(part: float, total: float) -> float | None:
+          """part / total, or None when total is 0."""
+          if total == 0:
+              return None
+          return part / total
+
+
+      @pytest.mark.parametrize(("part", "total", "expected"), [(1, 4, 0.25), (0, 5, 0.0), (5, 5, 1.0)])
+      def test_share_values(part: float, total: float, expected: float) -> None:
+          assert share(part, total) == pytest.approx(expected)
+
+
+      def test_share_zero_total_is_none() -> None:
+          assert share(3, 0) is None
+    annotations:
+      - find: '@pytest.mark.parametrize(("part", "total", "expected"), [(1, 4, 0.25), (0, 5, 0.0), (5, 5, 1.0)])'
+        note: "Several cases, including 0 and 1, in one readable table."
+      - find: "assert share(3, 0) is None"
+        note: "The edge case that most often ships broken, tested explicitly."
+  takeaway: |
+    Test edges on purpose, with tiny explicit inputs, one behaviour per test, and prove each test can fail.
+
+exercises:
+  - id: B17-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which assertion best tests that `share(3, 0)` returns `None`?
+    options:
+      - {id: a, text: "`assert not share(3, 0)`"}
+      - {id: b, text: "`assert share(3, 0) is None`"}
+      - {id: c, text: "`assert share(3, 0) == 0`"}
+      - {id: d, text: "`assert share(3, 0) != 1`"}
+    answer: b
+    reasons:
+      - {id: r1, text: "It fails for every result except None, including 0.0."}
+      - {id: r2, text: "`is` is faster than `==`."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "0.0 is falsy too, so a buggy 0.0 would pass."
+      - answer: c
+        feedback: "That asserts the bug."
+      - answer: d
+        feedback: "Almost any wrong value passes."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Precision matters, not speed."
+    hints:
+      - "Which buggy values would each assertion let through?"
+      - "Is 0.0 falsy?"
+      - "Only one rejects 0.0."
+    explanation: |
+      Write assertions that pass only for the correct value.
+
+  - id: B17-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (pandas 3.0)
+    code: |
+      import pandas as pd
+
+      a = pd.DataFrame({"n": [1, 2]})
+      b = pd.DataFrame({"n": [1.0, 2.0]})
+      print(a.equals(b), (a == b).all().all())
+      try:
+          pd.testing.assert_frame_equal(a, b)
+          print("equal")
+      except AssertionError:
+          print("AssertionError")
+    answer: |
+      False True
+      AssertionError
+    wrong_answers:
+      - answer: |
+          True True
+          equal
+        feedback: "Values match, but dtypes differ (int64 and float64). assert_frame_equal checks dtypes by default."
+    hints:
+      - "What are the dtypes?"
+      - "Does == compare dtypes?"
+      - "assert_frame_equal does."
+    explanation: |
+      `==` compares values only. `assert_frame_equal` also checks dtypes, which catches a column that silently became float.
+
+  - id: B17-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Run one test over three cases.
+    template: |
+      @pytest.mark.[[g1]](("part", "total", "expected"), [(1, 4, 0.25), (0, 5, 0.0), (5, 5, 1.0)])
+      def test_share_values(part, total, expected):
+          assert share(part, total) == pytest.[[g2]](expected)
+    gaps:
+      g1: {accepted: [parametrize]}
+      g2: {accepted: [approx]}
+    wrong_answers:
+      - answer: {g1: parameterize}
+        feedback: "pytest spells it parametrize, without the extra e."
+    hints:
+      - "The pytest marker for a table of cases."
+      - "Float comparison with tolerance."
+      - "`parametrize` and `approx`."
+    explanation: |
+      `parametrize` runs the test once per row. `approx` compares floats with a sensible tolerance.
+
+  - id: B17-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      `share(part, total)` should return `part / total`, or `None` when `total` is 0. Write two tests:
+
+      - `test_share_basic()`: `share(1, 4)` equals 0.25.
+      - `test_share_zero_total()`: `share(3, 0)` is `None`.
+
+      The checker runs your tests against a correct `share`, which must pass, and against two broken versions, which your tests must catch.
+    starter: |
+      def share(part: float, total: float) -> float | None:
+          """part / total, or None when total is 0."""
+          if total == 0:
+              return None
+          return part / total
+
+
+      def test_share_basic():
+          assert share(1, 4)
+
+
+      def test_share_zero_total():
+          assert not share(3, 0)
+    checker:
+      kind: python
+      setup: |
+        def _good(part, total):
+            return None if total == 0 else part / total
+
+        def _zero_bug(part, total):
+            return 0.0 if total == 0 else part / total
+
+        def _swap_bug(part, total):
+            return None if total == 0 else total / part
+      ast_rules:
+        - id: basic_exists
+          kind: requires_function
+          name: test_share_basic
+          message: "Define test_share_basic."
+        - id: zero_exists
+          kind: requires_function
+          name: test_share_zero_total
+          message: "Define test_share_zero_total."
+      tests:
+        - id: passes_good
+          code: |
+            share = _good
+            test_share_basic()
+            test_share_zero_total()
+          message: "Your tests must pass for a correct share function."
+        - id: catches_zero_bug
+          code: |
+            share = _zero_bug
+            try:
+                test_share_zero_total()
+            except AssertionError:
+                pass
+            else:
+                raise AssertionError("test_share_zero_total passed when share(3, 0) returned 0.0")
+          message: "test_share_zero_total must fail when share returns 0.0 for a zero total. Use `is None`."
+        - id: catches_swap_bug
+          code: |
+            share = _swap_bug
+            try:
+                test_share_basic()
+            except AssertionError:
+                pass
+            else:
+                raise AssertionError("test_share_basic passed when share returned total / part")
+          message: "test_share_basic must check the value 0.25, not just that a result exists."
+    solution: |
+      def share(part: float, total: float) -> float | None:
+          """part / total, or None when total is 0."""
+          if total == 0:
+              return None
+          return part / total
+
+
+      def test_share_basic() -> None:
+          assert share(1, 4) == 0.25
+
+
+      def test_share_zero_total() -> None:
+          assert share(3, 0) is None
+    seeded_bugs:
+      - |
+        def share(part: float, total: float) -> float | None:
+            """part / total, or None when total is 0."""
+            if total == 0:
+                return None
+            return part / total
+
+
+        def test_share_basic() -> None:
+            assert share(1, 4) == 0.25
+
+
+        def test_share_zero_total() -> None:
+            assert not share(3, 0)
+      - |
+        def share(part: float, total: float) -> float | None:
+            """part / total, or None when total is 0."""
+            if total == 0:
+                return None
+            return part / total
+
+
+        def test_share_basic() -> None:
+            assert share(1, 4)
+
+
+        def test_share_zero_total() -> None:
+            assert share(3, 0) is None
+    wrong_answers:
+      - answer: |
+          def share(part: float, total: float) -> float | None:
+              """part / total, or None when total is 0."""
+              if total == 0:
+                  return None
+              return part / total
+
+
+          def test_share_basic() -> None:
+              assert share(1, 4) == 0.25
+
+
+          def test_share_zero_total() -> None:
+              assert not share(3, 0)
+        triggers: catches_zero_bug
+      - answer: |
+          def share(part: float, total: float) -> float | None:
+              """part / total, or None when total is 0."""
+              if total == 0:
+                  return None
+              return part / total
+
+
+          def test_share_basic() -> None:
+              assert share(1, 4)
+
+
+          def test_share_zero_total() -> None:
+              assert share(3, 0) is None
+        triggers: catches_swap_bug
+    hints:
+      - "A test must fail for wrong values, not only for crashes."
+      - "Compare with the exact expected value: `== 0.25`."
+      - "Test for None with `is None`."
+    explanation: |
+      The checker plays the role of a mutation test: it breaks the code and checks your tests notice. Precise assertions catch both bugs.
+
+  - id: B17-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Choose test cases for `weighted_share(df, value, weight)` from lesson B8-L1.
+    slots:
+      - id: normal
+        label: "Normal case"
+        options:
+          - {id: explicit, text: "Four rows written out, expected value computed by hand"}
+          - {id: sample, text: "A 10,000-row sample of production data, expected value from the function itself"}
+        answer: explicit
+      - id: edges
+        label: "Edge cases"
+        options:
+          - {id: edges, text: "Empty frame, all weights zero, missing values in value and weight"}
+          - {id: skip, text: "None, the normal case covers the lines"}
+        answer: edges
+      - id: compare
+        label: "Float comparison"
+        options:
+          - {id: approx, text: "pytest.approx"}
+          - {id: exact, text: "== on computed floats"}
+        answer: approx
+    model_answer: |
+      - Tiny explicit inputs with hand-computed answers.
+      - Every edge the function promises to handle.
+      - approx for floats that come from arithmetic.
+    wrong_answers:
+      - answer: {normal: sample}
+        feedback: "An expected value produced by the function under test only checks that it agrees with itself."
+      - answer: {edges: skip}
+        feedback: "Line coverage is not behaviour coverage. Edge branches are where bugs ship."
+      - answer: {compare: exact}
+        feedback: "0.1 + 0.2 != 0.3 in floating point. Use approx."
+    hints:
+      - "Where does the expected value come from?"
+      - "Which inputs break data code?"
+      - "Floating point."
+    explanation: |
+      Independent expected values, every edge, and tolerant float comparison make tests that catch bugs.
+
+recap:
+  - front: "A test worth writing"
+    back: "One that fails when the code is wrong. Break the code once to prove it."
+  - front: "Edge cases for data code"
+    back: "Empty input, missing values, zero denominators, one row, duplicate keys."
+  - front: "Compare DataFrames in tests"
+    back: "pd.testing.assert_frame_equal: values, dtypes, columns and index."
+  - front: "Compare floats in tests"
+    back: "pytest.approx(expected)."
+
+claims:
+  - claim: "DataFrame.equals returns False and assert_frame_equal raises for int64 vs float64 columns with equal values, while == reports True."
+    status: verified
+    source: "Run on pandas 3.0.6 in this repository."

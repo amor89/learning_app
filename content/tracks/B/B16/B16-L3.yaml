@@ -1,0 +1,326 @@
+id: B16-L3
+title: Reproducible PyTorch runs and safe checkpoints
+
+concept: |
+  Neural network training draws random numbers everywhere: weight initialisation, data shuffling, dropout, augmentation. Control every source and two runs with the same seed give the same weights. In this course's build (PyTorch 2.14, CPU), a small network trained twice with seed 1 produced identical parameters. Seed 2 produced different ones.
+
+  **Seed at the entry point, once.** Your own code takes generators as parameters (lesson B6-L1). Libraries and PyTorch internals use global generators, so seed those too, at the start of the training script:
+
+  ```python
+  random.seed(seed)
+  np.random.seed(seed)
+  torch.manual_seed(seed)                       # CPU and all CUDA devices
+  loader_gen = torch.Generator().manual_seed(seed)
+  train_loader = DataLoader(ds, batch_size=64, shuffle=True, generator=loader_gen)
+  ```
+
+  - Pass a seeded `generator` to every shuffling `DataLoader`, so batch order is fixed.
+  - With `num_workers > 0`, the PyTorch documentation recommends a `worker_init_fn` that seeds NumPy and `random` in each worker from `torch.initial_seed()`.
+  - `torch.use_deterministic_algorithms(True)` makes PyTorch raise an error for operations that have no deterministic implementation, instead of silently varying. On CUDA it also needs the `CUBLAS_WORKSPACE_CONFIG` environment variable, as the documentation describes.
+
+  Exact equality holds for the same code, library versions and hardware. Across GPU models or library versions, expect small differences, and compare metrics within a tolerance (lesson B14-L3).
+
+  **Checkpoints** let a long run resume and let you keep the best epoch. Save a dict of state, not the model object:
+
+  ```python
+  torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(),
+              "epoch": epoch, "torch_rng": torch.get_rng_state()}, path)
+  ```
+
+  `torch.load` loads **weights only** by default in PyTorch 2.14. A checkpoint holding a pickled model object fails with `UnpicklingError`. That default protects you: loading an arbitrary pickle can execute code. Save state dicts, rebuild the model class in code, and load the weights into it.
+
+why_it_matters: |
+  A team fine-tuned a classifier and reported 0.86 F1. A reviewer reran the notebook and got 0.83, then 0.85. The DataLoader shuffled with the global generator, dropout drew from it too, and an augmentation library used its own. Nobody could say which number was "the" result. Fixing the seeds and the loader generator made the run repeatable: 0.84, every time. The earlier 0.86 had been a lucky draw.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      model = torch.load("best_model.pt")
+      loader = DataLoader(ds, batch_size=64, shuffle=True)
+    annotations:
+      - find: 'model = torch.load("best_model.pt")'
+        note: "Expects a pickled model object: refused by the weights-only default, and unsafe if forced."
+      - find: "loader = DataLoader(ds, batch_size=64, shuffle=True)"
+        note: "Shuffles with the global generator: batch order changes with any other random call."
+  strong:
+    code: |
+      import random
+      from pathlib import Path
+
+      import numpy as np
+      import torch
+
+
+      def seed_everything(seed: int) -> torch.Generator:
+          """Seed Python, NumPy and PyTorch global state; return a generator for DataLoaders."""
+          random.seed(seed)
+          np.random.seed(seed)
+          torch.manual_seed(seed)
+          return torch.Generator().manual_seed(seed)
+
+
+      def save_checkpoint(path: Path, model: torch.nn.Module, optimizer: torch.optim.Optimizer, epoch: int) -> None:
+          """Save state dicts and RNG state, never the model object."""
+          torch.save(
+              {
+                  "model": model.state_dict(),
+                  "optimizer": optimizer.state_dict(),
+                  "epoch": epoch,
+                  "torch_rng": torch.get_rng_state(),
+              },
+              path,
+          )
+    annotations:
+      - find: "return torch.Generator().manual_seed(seed)"
+        note: "A dedicated generator for DataLoader shuffling."
+      - find: '"model": model.state_dict(),'
+        note: "Weights as tensors: loads under the weights-only default."
+      - find: '"torch_rng": torch.get_rng_state(),'
+        note: "Resuming restores the random stream as well as the weights."
+  takeaway: |
+    Seed every generator at the entry point, give DataLoaders their own generator, and checkpoint state dicts, not objects.
+
+exercises:
+  - id: B16-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      `torch.load("model.pt")` raises `UnpicklingError` in PyTorch 2.14. The file was saved with `torch.save(model, path)`. Best fix?
+    options:
+      - {id: a, text: "Always pass weights_only=False."}
+      - {id: b, text: "Save model.state_dict() instead, rebuild the model class in code, and load the weights into it."}
+      - {id: c, text: "Downgrade PyTorch."}
+      - {id: d, text: "Rename the file to .pkl."}
+    answer: b
+    reasons:
+      - {id: r1, text: "State dicts hold only tensors and plain values, which load safely under the weights-only default."}
+      - {id: r2, text: "Model objects cannot be saved."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That loads arbitrary pickles, which can run code. Only do it for files you created and trust, and prefer fixing how you save."
+      - answer: c
+        feedback: "Downgrading removes a safety default and freezes you on an old version."
+      - answer: d
+        feedback: "The extension changes nothing about the content."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Objects can be saved. Loading them safely is the problem."
+    hints:
+      - "What does weights-only loading allow?"
+      - "What does a state dict contain?"
+      - "Tensors and plain values."
+    explanation: |
+      Save `state_dict()`, keep the model class in version-controlled code, and load weights into a fresh instance.
+
+  - id: B16-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.14)
+    code: |
+      import torch
+
+      g1 = torch.Generator().manual_seed(0)
+      g2 = torch.Generator().manual_seed(0)
+      a = torch.randperm(5, generator=g1).tolist()
+      torch.rand(100)
+      b = torch.randperm(5, generator=g2).tolist()
+      print(a == b)
+    answer: "True"
+    wrong_answers:
+      - answer: "False"
+        feedback: "torch.rand(100) uses the global generator. g1 and g2 are separate and unaffected."
+    hints:
+      - "Which generator does torch.rand use here?"
+      - "Do g1 and g2 share state with it?"
+      - "No."
+    explanation: |
+      Dedicated generators isolate the shuffle order from other random calls. That is why DataLoaders get their own.
+
+  - id: B16-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Give a shuffling DataLoader its own seeded generator.
+    template: |
+      loader_gen = torch.Generator().[[g1]](seed)
+      loader = DataLoader(ds, batch_size=64, shuffle=True, [[g2]]=loader_gen)
+    gaps:
+      g1: {accepted: [manual_seed]}
+      g2: {accepted: [generator]}
+    wrong_answers:
+      - answer: {g2: seed}
+        feedback: "DataLoader has no seed argument. Pass a torch.Generator as generator=."
+    hints:
+      - "The Generator method that seeds it."
+      - "The DataLoader argument that takes it."
+      - "`manual_seed` and `generator`."
+    explanation: |
+      `torch.Generator().manual_seed(seed)` returns the generator, ready to pass as `generator=`.
+
+  - id: B16-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `seed_everything(seed: int) -> torch.Generator`. Seed Python's `random`, NumPy's global generator and PyTorch with `torch.manual_seed`, then return `torch.Generator().manual_seed(seed)` for DataLoaders.
+
+      PyTorch does not run in the browser. The checker reads your code.
+    starter: |
+      import torch
+
+
+      def seed_everything(seed):
+          torch.manual_seed(seed)
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: seed_everything
+          typed: true
+          docstring: true
+          message: "Give `seed_everything` type hints and a docstring."
+        - id: python_random
+          kind: requires_pattern
+          pattern: "random\\.seed\\(\\s*seed\\s*\\)"
+          message: "Seed Python's random module."
+        - id: numpy
+          kind: requires_pattern
+          pattern: "np\\.random\\.seed\\(\\s*seed\\s*\\)|numpy\\.random\\.seed\\(\\s*seed\\s*\\)"
+          message: "Seed NumPy's global generator, which libraries and DataLoader workers may use."
+        - id: torch_seed
+          kind: requires_pattern
+          pattern: "torch\\.manual_seed\\(\\s*seed\\s*\\)"
+          message: "Seed PyTorch with torch.manual_seed(seed)."
+        - id: generator
+          kind: requires_pattern
+          pattern: "return\\s+torch\\.Generator\\(\\)\\.manual_seed\\(\\s*seed\\s*\\)"
+          message: "Return torch.Generator().manual_seed(seed) for DataLoaders."
+    solution: |
+      import random
+
+      import numpy as np
+      import torch
+
+
+      def seed_everything(seed: int) -> torch.Generator:
+          """Seed Python, NumPy and PyTorch global state at the entry point.
+
+          Args:
+              seed: The run's seed, logged with the run.
+
+          Returns:
+              A seeded generator to pass to shuffling DataLoaders.
+          """
+          random.seed(seed)
+          np.random.seed(seed)
+          torch.manual_seed(seed)
+          return torch.Generator().manual_seed(seed)
+    seeded_bugs:
+      - |
+        import random
+
+        import torch
+
+
+        def seed_everything(seed: int) -> torch.Generator:
+            """Forgets NumPy."""
+            random.seed(seed)
+            torch.manual_seed(seed)
+            return torch.Generator().manual_seed(seed)
+      - |
+        import random
+
+        import numpy as np
+        import torch
+
+
+        def seed_everything(seed: int) -> torch.Generator:
+            """Unseeded loader generator."""
+            random.seed(seed)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            return torch.Generator()
+    wrong_answers:
+      - answer: |
+          import random
+
+          import torch
+
+
+          def seed_everything(seed: int) -> torch.Generator:
+              """Forgets NumPy."""
+              random.seed(seed)
+              torch.manual_seed(seed)
+              return torch.Generator().manual_seed(seed)
+        triggers: numpy
+    hints:
+      - "Three global generators: random, NumPy, torch."
+      - "One dedicated generator for the loader."
+      - "`return torch.Generator().manual_seed(seed)`."
+    explanation: |
+      Seeding every global generator at the entry point covers code you do not control. The returned generator keeps batch order independent of everything else.
+
+  - id: B16-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Design checkpointing for a 12-hour training job that must resume after interruptions and keep the best epoch.
+    slots:
+      - id: content
+        label: "Checkpoint content"
+        options:
+          - {id: state, text: "Model and optimizer state dicts, epoch, RNG state, best validation loss"}
+          - {id: object, text: "The whole model object with torch.save(model)"}
+        answer: state
+      - id: when
+        label: "When to save"
+        options:
+          - {id: both, text: "A 'last' checkpoint every epoch, and a 'best' one when validation improves"}
+          - {id: end, text: "Once, at the end"}
+        answer: both
+      - id: load
+        label: "Loading"
+        options:
+          - {id: weights_only, text: "Default weights-only torch.load into a model built from code"}
+          - {id: unsafe, text: "weights_only=False on any checkpoint found in shared storage"}
+        answer: weights_only
+    model_answer: |
+      - State dicts plus epoch, RNG state and best score: everything needed to resume exactly.
+      - Save the last epoch for resuming, and the best epoch for release.
+      - Load with the safe default into a model defined in code.
+    wrong_answers:
+      - answer: {content: object}
+        feedback: "A pickled object ties the file to the exact code layout and fails the weights-only default."
+      - answer: {when: end}
+        feedback: "An interruption at hour 11 loses everything, and the last epoch is rarely the best."
+      - answer: {load: unsafe}
+        feedback: "Unpickling files from shared storage can run arbitrary code."
+    hints:
+      - "What must be restored to continue exactly?"
+      - "Which two checkpoints serve different needs?"
+      - "Keep the safe default."
+    explanation: |
+      Resume from state, release the best epoch, and never unpickle files you did not create.
+
+recap:
+  - front: "Seed a PyTorch run"
+    back: "random.seed, np.random.seed, torch.manual_seed at the entry point, plus a seeded Generator for each DataLoader."
+  - front: "torch.load default in PyTorch 2.14"
+    back: "Weights only. Pickled objects fail with UnpicklingError."
+  - front: "Checkpoint contents"
+    back: "Model and optimizer state dicts, epoch, RNG state, best metric."
+  - front: "Deterministic operations"
+    back: "torch.use_deterministic_algorithms(True) raises on operations with no deterministic version."
+
+claims:
+  - claim: "Same-seed training on CPU gave identical parameters; torch.load of a pickled model raised UnpicklingError; a dict of state dicts, epoch and torch.get_rng_state() loaded with the default."
+    status: verified
+    source: "Run with torch 2.14.0 (CPU) in a scratch environment for this repository."
+  - claim: "PyTorch recommends a worker_init_fn seeding NumPy and random from torch.initial_seed(), and CUBLAS_WORKSPACE_CONFIG for deterministic CUDA."
+    status: search-only
+    source: "PyTorch documentation, Reproducibility notes (not reachable from this environment)."

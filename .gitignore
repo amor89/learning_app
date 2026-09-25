@@ -11,3 +11,4 @@ derby.log
 test-results/
 tests/app/exercises.generated.json
 *.egg-info/
+.hypothesis/
