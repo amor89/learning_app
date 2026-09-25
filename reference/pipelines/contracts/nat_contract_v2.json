@@ -1,0 +1,19 @@
+{
+  "contract_id": "CTR-NAT-v2",
+  "tracker_id": "TRK-AUD-001",
+  "version": 2,
+  "effective_from": "2025-W01",
+  "row_count_min": 1500,
+  "row_count_max": 2500,
+  "weight_sum_min": 45000000,
+  "weight_sum_max": 55000000,
+  "weight_null_max": 0,
+  "key_columns": ["respondent_id"],
+  "mandatory_columns": ["respondent_id", "wave_id", "final_weight", "in_scope"],
+  "categorical_checks": [
+    {"column": "gender", "allowed_values": ["Male", "Female", "Other", "Prefer not to say"]}
+  ],
+  "distribution_checks": [
+    {"column": "age_group", "value": "16-34", "expected_min_pct": 0.20, "expected_max_pct": 0.35}
+  ]
+}
