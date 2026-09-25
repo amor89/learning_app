@@ -1,0 +1,282 @@
+id: D4-L3
+title: Weight totals and survey checks
+
+concept: |
+  Survey weights carry the whole estimate. A wrong weight gives a plausible but wrong percentage in every table. Check them on every wave, before gold.
+
+  **Totals and range:**
+
+  - No null weights, and none zero or negative, unless your design allows zero.
+  - The weight sum matches its target: the population total for grossing weights, or the sample size for weights normalised to mean 1. Your contract's `weight_sum_min` and `weight_sum_max` encode this.
+  - The ratio of largest to smallest weight stays below an agreed limit. One respondent standing for 40 others dominates their subgroup.
+
+  **Efficiency.** Unequal weights cost precision. Kish's approximation measures it:
+
+  ```text
+  deff  = n x sum(w^2) / (sum w)^2 = 1 + CV^2
+  n_eff = (sum w)^2 / sum(w^2) = n / deff
+  ```
+
+  Here CV is the population coefficient of variation of the weights. Weights 0.5, 1.0, 1.5 and 3.0 give a deff of 1.39 and an effective sample of 2.88 out of 4. Track n_eff per subgroup and wave. A sudden fall means the weighting struggled, often because a quota cell was nearly empty.
+
+  **Spark details that break these checks.** Checked on PySpark 4.0.4:
+
+  - `F.stddev` is the **sample** standard deviation. It returns null for a single row, and the Kish identity uses the population version, `F.stddev_pop`.
+  - On an empty DataFrame, `mean` and `stddev` return null. Your reference `check_weight_distribution` then calls `round(None, 4)` and raises `TypeError`.
+  - `F.sum(F.when(F.col("reach_flag") == 1, 1))` is **null**, not 0, for a subgroup where nobody was reached. Your gold table then shows a blank instead of 0% reach. Wrap it in `F.coalesce(..., F.lit(0))`.
+
+  Decide what each result means for the run. A null weight is CRITICAL: halt. A deff above your usual range is WARN: log it and have someone look.
+
+why_it_matters: |
+  A weighting run used last year's population targets for one age band. The weight sum stayed within tolerance overall, so the contract check passed. The 55+ band's effective sample fell from 800 to 190, and its reach estimate jumped 9 points. A per-subgroup n_eff check with a WARN threshold would have flagged it before the dashboard refreshed.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      stats = df.agg(F.mean(w).alias("mean"), F.stddev(w).alias("sd")).first()
+      cv = stats["sd"] / stats["mean"] if stats["mean"] else None
+      result = {"mean": round(stats["mean"], 4), "cv": round(cv, 4) if cv else None}
+    annotations:
+      - find: 'stats = df.agg(F.mean(w).alias("mean"), F.stddev(w).alias("sd")).first()'
+        note: "Sample standard deviation, and null for a single row."
+      - find: 'result = {"mean": round(stats["mean"], 4), "cv": round(cv, 4) if cv else None}'
+        note: "round(None, 4) raises TypeError on an empty wave. `if cv` treats a CV of 0 as missing."
+  strong:
+    code: |
+      row = df.agg(
+          F.count(w).alias("n"),
+          F.sum(w).alias("total"),
+          F.sum(F.col(w) * F.col(w)).alias("total_sq"),
+      ).first()
+      if row["n"] == 0 or row["total"] is None or row["total"] == 0:
+          raise ValueError("no weights to check")
+      deff = row["n"] * row["total_sq"] / row["total"] ** 2
+      n_eff = row["total"] ** 2 / row["total_sq"]
+    annotations:
+      - find: 'F.sum(F.col(w) * F.col(w)).alias("total_sq"),'
+        note: "Kish needs only n, sum and sum of squares, in one pass."
+      - find: 'if row["n"] == 0 or row["total"] is None or row["total"] == 0:'
+        note: "Empty and zero totals are reported, never divided by."
+  takeaway: |
+    Check nulls, range, sum and efficiency per wave and subgroup. Mind Spark's nulls: sample stddev, empty aggregates and sums over no matches.
+
+exercises:
+  - id: D4-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      In gold, `F.sum(F.when(F.col("reach_flag") == 1, 1))` gives what for a subgroup where no one was reached?
+    options:
+      - {id: a, text: "null"}
+      - {id: b, text: "0"}
+      - {id: c, text: "An error"}
+      - {id: d, text: "The subgroup is dropped"}
+    answer: a
+    reasons:
+      - {id: r1, text: "when without otherwise gives null for non-matching rows, and the sum of only nulls is null."}
+      - {id: r2, text: "Spark sums return null for any group with a zero."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That is what you want, and what coalesce(..., 0) gives you. The raw sum is null."
+      - answer: c
+        feedback: "No error: the null passes silently into the table."
+      - answer: d
+        feedback: "groupBy keeps the subgroup. Its sum is null."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Zeros sum normally. Only an all-null input gives null."
+    hints:
+      - "What does when() return when no otherwise is given?"
+      - "Null."
+      - "Sum of nulls."
+    explanation: |
+      Add `.otherwise(0)` inside, or `F.coalesce(..., F.lit(0))` outside.
+
+  - id: D4-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      w = [1.0, 1.0, 1.0, 1.0]
+      n = len(w)
+      deff = n * sum(x * x for x in w) / sum(w) ** 2
+      print(deff)
+    answer: "1.0"
+    wrong_answers:
+      - answer: "4.0"
+        feedback: "4 x 4 / 16 = 1. Equal weights cost no precision."
+      - answer: "0.0"
+        feedback: "deff is at least 1. Equal weights give exactly 1."
+    hints:
+      - "sum(w^2) = 4, (sum w)^2 = 16."
+      - "4 x 4 / 16."
+      - "1.0."
+    explanation: |
+      Equal weights give deff 1 and n_eff = n. Any variation raises deff above 1.
+
+  - id: D4-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Make the unweighted reach count 0 when no one in the subgroup was reached.
+    template: |
+      F.[[g1]](F.sum(F.when(F.col("reach_flag") == 1, 1)), F.lit([[g2]])).alias("unweighted_reach")
+    gaps:
+      g1: {accepted: [coalesce]}
+      g2: {accepted: ["0"]}
+    wrong_answers:
+      - answer: {g1: isnull}
+        feedback: "isnull tests for null and returns a boolean. coalesce replaces it."
+    hints:
+      - "Which function returns the first non-null argument?"
+      - "The replacement value."
+      - "`coalesce` and `0`."
+    explanation: |
+      `coalesce` returns its first non-null argument, so a null sum becomes 0.
+
+  - id: D4-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `weight_report(weights: list[float | None], max_ratio: float = 20.0) -> dict[str, object]`. Return `{"status": ..., "n": ..., "n_eff": ..., "deff": ...}`. Status is `"CRITICAL"` if the list is empty or any weight is `None` or not positive (and then `n_eff` and `deff` are `None`), `"WARN"` if max/min weight exceeds `max_ratio`, otherwise `"PASS"`. Use `n_eff = (sum w)^2 / sum(w^2)` and `deff = n / n_eff`, each rounded to 4 decimals.
+    starter: |
+      def weight_report(weights, max_ratio=20.0):
+          n_eff = sum(weights) ** 2 / sum(w * w for w in weights)
+          return {"status": "PASS", "n": len(weights), "n_eff": n_eff, "deff": len(weights) / n_eff}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: weight_report
+          typed: true
+          docstring: true
+          message: "Give `weight_report` type hints and a docstring."
+      tests:
+        - id: kish
+          code: |
+            r = weight_report([0.5, 1.0, 1.5, 3.0])
+            assert r == {"status": "PASS", "n": 4, "n_eff": 2.88, "deff": 1.3889}, r
+          message: "Weights 0.5, 1.0, 1.5, 3.0 give n_eff 2.88 and deff 1.3889."
+        - id: critical
+          code: |
+            for ws in ([], [1.0, None], [1.0, 0.0], [1.0, -2.0]):
+                r = weight_report(ws)
+                assert r["status"] == "CRITICAL" and r["n_eff"] is None and r["deff"] is None, (ws, r)
+          message: "Empty lists, None, zero and negative weights are CRITICAL, with no efficiency figures."
+        - id: ratio
+          code: |
+            r = weight_report([0.1, 1.0, 3.0])
+            assert r["status"] == "WARN", r
+          message: "A max/min ratio of 30 exceeds 20: WARN."
+    solution: |
+      def weight_report(weights: list[float | None], max_ratio: float = 20.0) -> dict[str, object]:
+          """Weight checks with Kish's effective sample size and design effect.
+
+          Args:
+              weights: One weight per respondent. None means missing.
+              max_ratio: Largest allowed max/min weight ratio before WARN.
+
+          Returns:
+              status ("PASS", "WARN" or "CRITICAL"), n, n_eff and deff.
+          """
+          n = len(weights)
+          valid = [w for w in weights if w is not None and w > 0]
+          if n == 0 or len(valid) != n:
+              return {"status": "CRITICAL", "n": n, "n_eff": None, "deff": None}
+          total = sum(valid)
+          n_eff = total**2 / sum(w * w for w in valid)
+          status = "WARN" if max(valid) / min(valid) > max_ratio else "PASS"
+          return {"status": status, "n": n, "n_eff": round(n_eff, 4), "deff": round(n / n_eff, 4)}
+    seeded_bugs:
+      - |
+        def weight_report(weights: list[float | None], max_ratio: float = 20.0) -> dict[str, object]:
+            """Drops bad weights silently."""
+            valid = [w for w in weights if w]
+            if not valid:
+                return {"status": "CRITICAL", "n": len(weights), "n_eff": None, "deff": None}
+            n_eff = sum(valid) ** 2 / sum(w * w for w in valid)
+            status = "WARN" if max(valid) / min(valid) > max_ratio else "PASS"
+            return {"status": status, "n": len(valid), "n_eff": round(n_eff, 4), "deff": round(len(valid) / n_eff, 4)}
+    wrong_answers:
+      - answer: |
+          def weight_report(weights: list[float | None], max_ratio: float = 20.0) -> dict[str, object]:
+              """Drops bad weights silently."""
+              valid = [w for w in weights if w]
+              if not valid:
+                  return {"status": "CRITICAL", "n": len(weights), "n_eff": None, "deff": None}
+              n_eff = sum(valid) ** 2 / sum(w * w for w in valid)
+              status = "WARN" if max(valid) / min(valid) > max_ratio else "PASS"
+              return {"status": status, "n": len(valid), "n_eff": round(n_eff, 4), "deff": round(len(valid) / n_eff, 4)}
+        triggers: critical
+    hints:
+      - "Check emptiness and invalid weights first."
+      - "Test `w is not None and w > 0`, not truthiness."
+      - "n_eff = total**2 / sum of squares; deff = n / n_eff."
+    explanation: |
+      A missing or non-positive weight is a data error to report, never a row to drop quietly.
+
+  - id: D4-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Set severities for weight checks in the silver QA step.
+    slots:
+      - id: nulls
+        label: "Any null final_weight"
+        options:
+          - {id: critical, text: "CRITICAL: halt before gold"}
+          - {id: warn, text: "WARN: drop those rows and continue"}
+        answer: critical
+      - id: deff
+        label: "Subgroup deff 40% above its usual range"
+        options:
+          - {id: warn, text: "WARN: log it and flag for review"}
+          - {id: critical, text: "CRITICAL: halt"}
+        answer: warn
+      - id: sd
+        label: "Standard deviation for the CV"
+        options:
+          - {id: pop, text: "F.stddev_pop, guarded for empty data"}
+          - {id: samp, text: "F.stddev"}
+        answer: pop
+    model_answer: |
+      - A null weight makes every estimate for that respondent undefined: halt.
+      - A high deff is a signal for a person, not proof of an error: warn.
+      - Kish's identity uses the population standard deviation. Guard the empty case.
+    wrong_answers:
+      - answer: {nulls: warn}
+        feedback: "Dropping rows changes the sample silently. Halt and fix the weighting."
+      - answer: {deff: critical}
+        feedback: "Real populations shift. Halting on every efficiency change blocks legitimate waves."
+      - answer: {sd: samp}
+        feedback: "F.stddev is the sample version, null for one row, and does not match 1 + CV^2."
+    hints:
+      - "Which result makes the estimate undefined?"
+      - "Which result needs judgement?"
+      - "Which standard deviation does Kish use?"
+    explanation: |
+      CRITICAL for undefined estimates, WARN for signals, and the right statistic for the formula.
+
+recap:
+  - front: "Kish design effect and effective sample"
+    back: "deff = n x sum(w^2) / (sum w)^2 = 1 + CV^2. n_eff = (sum w)^2 / sum(w^2)."
+  - front: "F.stddev in Spark"
+    back: "Sample standard deviation, null for one row. Use F.stddev_pop for 1 + CV^2."
+  - front: "sum(when(cond, 1)) with no matches"
+    back: "Null, not 0. Wrap in coalesce(..., lit(0)) or add otherwise(0)."
+  - front: "Severity for a null weight"
+    back: "CRITICAL: halt before gold."
+
+claims:
+  - claim: "Kish deff = n sum(w^2)/(sum w)^2 = 1 + CV^2 (population CV); n_eff = (sum w)^2 / sum(w^2); example weights give 1.3889 and 2.88."
+    status: verified
+    source: "Computed locally on CPython 3.13, September 2026; identity follows algebraically."
+  - claim: "PySpark 4.0.4: sum(when(...)) over no matches is null; stddev is the sample version and null for one row; mean and stddev of an empty DataFrame are null."
+    status: verified
+    source: "Local run on PySpark 4.0.4, September 2026."

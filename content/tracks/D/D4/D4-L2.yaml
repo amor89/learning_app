@@ -1,0 +1,335 @@
+id: D4-L2
+title: Distribution drift between waves
+
+concept: |
+  Row counts can be perfect while the data inside has changed. A routing error drops one question. A supplier recodes region. A weighting run uses last year's targets. Each shows up as a **shift in distributions** between waves.
+
+  Three checks, from simple to sensitive:
+
+  - **Category shares.** For each categorical variable, compare each category's weighted share with the prior wave. Flag a move larger than a tolerance, say 5 percentage points. This is what your `check_wave_stability` does, once its truthiness bug is fixed (lesson D3-L3).
+  - **New and missing categories.** A category present in one wave and absent in the other is a recode until proven otherwise. `region = "Northern"` appearing beside `"North"` is a supplier change, not a population change.
+  - **Population stability index (PSI)** summarises a whole distribution in one number:
+
+  ```text
+  PSI = sum over categories of (actual - expected) x ln(actual / expected)
+  ```
+
+  where `expected` and `actual` are shares in the prior and current wave. PSI is 0 when nothing moved. A category with a share of zero makes the logarithm undefined, so replace zero shares with a small floor, such as 0.0001, before computing. A common rule of thumb reads PSI below 0.1 as stable and above 0.25 as a large shift. Those cut-offs are convention, not a standard: calibrate them on your own history of waves.
+
+  **Guard the divisions.** Every share divides by a total. An empty wave, or a variable with no valid answers, gives a total of zero. Your reference `_check_distributions` divides by `total` with no guard and fails on an empty delivery. Check the total first and report "no data" as its own status.
+
+  Drift is a question, not a verdict. Real change happens. The check makes a person look before the numbers are published.
+
+why_it_matters: |
+  A supplier renamed region code `"North"` to `"Northern"` in wave W21. Silver loaded both values, the region lookup matched only `"North"`, and the northern subgroup fell from 1,900 respondents to 12. Every row count passed. A new-and-missing category check on `region` would have flagged `"Northern"` on the first run.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def share_changes(prior: dict[str, int], current: dict[str, int]) -> dict[str, float]:
+          """Change in share per category."""
+          p_total = sum(prior.values())
+          c_total = sum(current.values())
+          return {k: current[k] / c_total - prior[k] / p_total for k in prior}
+    annotations:
+      - find: "c_total = sum(current.values())"
+        note: "An empty wave makes this 0, and the division fails."
+      - find: "return {k: current[k] / c_total - prior[k] / p_total for k in prior}"
+        note: "Loops over prior only. A new category in current is ignored, and a missing one raises KeyError."
+  strong:
+    code: |
+      def share_changes(prior: dict[str, int], current: dict[str, int]) -> dict[str, float]:
+          """Change in share per category, over the union of categories.
+
+          Raises:
+              ValueError: If either wave has no observations.
+          """
+          p_total = sum(prior.values())
+          c_total = sum(current.values())
+          if p_total == 0 or c_total == 0:
+              raise ValueError("a wave has no observations")
+          categories = sorted(prior.keys() | current.keys())
+          return {
+              k: current.get(k, 0) / c_total - prior.get(k, 0) / p_total for k in categories
+          }
+    annotations:
+      - find: "if p_total == 0 or c_total == 0:"
+        note: "An empty wave is reported, not divided by."
+      - find: "categories = sorted(prior.keys() | current.keys())"
+        note: "New and missing categories both appear, with a share of 0 on the side where they are absent."
+  takeaway: |
+    Compare shares over the union of categories, flag new and missing values, summarise with PSI, and guard every total.
+
+exercises:
+  - id: D4-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Wave W20 has region values North, South, East. Wave W21 has Northern, South, East. Row counts match. What is the most likely cause?
+    options:
+      - {id: a, text: "A recode by the supplier"}
+      - {id: b, text: "The population of the North moved"}
+      - {id: c, text: "A weighting error"}
+      - {id: d, text: "Normal sampling variation"}
+    answer: a
+    reasons:
+      - {id: r1, text: "A category that vanishes while a similar new one appears is a label change until proven otherwise."}
+      - {id: r2, text: "Suppliers always rename categories between waves."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "A population does not rename itself. Check the labels first."
+      - answer: c
+        feedback: "Weights change shares, not category names."
+      - answer: d
+        feedback: "Sampling variation moves shares. It does not create new labels."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Most waves have no recode, which is why a check must catch the one that does."
+    hints:
+      - "Compare the labels, not the counts."
+      - "North vanished, Northern appeared."
+      - "A recode."
+    explanation: |
+      Check new and missing categories before comparing shares.
+
+  - id: D4-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      prior = {"yes": 30, "no": 70}
+      current = {"yes": 45, "no": 55}
+      change = current["yes"] / 100 - prior["yes"] / 100
+      print(round(change * 100))
+    answer: "15"
+    wrong_answers:
+      - answer: "50"
+        feedback: "That is the relative change (45/30 - 1). The check uses percentage points: 45% - 30%."
+      - answer: "0"
+        feedback: "The shares differ by 0.15, which is 15 points."
+    hints:
+      - "Both totals are 100."
+      - "0.45 - 0.30."
+      - "In points, times 100."
+    explanation: |
+      A move from 30% to 45% is 15 percentage points, and a 50% relative increase. State which one a tolerance means.
+
+  - id: D4-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the PSI term for one category, with zero shares floored.
+    template: |
+      import math
+
+      e = max(expected_share, FLOOR)
+      a = max(actual_share, FLOOR)
+      term = (a - e) * math.[[g1]](a / [[g2]])
+    gaps:
+      g1: {accepted: [log]}
+      g2: {accepted: [e]}
+    wrong_answers:
+      - answer: {g1: log10}
+        feedback: "PSI uses the natural logarithm, math.log."
+    hints:
+      - "Natural logarithm."
+      - "Of actual over expected."
+      - "`log` and `e`."
+    explanation: |
+      `(a - e) * ln(a / e)` is never negative, so every category adds to the index.
+
+  - id: D4-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `psi(expected: dict[str, int], actual: dict[str, int], floor: float = 0.0001) -> float`. Both map categories to counts. Use the union of categories, a missing category counting 0. Convert counts to shares, replace shares below `floor` with `floor`, and return the sum of `(a - e) * ln(a / e)`. Raise `ValueError` if either total is 0.
+    starter: |
+      import math
+
+
+      def psi(expected, actual, floor=0.0001):
+          return sum((actual[k] - expected[k]) * math.log(actual[k] / expected[k]) for k in expected)
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: psi
+          typed: true
+          docstring: true
+          message: "Give `psi` type hints and a docstring."
+      tests:
+        - id: same
+          code: |
+            assert psi({"a": 50, "b": 50}, {"a": 5, "b": 5}) == 0.0
+          message: "Identical shares give PSI 0, whatever the totals."
+        - id: known
+          code: |
+            import math
+            got = psi({"a": 50, "b": 50}, {"a": 60, "b": 40})
+            want = (0.6 - 0.5) * math.log(0.6 / 0.5) + (0.4 - 0.5) * math.log(0.4 / 0.5)
+            assert math.isclose(got, want), got
+          message: "Use shares, not counts, and the natural logarithm."
+        - id: new_category
+          code: |
+            import math
+            got = psi({"North": 100}, {"North": 50, "Northern": 50})
+            want = (0.5 - 1.0) * math.log(0.5 / 1.0) + (0.5 - 0.0001) * math.log(0.5 / 0.0001)
+            assert math.isclose(got, want), got
+          message: "Include categories from both waves. Floor a zero share at 0.0001 instead of dividing by zero."
+        - id: empty
+          code: |
+            try:
+                psi({}, {"a": 1})
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "An empty wave has no shares. Raise ValueError."
+    solution: |
+      import math
+
+
+      def psi(expected: dict[str, int], actual: dict[str, int], floor: float = 0.0001) -> float:
+          """Population stability index between two categorical distributions.
+
+          Args:
+              expected: Category counts in the reference wave.
+              actual: Category counts in the current wave.
+              floor: Minimum share, so a zero share does not break the logarithm.
+
+          Returns:
+              PSI, 0 when the shares are identical.
+
+          Raises:
+              ValueError: If either wave has no observations.
+          """
+          e_total = sum(expected.values())
+          a_total = sum(actual.values())
+          if e_total == 0 or a_total == 0:
+              raise ValueError("a wave has no observations")
+          index = 0.0
+          for category in expected.keys() | actual.keys():
+              e = max(expected.get(category, 0) / e_total, floor)
+              a = max(actual.get(category, 0) / a_total, floor)
+              index += (a - e) * math.log(a / e)
+          return index
+    seeded_bugs:
+      - |
+        import math
+
+
+        def psi(expected: dict[str, int], actual: dict[str, int], floor: float = 0.0001) -> float:
+            """Ignores new categories."""
+            e_total = sum(expected.values())
+            a_total = sum(actual.values())
+            if e_total == 0 or a_total == 0:
+                raise ValueError("empty")
+            index = 0.0
+            for category in expected:
+                e = max(expected[category] / e_total, floor)
+                a = max(actual.get(category, 0) / a_total, floor)
+                index += (a - e) * math.log(a / e)
+            return index
+      - |
+        import math
+
+
+        def psi(expected: dict[str, int], actual: dict[str, int], floor: float = 0.0001) -> float:
+            """Counts instead of shares."""
+            if not expected or not actual:
+                raise ValueError("empty")
+            index = 0.0
+            for category in expected.keys() | actual.keys():
+                e = max(expected.get(category, 0), floor)
+                a = max(actual.get(category, 0), floor)
+                index += (a - e) * math.log(a / e)
+            return index
+    wrong_answers:
+      - answer: |
+          import math
+
+
+          def psi(expected: dict[str, int], actual: dict[str, int], floor: float = 0.0001) -> float:
+              """Ignores new categories."""
+              e_total = sum(expected.values())
+              a_total = sum(actual.values())
+              if e_total == 0 or a_total == 0:
+                  raise ValueError("empty")
+              index = 0.0
+              for category in expected:
+                  e = max(expected[category] / e_total, floor)
+                  a = max(actual.get(category, 0) / a_total, floor)
+                  index += (a - e) * math.log(a / e)
+              return index
+        triggers: new_category
+    hints:
+      - "Totals first, and guard zero."
+      - "Loop over `expected.keys() | actual.keys()`."
+      - "Floor each share with `max(share, floor)`."
+    explanation: |
+      Shares, the union of categories and a floor. Without the union, the recode that matters most adds nothing to the index.
+
+  - id: D4-L2-E5
+    type: spot_bug
+    difficulty: 3
+    language: python
+    prompt: |
+      This is your reference `_check_distributions` logic, as a plain function. It fails on an empty delivery. Tap the line, then fix it: return `"NO_DATA"` when the total is 0.
+    code: |
+      def distribution_status(value_count: int, total: int, min_pct: float, max_pct: float) -> str:
+          """PASS if the value's share is within bounds, else WARN."""
+          pct = value_count / total
+          return "PASS" if min_pct <= pct <= max_pct else "WARN"
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      tests:
+        - id: empty
+          code: |
+            assert distribution_status(0, 0, 0.4, 0.6) == "NO_DATA"
+          message: "An empty delivery returns NO_DATA instead of dividing by zero."
+        - id: normal
+          code: |
+            assert distribution_status(50, 100, 0.4, 0.6) == "PASS"
+            assert distribution_status(90, 100, 0.4, 0.6) == "WARN"
+          message: "Keep PASS and WARN for non-empty data."
+    fix_solution: |
+      def distribution_status(value_count: int, total: int, min_pct: float, max_pct: float) -> str:
+          """PASS if the value's share is within bounds, WARN if not, NO_DATA if empty."""
+          if total == 0:
+              return "NO_DATA"
+          pct = value_count / total
+          return "PASS" if min_pct <= pct <= max_pct else "WARN"
+    wrong_answers:
+      - lines: [4]
+        feedback: "The bounds check is fine. The division above it fails first."
+    hints:
+      - "What is total for an empty delivery?"
+      - "Zero."
+      - "Check it before dividing."
+    explanation: |
+      Guard every division. An empty delivery is a status to report, not a crash.
+
+recap:
+  - front: "Three drift checks"
+    back: "Category shares vs prior wave, new and missing categories, and a PSI summary."
+  - front: "PSI formula"
+    back: "Sum of (actual - expected) x ln(actual / expected) over shares, with zero shares floored."
+  - front: "PSI thresholds 0.1 and 0.25"
+    back: "A rule of thumb, not a standard. Calibrate on your own wave history."
+  - front: "Percentage points vs relative change"
+    back: "30% to 45% is +15 points and +50% relative. Say which a tolerance uses."
+
+claims:
+  - claim: "PSI = sum (a - e) ln(a / e) over category shares; zero shares need a floor."
+    status: verified
+    source: "Definition checked by the exercise tests in this repo; the formula follows from its terms."
+  - claim: "PSI thresholds of 0.1 and 0.25 are an informal industry convention."
+    status: unverified
+    source: "Widely quoted in credit-scoring practice; no official standard located. Taught as a rule of thumb only."

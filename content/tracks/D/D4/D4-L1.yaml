@@ -1,0 +1,315 @@
+id: D4-L1
+title: Row counts across layers
+
+concept: |
+  Every layer of a medallion pipeline changes the row count for a reason. Write the reasons down as rules, then check them on every run. A count that breaks a rule is a bug, even when no step failed.
+
+  For one tracker and one wave:
+
+  | Check | Rule |
+  | --- | --- |
+  | Bronze vs delivery | Bronze rows for the delivery = rows in the delivered file or manifest |
+  | Silver vs bronze | Silver rows = distinct respondent keys in bronze. Never more than bronze rows |
+  | Gold vs silver | Sum of gold `unweighted_n` = silver rows in scope |
+  | Redelivery | After MERGE, silver rows = rows before + rows inserted |
+
+  **Where the numbers come from.** Count each layer with one `agg` pass, not repeated `count()` calls on an uncached DataFrame: `df.agg(F.count("*"), F.count_distinct("respondent_id"))`. For writes, Delta records metrics in the table history. `DESCRIBE HISTORY` shows `numOutputRows` for a write, and for a MERGE `numSourceRows`, `numTargetRowsInserted` and `numTargetRowsUpdated`. Checked on delta-spark 4.0.1.
+
+  **Filter both sides the same way.** Your reference `get_unprocessed_waves` compares bronze waves **for one tracker** with silver waves **for all trackers**. When another tracker already has wave W14 in silver, this tracker's W14 is never loaded. Every reconciliation query filters bronze, silver and gold on the same tracker and wave.
+
+  **Store the result.** Write each reconciliation as a structured row in the run log: layer, expected, actual, status. A failed CRITICAL rule halts the pipeline before gold is published.
+
+  Counts catch lost and duplicated rows. They do not catch wrong values in the right number of rows. Lessons D4-L2 and D4-L3 cover those.
+
+why_it_matters: |
+  Wave W14 for one tracker never reached silver. The job logged success every night for three weeks, because `get_unprocessed_waves` found W14 in silver, loaded by a different tracker. A rule "silver rows for tracker and wave > 0 when bronze rows > 0" would have failed on the first night.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      bronze_n = bronze.count()
+      silver_n = silver.count()
+      if silver_n > 0:
+          print("silver loaded")
+    annotations:
+      - find: "bronze_n = bronze.count()"
+        note: "All trackers and all waves. The number means nothing for this load."
+      - find: "if silver_n > 0:"
+        note: "Any row from any tracker passes this check."
+  strong:
+    code: |
+      from pyspark.sql import functions as F
+
+      def layer_counts(df, tracker_id: str, wave_id: str) -> dict[str, int]:
+          """Rows and distinct respondents for one tracker and wave, in one pass."""
+          row = (
+              df.filter((F.col("tracker_id") == tracker_id) & (F.col("wave_id") == wave_id))
+              .agg(F.count("*").alias("rows"), F.count_distinct("respondent_id").alias("keys"))
+              .first()
+          )
+          return {"rows": row["rows"], "keys": row["keys"]}
+
+      bronze_c = layer_counts(bronze, "NAT", "W14")
+      silver_c = layer_counts(silver, "NAT", "W14")
+      if silver_c["rows"] != bronze_c["keys"]:
+          raise RuntimeError(f"silver {silver_c['rows']} != bronze keys {bronze_c['keys']}")
+    annotations:
+      - find: 'df.filter((F.col("tracker_id") == tracker_id) & (F.col("wave_id") == wave_id))'
+        note: "The same tracker and wave filter on every layer."
+      - find: '.agg(F.count("*").alias("rows"), F.count_distinct("respondent_id").alias("keys"))'
+        note: "Both counts in one pass over the data."
+      - find: 'if silver_c["rows"] != bronze_c["keys"]:'
+        note: "A written rule, checked every run. It halts before gold."
+  takeaway: |
+    Write the expected relationship between layers as rules, compute counts in one pass on identical filters, and halt when a CRITICAL rule fails.
+
+exercises:
+  - id: D4-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Bronze holds 10,400 rows for tracker NAT, wave W14, with 10,000 distinct respondents. Silver deduplicates on respondent and wave. How many silver rows do you expect?
+    options:
+      - {id: a, text: "10,000"}
+      - {id: b, text: "10,400"}
+      - {id: c, text: "Any number up to 10,400"}
+      - {id: d, text: "It depends on the weights"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Silver's grain is one row per respondent per wave, so it holds one row per distinct key."}
+      - {id: r2, text: "Silver always drops 4% of rows."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That keeps the 400 duplicates. Silver deduplicates on the key."
+      - answer: c
+        feedback: "The grain fixes the number exactly. A vague rule catches nothing."
+      - answer: d
+        feedback: "Weights do not change row counts."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. The number follows the grain, not a fixed rate."
+    hints:
+      - "What is silver's grain?"
+      - "One row per respondent per wave."
+      - "Count distinct keys in bronze."
+    explanation: |
+      The grain turns a vague expectation into an exact rule: silver rows = distinct bronze keys.
+
+  - id: D4-L1-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A redelivery MERGE into silver reports `numSourceRows = 500`, `numTargetRowsInserted = 120`, `numTargetRowsUpdated = 380`. Silver had 10,000 rows before. How many rows does it hold now?
+    options:
+      - {id: a, text: "10,120"}
+      - {id: b, text: "10,500"}
+      - {id: c, text: "10,380"}
+      - {id: d, text: "10,000"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Updates replace existing rows. Only inserts add rows."}
+      - {id: r2, text: "MERGE never removes rows, so every source row is added."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "380 source rows updated existing rows, so they add nothing."
+      - answer: c
+        feedback: "Updated rows were already counted in the 10,000."
+      - answer: d
+        feedback: "120 new respondents were inserted."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Updated rows replace existing ones and add nothing."
+    hints:
+      - "Which metric adds rows?"
+      - "Inserts."
+      - "10,000 + 120."
+    explanation: |
+      Check after every MERGE: rows after = rows before + numTargetRowsInserted - rows deleted.
+
+  - id: D4-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Compute rows and distinct respondents in one pass.
+    template: |
+      row = df.agg(
+          F.count("*").alias("rows"),
+          F.[[g1]]("respondent_id").alias("keys"),
+      ).[[g2]]()
+    gaps:
+      g1: {accepted: [count_distinct, countDistinct]}
+      g2: {accepted: [first, head]}
+    wrong_answers:
+      - answer: {g1: count}
+        feedback: "count counts non-null values, duplicates included. You need distinct keys."
+    hints:
+      - "Which function counts distinct values?"
+      - "Then fetch the single result row."
+      - "`count_distinct` and `first`."
+    explanation: |
+      One `agg` returns both numbers in one scan. `first()` brings the single row back to the driver.
+
+  - id: D4-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `reconcile(delivered: int, bronze_rows: int, bronze_keys: int, silver_rows: int, gold_n: int, in_scope: int) -> list[dict[str, object]]`. Return one record per rule, in this order, each `{"rule": name, "expected": int, "actual": int, "status": "PASS" or "FAIL"}`: `"bronze_vs_delivery"` (bronze_rows equals delivered), `"silver_vs_bronze_keys"` (silver_rows equals bronze_keys), `"gold_vs_silver_scope"` (gold_n equals in_scope). Raise `ValueError` if any count is negative, or if `in_scope` exceeds `silver_rows`.
+    starter: |
+      def reconcile(delivered, bronze_rows, bronze_keys, silver_rows, gold_n, in_scope):
+          return [{"rule": "all", "status": "PASS" if silver_rows > 0 else "FAIL"}]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: reconcile
+          typed: true
+          docstring: true
+          message: "Give `reconcile` type hints and a docstring."
+      tests:
+        - id: all_pass
+          code: |
+            out = reconcile(10400, 10400, 10000, 10000, 9500, 9500)
+            assert [r["status"] for r in out] == ["PASS", "PASS", "PASS"], out
+            assert [r["rule"] for r in out] == ["bronze_vs_delivery", "silver_vs_bronze_keys", "gold_vs_silver_scope"]
+          message: "Three rules in order, all PASS for consistent counts."
+        - id: silver_duplicates
+          code: |
+            out = reconcile(10400, 10400, 10000, 10400, 9500, 9500)
+            assert out[1] == {"rule": "silver_vs_bronze_keys", "expected": 10000, "actual": 10400, "status": "FAIL"}, out[1]
+          message: "Silver must equal distinct bronze keys, not bronze rows. Record expected and actual."
+        - id: gold_short
+          code: |
+            out = reconcile(100, 100, 100, 100, 90, 95)
+            assert out[2]["status"] == "FAIL" and out[2]["expected"] == 95 and out[2]["actual"] == 90
+          message: "Gold unweighted_n must add up to the in-scope silver rows."
+        - id: invalid
+          code: |
+            for args in [(1, 1, 1, 1, 1, 2), (-1, 0, 0, 0, 0, 0)]:
+                try:
+                    reconcile(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {args}")
+          message: "Negative counts, or more in scope than silver rows, are impossible inputs. Raise ValueError."
+    solution: |
+      def reconcile(
+          delivered: int,
+          bronze_rows: int,
+          bronze_keys: int,
+          silver_rows: int,
+          gold_n: int,
+          in_scope: int,
+      ) -> list[dict[str, object]]:
+          """Row-count rules across layers for one tracker and wave.
+
+          Args:
+              delivered: Rows in the delivery manifest.
+              bronze_rows: Bronze rows for the delivery.
+              bronze_keys: Distinct respondent keys in bronze.
+              silver_rows: Silver rows for the wave.
+              gold_n: Sum of gold unweighted_n.
+              in_scope: Silver rows in scope.
+
+          Returns:
+              One structured record per rule.
+
+          Raises:
+              ValueError: If inputs are impossible.
+          """
+          counts = (delivered, bronze_rows, bronze_keys, silver_rows, gold_n, in_scope)
+          if min(counts) < 0:
+              raise ValueError("counts must not be negative")
+          if in_scope > silver_rows:
+              raise ValueError("in_scope cannot exceed silver_rows")
+          rules = [
+              ("bronze_vs_delivery", delivered, bronze_rows),
+              ("silver_vs_bronze_keys", bronze_keys, silver_rows),
+              ("gold_vs_silver_scope", in_scope, gold_n),
+          ]
+          return [
+              {"rule": name, "expected": expected, "actual": actual,
+               "status": "PASS" if expected == actual else "FAIL"}
+              for name, expected, actual in rules
+          ]
+    seeded_bugs:
+      - |
+        def reconcile(delivered: int, bronze_rows: int, bronze_keys: int, silver_rows: int, gold_n: int, in_scope: int) -> list[dict[str, object]]:
+            """Compares silver with bronze rows."""
+            if min(delivered, bronze_rows, bronze_keys, silver_rows, gold_n, in_scope) < 0 or in_scope > silver_rows:
+                raise ValueError("bad input")
+            rules = [("bronze_vs_delivery", delivered, bronze_rows), ("silver_vs_bronze_keys", bronze_rows, silver_rows), ("gold_vs_silver_scope", in_scope, gold_n)]
+            return [{"rule": n, "expected": e, "actual": a, "status": "PASS" if e == a else "FAIL"} for n, e, a in rules]
+    wrong_answers:
+      - answer: |
+          def reconcile(delivered: int, bronze_rows: int, bronze_keys: int, silver_rows: int, gold_n: int, in_scope: int) -> list[dict[str, object]]:
+              """Compares silver with bronze rows."""
+              if min(delivered, bronze_rows, bronze_keys, silver_rows, gold_n, in_scope) < 0 or in_scope > silver_rows:
+                  raise ValueError("bad input")
+              rules = [("bronze_vs_delivery", delivered, bronze_rows), ("silver_vs_bronze_keys", bronze_rows, silver_rows), ("gold_vs_silver_scope", in_scope, gold_n)]
+              return [{"rule": n, "expected": e, "actual": a, "status": "PASS" if e == a else "FAIL"} for n, e, a in rules]
+        triggers: all_pass
+    hints:
+      - "Validate inputs first."
+      - "List the rules as (name, expected, actual) tuples."
+      - "Silver is compared with distinct bronze keys."
+    explanation: |
+      Structured records with expected and actual values go straight into the run log, and a dashboard can chart them.
+
+  - id: D4-L1-E5
+    type: spot_bug
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      This is your reference `get_unprocessed_waves`, cut down. Tracker NAT's wave W14 is never loaded when another tracker already has W14 in silver. Tap the line with the bug, then fix it.
+    code: |
+      bronze_waves = (
+          spark.table(bronze_table).filter(F.col("tracker_id") == tracker_id)
+          .select("wave_id").distinct()
+      )
+      silver_waves = spark.table(silver_table).select("wave_id").distinct()
+      new_waves = [r.wave_id for r in bronze_waves.subtract(silver_waves).collect()]
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: silver_filtered
+          kind: requires_pattern
+          pattern: "spark\\.table\\(silver_table\\)\\s*\\.filter\\(\\s*F\\.col\\(\"tracker_id\"\\)\\s*==\\s*tracker_id\\s*\\)"
+          message: "Filter silver on the same tracker as bronze: spark.table(silver_table).filter(F.col(\"tracker_id\") == tracker_id)."
+    fix_solution: |
+      bronze_waves = (
+          spark.table(bronze_table).filter(F.col("tracker_id") == tracker_id)
+          .select("wave_id").distinct()
+      )
+      silver_waves = spark.table(silver_table).filter(F.col("tracker_id") == tracker_id).select("wave_id").distinct()
+      new_waves = [r.wave_id for r in bronze_waves.subtract(silver_waves).collect()]
+    wrong_answers:
+      - lines: [6]
+        feedback: "subtract is the right operation. Its right side holds every tracker's waves."
+      - lines: [2]
+        feedback: "The bronze side is filtered correctly. The silver side is not."
+    hints:
+      - "Compare the filters on both sides."
+      - "Which side has no tracker filter?"
+      - "Line 5."
+    explanation: |
+      Both sides of a comparison need the same keys. Silver waves for all trackers hide this tracker's missing waves.
+
+recap:
+  - front: "Row-count rules: silver vs bronze"
+    back: "Silver rows = distinct respondent keys in bronze for the tracker and wave."
+  - front: "Rows after a MERGE"
+    back: "Rows before + numTargetRowsInserted (minus any deletes). Updates add nothing."
+  - front: "Counting efficiently"
+    back: "One agg pass: F.count('*') and F.count_distinct(key). Not repeated count() calls."
+  - front: "The get_unprocessed_waves bug"
+    back: "Bronze filtered on tracker, silver not. Filter both sides on the same keys."
+
+claims:
+  - claim: "Delta MERGE history records numSourceRows, numTargetRowsInserted, numTargetRowsUpdated; writes record numOutputRows."
+    status: verified
+    source: "Local run of DESCRIBE HISTORY on delta-spark 4.0.1 with PySpark 4.0.4, September 2026."
