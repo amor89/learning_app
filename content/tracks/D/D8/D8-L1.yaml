@@ -1,0 +1,273 @@
+id: D8-L1
+title: State versions and constraints in every prompt
+
+concept: |
+  Most wrong code from an assistant answers a question you did not ask. It targets a version you do not run, a platform you do not use, or a standard you did not mention. Track D showed the results: `CREATE ROW ACCESS POLICY`, `datetime.utcnow()`, `applymap`. The cheapest fix happens before the code exists: a better prompt.
+
+  **Name the versions.** The assistant cannot see your environment. Say it:
+
+  ```text
+  Environment: Databricks Runtime 17.3 LTS (Spark 4.0, Python 3.12),
+  PySpark DataFrame API, Delta tables in Unity Catalog.
+  Local tests: pandas 3.0, pytest 9.
+  ```
+
+  **Name the platform and dialect.** "SQL" means nothing. Write "Databricks SQL" or "Fabric Warehouse T-SQL". The same goes for "a notebook": Databricks or Fabric?
+
+  **State the constraints your standard sets.** Paste the few that apply, not the whole file:
+
+  - Import `functions as F`. Never import `sum`, `min` or `max` by name.
+  - Type hints and a Google-style docstring on every function.
+  - Bronze is append-only. Silver uses MERGE on `(respondent_id, wave_id)`.
+  - Three-level table names. No secrets in code.
+  - Test for None with `is None`.
+
+  **State what not to do.** "Do not use RDDs, Python UDFs or `collect()` on the full table." Negative constraints stop the common wrong turns.
+
+  **Ask for a list of assumptions** at the end of the answer (lesson D6-L3).
+
+  Keep a prompt header with these lines in your repository, next to `CLAUDE.md`, and paste it at the start of each coding conversation. A prompt that states versions and constraints does not guarantee correct code. It removes the mistakes that come from guessing, so your review can focus on the rest.
+
+why_it_matters: |
+  An engineer asked for "a PySpark function to cap survey weights". The answer used `pandas_udf` with a type-hint style from Spark 3.0 docs, imported `max` from `pyspark.sql.functions`, and wrote to a two-part table name. The same request with a four-line header naming Databricks Runtime 17.3 LTS, the import rule and three-level names produced code that passed review on the first read.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Write a PySpark function that caps survey weights at 5 and saves the result.
+    annotations:
+      - find: "Write a PySpark function that caps survey weights at 5 and saves the result."
+        note: "No version, no platform, no standard, no table rules. The assistant guesses all of them."
+  strong:
+    code: |
+      Environment: Databricks Runtime 17.3 LTS (Spark 4.0, Python 3.12), Unity Catalog.
+      Standards: from pyspark.sql import functions as F; type hints and Google docstrings;
+        no Python UDFs, RDDs or collect() on full tables; three-level table names.
+      Task: write cap_weights(df, cap: float) -> DataFrame that caps final_weight at cap.
+        Do not write to any table. Return the DataFrame.
+      Finish by listing the assumptions your code makes about the input.
+    annotations:
+      - find: "Environment: Databricks Runtime 17.3 LTS (Spark 4.0, Python 3.12), Unity Catalog."
+        note: "Versions and platform, stated once."
+      - find: "  no Python UDFs, RDDs or collect() on full tables; three-level table names."
+        note: "Negative constraints close the common wrong turns."
+      - find: "Finish by listing the assumptions your code makes about the input."
+        note: "Makes hidden assumptions reviewable."
+  takeaway: |
+    Every coding prompt names versions, platform and dialect, the constraints from your standard, and what not to do.
+
+exercises:
+  - id: D8-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You ask for "SQL to add a row filter by region". Which line most improves the prompt?
+    options:
+      - {id: a, text: "Target: Databricks SQL, Unity Catalog, Databricks Runtime 17.3 LTS"}
+      - {id: b, text: "Please write clean code"}
+      - {id: c, text: "Make it efficient"}
+      - {id: d, text: "Explain your answer in detail"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Row filter syntax differs by platform. Naming the dialect rules out Snowflake's CREATE ROW ACCESS POLICY."}
+      - {id: r2, text: "Longer prompts always give better answers."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Vague quality words do not change which dialect the assistant picks."
+      - answer: c
+        feedback: "Efficiency does not matter if the statement does not exist on your platform."
+      - answer: d
+        feedback: "An explanation of the wrong dialect is still the wrong dialect."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Length does not help. Specific facts do."
+    hints:
+      - "Which fact can the assistant not guess?"
+      - "The platform."
+      - "Name the dialect."
+    explanation: |
+      The dialect decides the syntax. Name it every time.
+
+  - id: D8-L1-E2
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the parts of a coding prompt header.
+    items:
+      - {id: env, text: "Environment: runtime, language and library versions"}
+      - {id: std, text: "Standards that apply: imports, typing, table rules"}
+      - {id: dont, text: "What not to do: no UDFs, no RDDs, no secrets"}
+      - {id: task, text: "The task, with inputs, outputs and side effects"}
+      - {id: assume, text: "Ask for a list of assumptions"}
+    answer: [env, std, dont, task, assume]
+    wrong_answers:
+      - answer: [task, env, std, dont, assume]
+        feedback: "Context first. An assistant starts shaping the answer as soon as it reads the task."
+      - answer: [env, std, dont, assume, task]
+        feedback: "The assumptions request comes last, after the task it refers to."
+    hints:
+      - "Context before the task."
+      - "Rules, then prohibitions."
+      - "Assumptions at the end."
+    explanation: |
+      Environment, standards, prohibitions, task, assumptions.
+
+  - id: D8-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the environment line for this course's Databricks lessons.
+    template: |
+      Environment: Databricks Runtime [[g1]] LTS (Spark [[g2]], Python 3.12), Unity Catalog.
+    gaps:
+      g1: {accepted: ["17.3"]}
+      g2: {accepted: ["4.0", "4.0.0"]}
+    wrong_answers:
+      - answer: {g1: "18"}
+        feedback: "Runtime 18 is not LTS yet. This course targets 17.3 LTS."
+    hints:
+      - "Check VERSIONS.md."
+      - "The LTS runtime this course pins."
+      - "17.3 LTS with Spark 4.0."
+    explanation: |
+      Databricks Runtime 17.3 LTS ships Apache Spark 4.0.0 and Python 3.12.3.
+
+  - id: D8-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `unstated_versions(prompt: str, libraries: list[str]) -> list[str]`. Return the libraries, in the order given, that the prompt does not mention followed by a version number, such as `pandas 3.0`, `PySpark 4.0` or `Python 3.12`. Match library names case-insensitively. A version is digits and dots after optional whitespace and an optional `v`. A library mentioned without a version counts as unstated.
+    starter: |
+      def unstated_versions(prompt, libraries):
+          return [lib for lib in libraries if lib not in prompt]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: unstated_versions
+          typed: true
+          docstring: true
+          message: "Give `unstated_versions` type hints and a docstring."
+      tests:
+        - id: mixed
+          code: |
+            p = "Environment: Databricks Runtime 17.3 LTS, python 3.12. Use pandas for local tests."
+            assert unstated_versions(p, ["Python", "pandas", "PySpark"]) == ["pandas", "PySpark"]
+          message: "Python has a version (case-insensitive). pandas appears without one. PySpark is absent."
+        - id: v_prefix
+          code: |
+            assert unstated_versions("Target PySpark v4.0.", ["PySpark"]) == []
+          message: "Allow an optional v before the version."
+        - id: word_boundary
+          code: |
+            assert unstated_versions("Use pandas-stubs 2.2 only.", ["pandas"]) == ["pandas"]
+          message: "pandas-stubs 2.2 is not a pandas version. Match the library name as a whole word."
+    solution: |
+      import re
+
+
+      def unstated_versions(prompt: str, libraries: list[str]) -> list[str]:
+          """Libraries a prompt names without a version number.
+
+          Args:
+              prompt: Prompt text.
+              libraries: Library names that need a stated version.
+
+          Returns:
+              Libraries without a version, in the order given.
+          """
+          missing = []
+          for lib in libraries:
+              pattern = rf"(?<![\w-]){re.escape(lib)}(?![\w-])\s*v?\d+(\.\d+)*"
+              if re.search(pattern, prompt, flags=re.IGNORECASE) is None:
+                  missing.append(lib)
+          return missing
+    seeded_bugs:
+      - |
+        import re
+
+
+        def unstated_versions(prompt: str, libraries: list[str]) -> list[str]:
+            """Case-sensitive."""
+            return [lib for lib in libraries if re.search(rf"{re.escape(lib)}\s*v?\d", prompt) is None]
+      - |
+        import re
+
+
+        def unstated_versions(prompt: str, libraries: list[str]) -> list[str]:
+            """No word boundary."""
+            return [lib for lib in libraries if re.search(rf"{re.escape(lib)}\S*\s*v?\d", prompt, re.IGNORECASE) is None]
+    wrong_answers:
+      - answer: |
+          import re
+
+
+          def unstated_versions(prompt: str, libraries: list[str]) -> list[str]:
+              """Case-sensitive."""
+              return [lib for lib in libraries if re.search(rf"{re.escape(lib)}\s*v?\d", prompt) is None]
+        triggers: mixed
+    hints:
+      - "Escape the library name with re.escape."
+      - "Follow it with `\\s*v?\\d+(\\.\\d+)*`."
+      - "Use lookarounds so pandas-stubs does not match pandas."
+    explanation: |
+      A small lint on your own prompts. Run it on the header you paste, and you never forget the versions line.
+
+  - id: D8-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Build the prompt header your team pastes into every coding conversation for the survey pipeline.
+    slots:
+      - id: versions
+        label: "Versions line"
+        options:
+          - {id: pinned, text: "Databricks Runtime 17.3 LTS, Spark 4.0, Python 3.12, pandas 3.0 for local tests"}
+          - {id: latest, text: "Use the latest versions of everything"}
+        answer: pinned
+      - id: standards
+        label: "Standards"
+        options:
+          - {id: relevant, text: "The six rules that apply to pipeline code, copied from CLAUDE.md"}
+          - {id: whole, text: "The whole 200-line CLAUDE.md every time"}
+        answer: relevant
+      - id: storage
+        label: "Where the header lives"
+        options:
+          - {id: repo, text: "In the repository next to CLAUDE.md, reviewed like code"}
+          - {id: memory, text: "In each engineer's memory"}
+        answer: repo
+    model_answer: |
+      - Pinned versions match what the code will run on.
+      - A short list of relevant rules gets followed. A long file gets skimmed, by people and models.
+      - A header in the repository is shared, versioned and updated when the runtime changes.
+    wrong_answers:
+      - answer: {versions: latest}
+        feedback: "The latest PySpark is not what Databricks Runtime 17.3 LTS runs."
+      - answer: {standards: whole}
+        feedback: "The rules that matter get lost among the ones that do not apply."
+      - answer: {storage: memory}
+        feedback: "Unwritten headers drift and differ between people."
+    hints:
+      - "Which versions will the code run on?"
+      - "Which rules apply to this task?"
+      - "Where do shared standards live?"
+    explanation: |
+      Pinned versions, relevant rules, and a header kept in the repository.
+
+recap:
+  - front: "Four things every coding prompt states"
+    back: "Versions and platform, the dialect, the relevant standards, and what not to do."
+  - front: "Why name the SQL dialect"
+    back: "Syntax differs by platform. 'SQL' alone invites Snowflake or T-SQL statements."
+  - front: "Where to keep the prompt header"
+    back: "In the repository next to CLAUDE.md, updated when versions change."
+
+claims:
+  - claim: "Databricks Runtime 17.3 LTS ships Spark 4.0.0 and Python 3.12.3; Runtime 18 is not yet LTS."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/release-notes/runtime/17.3lts and /18 (checked 2026-09-25)"

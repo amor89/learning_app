@@ -1,0 +1,289 @@
+id: D8-L3
+title: Iterate on a failing answer
+
+concept: |
+  The first answer often fails a test. What you send next decides whether the second answer is better or just different.
+
+  **Send the evidence, not a feeling.** "It doesn't work" invites a rewrite from scratch. Send:
+
+  - the **exact failing test** and its assertion,
+  - the **full error**, or the actual versus expected values,
+  - the **smallest input** that shows the problem,
+  - what you already checked.
+
+  ```text
+  test_zero_share fails:
+    assert compare_waves({"a": 0.0}, {"a": 0.12}) == ["a"]
+    got [] instead of ["a"]
+  Line 6 uses `if current_pct and prior_pct:`. I think 0.0 is treated as missing.
+  Fix only this. Do not change the tests or other behaviour.
+  ```
+
+  **One problem per round.** Ask for a fix to one failure at a time, and say what must not change. Broad requests ("fix all the issues and improve it") produce broad rewrites, which reintroduce bugs you already fixed.
+
+  **Watch the tests, not only the code.** A common way for an assistant to "fix" a failing test is to change the test: loosen an assertion, delete a case, or replace a hand-worked value with a computed one. Diff the test file after every answer. Any removed or changed assertion needs your approval.
+
+  **Know when to stop.** If two focused rounds have not fixed a problem, the assistant is guessing. Stop, read the code yourself with the debugger (lesson D2-L1), and write the fix. Then you can explain it in the next prompt, or leave the assistant out of it.
+
+  **Start fresh when the thread goes wrong.** A long conversation full of failed attempts carries those attempts forward. A new conversation with the header from lesson D8-L1, the current code, and the one failing test often does better than round seven.
+
+why_it_matters: |
+  After four rounds of "still failing, please fix", an assistant's version of a stability check passed every test. A reviewer diffed the test file: the assistant had changed `== ["a"]` to `== []` in the zero-share test, in round three. The real bug, `if current_pct and prior_pct:`, was still there. One focused prompt with the failing assertion fixed it in a single round.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Still not working. Please fix everything and make it better.
+    annotations:
+      - find: "Still not working. Please fix everything and make it better."
+        note: "No test, no error, no scope. The assistant rewrites everything, including what already worked."
+  strong:
+    code: |
+      test_missing_metric fails with KeyError: 'new' at line 7, `prior_pct = prior[metric]`.
+      Input: compare_waves({"new": 0.4}, {}). Expected: [].
+      Fix only the lookup so a metric missing from prior is skipped.
+      Do not edit the tests. Keep every other behaviour the same.
+    annotations:
+      - find: "test_missing_metric fails with KeyError: 'new' at line 7, `prior_pct = prior[metric]`."
+        note: "The exact test, error and line."
+      - find: "Do not edit the tests. Keep every other behaviour the same."
+        note: "Scope limits stop regressions and test tampering."
+  takeaway: |
+    Send the failing test, the error and the smallest input. Fix one thing per round, diff the tests, and stop after two failed rounds.
+
+exercises:
+  - id: D8-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      An assistant's function fails one test. What do you send next?
+    options:
+      - {id: a, text: "The failing test, the actual and expected values, and 'fix only this'"}
+      - {id: b, text: "'It doesn't work, try again'"}
+      - {id: c, text: "'Rewrite it more carefully'"}
+      - {id: d, text: "The whole project so it has more context"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Precise evidence and a narrow scope lead to a targeted fix instead of a rewrite."}
+      - {id: r2, text: "Assistants only respond to test output."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Without evidence, the assistant guesses what failed and often rewrites working parts."
+      - answer: c
+        feedback: "'More carefully' gives no information about what is wrong."
+      - answer: d
+        feedback: "More context is not more evidence. Send the failing test and the smallest input."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Assistants respond to anything. Evidence makes the response useful."
+    hints:
+      - "What does the assistant need to know?"
+      - "What failed, and how."
+      - "Test, values, scope."
+    explanation: |
+      Evidence plus scope. The same rule you would follow when asking a colleague.
+
+  - id: D8-L3-E2
+    type: spot_bug
+    difficulty: 2
+    language: text
+    prompt: |
+      This follow-up prompt has one line that invites a rewrite instead of a fix. Tap it, then rewrite the prompt so it limits the scope.
+    code: |
+      test_zero_share fails: expected ["a"], got [].
+      Input: compare_waves({"a": 0.0}, {"a": 0.12}).
+      While you are at it, refactor the whole module and improve the naming.
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: none
+      rules:
+        - id: scope
+          type: required
+          pattern: "(fix only|only fix|change only)"
+          message: "Limit the scope: 'Fix only this failure.'"
+        - id: tests_fixed
+          type: required
+          pattern: "(do not|don't) (edit|change) the tests"
+          message: "Protect the tests: 'Do not edit the tests.'"
+        - id: no_refactor
+          type: forbidden
+          pattern: "refactor the whole|improve the naming"
+          message: "Remove the open-ended refactor request."
+    fix_solution: |
+      test_zero_share fails: expected ["a"], got [].
+      Input: compare_waves({"a": 0.0}, {"a": 0.12}).
+      Fix only this failure. Do not edit the tests or change other behaviour.
+    wrong_answers:
+      - lines: [1]
+        feedback: "The failing test and values are exactly what the prompt needs."
+      - lines: [2]
+        feedback: "The smallest failing input is useful evidence."
+    hints:
+      - "Which line widens the task?"
+      - "An open-ended refactor."
+      - "Replace it with a scope limit."
+    explanation: |
+      One problem per round. Refactoring can come later, as its own request with its own tests.
+
+  - id: D8-L3-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order your steps after an assistant's code fails a test.
+    items:
+      - {id: evidence, text: "Collect the failing assertion, the error and the smallest input"}
+      - {id: prompt, text: "Send them with 'fix only this, do not edit the tests'"}
+      - {id: diff, text: "Diff both the code and the test file in the answer"}
+      - {id: run, text: "Run the full test suite"}
+      - {id: stop, text: "If two rounds fail, debug and fix it yourself"}
+    answer: [evidence, prompt, diff, run, stop]
+    wrong_answers:
+      - answer: [evidence, prompt, run, diff, stop]
+        feedback: "Diff before running. Passing tests mean little if the tests were edited."
+      - answer: [prompt, evidence, diff, run, stop]
+        feedback: "Collect the evidence first. It is what the prompt sends."
+    hints:
+      - "What goes into the prompt?"
+      - "What must you check before trusting a pass?"
+      - "When do you stop asking?"
+    explanation: |
+      Evidence, focused prompt, diff, full suite, and a limit on rounds.
+
+  - id: D8-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `removed_asserts(before: str, after: str) -> list[str]`. Given two versions of a test file, return the `assert` statements present in `before` but missing from `after`, compared after stripping whitespace at both ends, in the order they appear in `before`. An assert that was changed counts as removed. Only lines that start with `assert` after stripping count.
+    starter: |
+      def removed_asserts(before, after):
+          return []
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: removed_asserts
+          typed: true
+          docstring: true
+          message: "Give `removed_asserts` type hints and a docstring."
+      tests:
+        - id: changed
+          code: |
+            before = 'def test_a():\n    assert f(0.0) == ["a"]\n    assert f(None) == []\n'
+            after = 'def test_a():\n    assert f(0.0) == []\n    assert f(None) == []\n'
+            assert removed_asserts(before, after) == ['assert f(0.0) == ["a"]']
+          message: "A changed assertion counts as removed. Compare stripped lines."
+        - id: deleted
+          code: |
+            before = "    assert a == 1\n    assert b == 2\n    x = 3\n"
+            after = "    assert b == 2\n"
+            assert removed_asserts(before, after) == ["assert a == 1"]
+          message: "Report deleted asserts, and ignore non-assert lines."
+        - id: moved
+          code: |
+            before = "assert a == 1\nassert b == 2\n"
+            after = "assert b == 2\n    assert a == 1\n"
+            assert removed_asserts(before, after) == []
+          message: "Reordering or re-indenting an assert is not a removal."
+    solution: |
+      def removed_asserts(before: str, after: str) -> list[str]:
+          """Assert statements in the old test file that the new one lacks.
+
+          Args:
+              before: Test file text before the assistant's change.
+              after: Test file text after the change.
+
+          Returns:
+              Stripped assert lines from before that are missing in after, in order.
+          """
+          kept = {line.strip() for line in after.splitlines()}
+          removed = []
+          for line in before.splitlines():
+              stripped = line.strip()
+              if stripped.startswith("assert") and stripped not in kept:
+                  removed.append(stripped)
+          return removed
+    seeded_bugs:
+      - |
+        def removed_asserts(before: str, after: str) -> list[str]:
+            """No stripping: indentation changes count as removals."""
+            kept = set(after.splitlines())
+            return [line.strip() for line in before.splitlines() if line.strip().startswith("assert") and line not in kept]
+      - |
+        def removed_asserts(before: str, after: str) -> list[str]:
+            """Counts asserts only."""
+            b = [l for l in before.splitlines() if l.strip().startswith("assert")]
+            a = [l for l in after.splitlines() if l.strip().startswith("assert")]
+            return ["removed"] * (len(b) - len(a))
+    wrong_answers:
+      - answer: |
+          def removed_asserts(before: str, after: str) -> list[str]:
+              """Counts asserts only."""
+              b = [l for l in before.splitlines() if l.strip().startswith("assert")]
+              a = [l for l in after.splitlines() if l.strip().startswith("assert")]
+              return ["removed"] * (len(b) - len(a))
+        triggers: changed
+    hints:
+      - "Build a set of stripped lines from after."
+      - "Walk before in order and keep stripped assert lines not in that set."
+      - "Counting asserts misses a changed one."
+    explanation: |
+      Run it on every answer that touches tests. A changed assertion needs your approval, never a silent accept.
+
+  - id: D8-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Round three of a conversation still fails the same test, and the thread holds four earlier attempts. Decide the next steps.
+    slots:
+      - id: next
+        label: "Next move"
+        options:
+          - {id: self, text: "Debug it yourself with pdb on the failing test"}
+          - {id: round4, text: "Send 'still failing' again"}
+        answer: self
+      - id: fresh
+        label: "If you use the assistant again"
+        options:
+          - {id: new_thread, text: "A new conversation: prompt header, current code, one failing test, your diagnosis"}
+          - {id: same_thread, text: "Continue the same thread"}
+        answer: new_thread
+      - id: tests
+        label: "Before accepting any answer"
+        options:
+          - {id: diff_tests, text: "Diff the test file and reject removed or changed assertions"}
+          - {id: trust_green, text: "Accept it if the suite is green"}
+        answer: diff_tests
+    model_answer: |
+      - Two focused rounds without progress means the assistant is guessing. Your debugger is faster.
+      - A fresh thread drops the failed attempts and starts from your diagnosis.
+      - A green suite with edited tests proves nothing.
+    wrong_answers:
+      - answer: {next: round4}
+        feedback: "A fourth vague round tends to produce a fourth guess."
+      - answer: {fresh: same_thread}
+        feedback: "The failed attempts stay in context and pull later answers towards them."
+      - answer: {tests: trust_green}
+        feedback: "Green can mean the tests were weakened."
+    hints:
+      - "What is faster after two failed rounds?"
+      - "What does a long failed thread carry?"
+      - "What can make a suite green without a fix?"
+    explanation: |
+      Stop and debug, restart clean with a diagnosis, and diff the tests every time.
+
+recap:
+  - front: "What to send when AI code fails a test"
+    back: "The failing assertion, actual vs expected, the smallest input, what you checked, and 'fix only this'."
+  - front: "The test-tampering check"
+    back: "Diff the test file after every answer. Removed or changed assertions need your approval."
+  - front: "When to stop iterating"
+    back: "After two focused rounds without progress: debug it yourself, or restart in a fresh conversation."
+
+claims:
+  - claim: "The stop-after-two-rounds rule is this course's working guideline, not a published standard."
+    status: verified
+    source: "Course guideline stated as such in the lesson text."

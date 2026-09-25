@@ -1,0 +1,271 @@
+id: D8-L2
+title: State expected outputs and tests in the prompt
+
+concept: |
+  "Write a function that computes weighted reach" leaves the assistant to decide what correct means. It will decide something plausible, and you will find out later whether it matches your meaning. Put your meaning in the prompt instead: examples with expected outputs, the edge cases, and the tests the code must pass.
+
+  **Give a small input and the exact output.** A table of five rows and the result you worked out by hand removes most ambiguity at once:
+
+  ```text
+  Input (respondent_id, reach_flag, final_weight):
+    R1, 1, 2.0   R2, 0, 1.0   R3, 1, 1.0   R4, null, 1.0
+  Expected: weighted_reach = 3.0, weighted_base = 4.0, pct = 0.75
+  R4 has no reach answer: exclude it from the base.
+  ```
+
+  **List the edge cases and their answers.** Empty input returns None. A zero base returns None. A share of 0.0 is valid. A duplicate key raises ValueError. Each line is a decision the assistant would otherwise make for you.
+
+  **Paste the tests, or ask for them in a fixed form.** Two options:
+
+  - Paste your own failing tests (lesson D6-L2) and ask for code that makes them pass without changing them.
+  - Ask for tests first, "using only hand-worked expected values, not the function's formula", review them, then ask for the code.
+
+  **State the output format.** Return type, column names and order, rounding, and whether the function writes anywhere. "Return a DataFrame with columns wave_id, weighted_reach_pct. Do not write to a table."
+
+  A prompt with examples and tests turns review from "does this look right?" into "do the tests pass, and are they the tests I wrote?" The second question takes seconds.
+
+why_it_matters: |
+  Asked for "weighted reach by wave", an assistant included respondents with a null reach answer in the base. Another conversation, given the same task with a five-row example that excluded the null, produced code that matched on the first try. The example took two minutes to write and settled a question that had caused a four-point difference in the dashboard.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Write a function to compute the weighted reach percentage by wave.
+    annotations:
+      - find: "Write a function to compute the weighted reach percentage by wave."
+        note: "Nulls? Empty waves? Output shape? The assistant decides all of it."
+  strong:
+    code: |
+      Task: weighted_reach_pct(rows) -> float | None.
+      rows: list of (reach_flag: int | None, final_weight: float).
+      Example: [(1, 2.0), (0, 1.0), (1, 1.0), (None, 1.0)] -> 0.75
+        (the None row is excluded from the base).
+      Edge cases: [] -> None; all reach_flag None -> None; [(0, 1.0)] -> 0.0.
+      Make these tests pass without editing them:
+        assert weighted_reach_pct([(1, 2.0), (0, 1.0), (1, 1.0), (None, 1.0)]) == 0.75
+        assert weighted_reach_pct([]) is None
+        assert weighted_reach_pct([(0, 1.0)]) == 0.0
+    annotations:
+      - find: "Example: [(1, 2.0), (0, 1.0), (1, 1.0), (None, 1.0)] -> 0.75"
+        note: "A worked example settles how nulls are treated."
+      - find: "Make these tests pass without editing them:"
+        note: "The acceptance criteria, stated before any code exists."
+  takeaway: |
+    Give a worked example, the edge cases with answers, the output format and the tests. Then review against them.
+
+exercises:
+  - id: D8-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which addition to a prompt best settles how null reach answers are treated?
+    options:
+      - {id: a, text: "A five-row example with a null and the expected result worked by hand"}
+      - {id: b, text: "'Handle nulls properly'"}
+      - {id: c, text: "'Be careful with edge cases'"}
+      - {id: d, text: "'Use best practices'"}
+    answer: a
+    reasons:
+      - {id: r1, text: "An example states the rule precisely. Words like 'properly' leave the rule to the assistant."}
+      - {id: r2, text: "Assistants ignore instructions written in words."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Properly how? Excluded from the base, counted as 0, or an error?"
+      - answer: c
+        feedback: "Which edge cases, and with what answers?"
+      - answer: d
+        feedback: "Best practice does not say whether a null counts in the base."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Instructions in words work when they are specific. An example is the most specific form."
+    hints:
+      - "Which option states the rule exactly?"
+      - "An example with the answer."
+      - "Option a."
+    explanation: |
+      A worked example is a specification the assistant cannot misread.
+
+  - id: D8-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      Work out the expected value for your prompt's example. Rows are `(reach_flag, final_weight)`, and rows with a `None` flag are excluded from the base. What does this print?
+    code: |
+      rows = [(1, 2.0), (0, 1.0), (1, 1.0), (None, 1.0)]
+      valid = [(f, w) for f, w in rows if f is not None]
+      print(sum(w for f, w in valid if f == 1) / sum(w for _, w in valid))
+    answer: "0.75"
+    wrong_answers:
+      - answer: "0.6"
+        feedback: "That includes the None row in the base: 3 / 5. The rule excludes it: 3 / 4."
+    hints:
+      - "Which rows are valid?"
+      - "Reach 3.0, base 4.0."
+      - "0.75."
+    explanation: |
+      Working the example out yourself is part of writing the prompt. If you cannot, the rule is not clear yet.
+
+  - id: D8-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the instruction that stops an assistant from weakening your tests.
+    template: |
+      Make these tests pass [[g1]] editing them. If a test seems wrong, [[g2]] instead of changing it.
+    gaps:
+      g1: {accepted: [without]}
+      g2: {accepted: ["say so", explain, "tell me", ask]}
+    wrong_answers:
+      - answer: {g1: by}
+        feedback: "Editing the tests to pass is exactly what the instruction must forbid."
+    hints:
+      - "Tests are fixed."
+      - "Disagreement goes to you, not into the test."
+      - "`without` and `say so`."
+    explanation: |
+      Fixed tests are the acceptance criteria. An assistant that edits them to pass has changed the requirement.
+
+  - id: D8-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `examples_to_asserts(func_name: str, examples: list[tuple[tuple[object, ...], object]]) -> list[str]` that turns worked examples into assert lines for a prompt. Each example is `(args, expected)`. Produce `assert func(arg1, arg2) == expected` using `repr` for every argument and value, except that an expected `None` produces `assert func(...) is None`.
+    starter: |
+      def examples_to_asserts(func_name, examples):
+          return [f"assert {func_name}({args}) == {expected}" for args, expected in examples]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: examples_to_asserts
+          typed: true
+          docstring: true
+          message: "Give `examples_to_asserts` type hints and a docstring."
+      tests:
+        - id: format
+          code: |
+            lines = examples_to_asserts("share", [((3, 4), 0.75), ((5, 0), None)])
+            assert lines == ["assert share(3, 4) == 0.75", "assert share(5, 0) is None"], lines
+          message: "Join args with ', ' using repr, and use `is None` for a None result."
+        - id: strings
+          code: |
+            lines = examples_to_asserts("latest_wave", [((["W9", "W10"],), "W10")])
+            assert lines == ["assert latest_wave(['W9', 'W10']) == 'W10'"], lines
+          message: "repr keeps strings quoted, so the line is valid Python."
+        - id: runs
+          code: |
+            def share(p, t):
+                return None if t == 0 else p / t
+            for line in examples_to_asserts("share", [((1, 4), 0.25), ((0, 0), None)]):
+                exec(line, {"share": share})
+          message: "The generated lines must run as Python and pass for a correct function."
+    solution: |
+      def examples_to_asserts(
+          func_name: str, examples: list[tuple[tuple[object, ...], object]]
+      ) -> list[str]:
+          """Turn worked examples into assert lines for a prompt or a test file.
+
+          Args:
+              func_name: Name of the function under test.
+              examples: (args, expected) pairs worked out by hand.
+
+          Returns:
+              One assert statement per example.
+          """
+          lines = []
+          for args, expected in examples:
+              call = f"{func_name}({', '.join(repr(a) for a in args)})"
+              if expected is None:
+                  lines.append(f"assert {call} is None")
+              else:
+                  lines.append(f"assert {call} == {expected!r}")
+          return lines
+    seeded_bugs:
+      - |
+        def examples_to_asserts(func_name: str, examples: list[tuple[tuple[object, ...], object]]) -> list[str]:
+            """== None for None."""
+            return [f"assert {func_name}({', '.join(repr(a) for a in args)}) == {expected!r}" for args, expected in examples]
+      - |
+        def examples_to_asserts(func_name: str, examples: list[tuple[tuple[object, ...], object]]) -> list[str]:
+            """str instead of repr."""
+            out = []
+            for args, expected in examples:
+                call = f"{func_name}({', '.join(str(a) for a in args)})"
+                out.append(f"assert {call} is None" if expected is None else f"assert {call} == {expected}")
+            return out
+    wrong_answers:
+      - answer: |
+          def examples_to_asserts(func_name: str, examples: list[tuple[tuple[object, ...], object]]) -> list[str]:
+              """str instead of repr."""
+              out = []
+              for args, expected in examples:
+                  call = f"{func_name}({', '.join(str(a) for a in args)})"
+                  out.append(f"assert {call} is None" if expected is None else f"assert {call} == {expected}")
+              return out
+        triggers: strings
+    hints:
+      - "`', '.join(repr(a) for a in args)` builds the argument list."
+      - "Use `{expected!r}` for the expected value."
+      - "Special-case None with `is None`."
+    explanation: |
+      Worked examples become executable tests in one step. Paste them into the prompt and into the test file.
+
+  - id: D8-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Plan the prompt for an assistant to write a silver deduplication function.
+    slots:
+      - id: example
+        label: "Example in the prompt"
+        options:
+          - {id: worked, text: "Six input rows with two duplicates and the expected four output rows"}
+          - {id: none_ex, text: "No example: the assistant knows what deduplication means"}
+        answer: worked
+      - id: tie
+        label: "Rule for duplicates"
+        options:
+          - {id: latest, text: "Keep the row with the latest ingestion_timestamp; ties raise ValueError"}
+          - {id: any, text: "Keep any one of them"}
+        answer: latest
+      - id: tests
+        label: "Tests"
+        options:
+          - {id: fixed, text: "Paste failing tests and ask for code that passes them unchanged"}
+          - {id: after, text: "Ask the assistant to write tests after the code"}
+        answer: fixed
+    model_answer: |
+      - A worked example fixes the grain and which columns form the key.
+      - An explicit tie rule removes a decision the assistant would otherwise make silently.
+      - Fixed tests written first are acceptance criteria, not a mirror of the code.
+    wrong_answers:
+      - answer: {example: none_ex}
+        feedback: "Deduplicate on which key, keeping which row? The example answers both."
+      - answer: {tie: any}
+        feedback: "'Any' makes the output depend on execution order, and it changes between runs."
+      - answer: {tests: after}
+        feedback: "Tests written after the code tend to confirm what the code does, bugs included."
+    hints:
+      - "What settles the key and the grain?"
+      - "What happens with two rows for one key?"
+      - "When are tests written?"
+    explanation: |
+      Example, explicit rules, and tests written first.
+
+recap:
+  - front: "Four things that specify correct code in a prompt"
+    back: "A worked example, edge cases with answers, the output format, and fixed tests."
+  - front: "Instruction that protects your tests"
+    back: "'Make these tests pass without editing them. If a test seems wrong, say so.'"
+  - front: "Why work the example out yourself"
+    back: "If you cannot compute the answer by hand, the rule is not clear enough to ask for code."
+
+claims:
+  - claim: "Generated assert lines using repr and 'is None' execute as valid Python."
+    status: verified
+    source: "Checked by the exercise tests in this repo, September 2026."
