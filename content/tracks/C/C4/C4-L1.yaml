@@ -1,0 +1,307 @@
+id: C4-L1
+title: Choosing how data gets into Fabric
+
+concept: |
+  Fabric offers several ways to move data. They overlap, and picking by habit creates pipelines nobody needs. Microsoft Learn's data movement guide (updated April 2026) gives a starting rule by layer:
+
+  - **Curated data from an existing system, for reporting: Mirroring.** If the source already does its own ETL and you need the result in Fabric, mirroring is the simplest and cheapest choice (lesson C3-L2).
+  - **Raw ingestion into bronze: Copy job.** It handles bulk copy, incremental copy and change data capture (CDC), with scheduling and state tracking built in, without building a pipeline.
+  - **Low-latency events: Eventstream** (lesson C7-L1).
+
+  Then add tools only where they earn their place:
+
+  - **Pipeline** (Data Factory): orchestration. Run activities in order, branch on success or failure, loop, retry, and call notebooks, stored procedures, dataflows and Copy jobs. A pipeline with a copy activity also moves data, but you manage incremental state yourself.
+  - **Dataflow Gen2**: Power Query, low-code transformation for analysts, with a data destination per query.
+  - **Spark notebook**: code-first transformation at scale, the closest match to your Databricks work (lesson C5-L1).
+
+  A simple way to decide:
+
+  1. Does the source need to be replicated as a whole database? Mirroring.
+  2. Is it a copy of tables or files into bronze? Copy job.
+  3. Are there events that must arrive within seconds? Eventstream.
+  4. Is there transformation? Spark for engineers, Dataflow Gen2 for low-code authors.
+  5. Do several steps need ordering, branching and alerts? Wrap them in a pipeline.
+
+  Two warnings. A pipeline that only copies tables re-creates what a Copy job does, with more to maintain. And Dataflow Gen2 is not a replacement for Spark on large volumes. Check your capacity usage (lesson C10-L3) before you standardise on one tool.
+
+why_it_matters: |
+  A team built 40 pipelines, each with a copy activity, a lookup of the last loaded timestamp from a control table, and a stored procedure to update it. Two of them had an off-by-one error in the watermark and silently skipped rows every night. A Copy job per source would have tracked incremental state itself, with nothing for the team to get wrong.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Source: Azure SQL CRM (200 tables)   -> 200 pipelines, copy activity + control table
+      Source: Clickstream events            -> hourly copy activity from storage
+      Transform: Dataflow Gen2 on 400 M rows per day
+    annotations:
+      - find: "Source: Azure SQL CRM (200 tables)   -> 200 pipelines, copy activity + control table"
+        note: "Hand-built incremental state for a whole database: mirroring or a Copy job does this for you."
+      - find: "Source: Clickstream events            -> hourly copy activity from storage"
+        note: "Events that need low latency, handled as hourly batches."
+      - find: "Transform: Dataflow Gen2 on 400 M rows per day"
+        note: "A low-code tool on engineering-scale volume. Spark suits this better."
+  strong:
+    code: |
+      Source: Azure SQL CRM (200 tables)   -> Mirroring (curated reporting copy)
+      Source: Supplier files in ADLS        -> Copy job, incremental, into bronze
+      Source: Clickstream events            -> Eventstream into an eventhouse
+      Transform: Spark notebooks, bronze to gold
+      Orchestration: one pipeline runs the notebooks in order, retries, alerts on failure
+    annotations:
+      - find: "Source: Azure SQL CRM (200 tables)   -> Mirroring (curated reporting copy)"
+        note: "Free replication compute, no incremental logic to maintain."
+      - find: "Source: Supplier files in ADLS        -> Copy job, incremental, into bronze"
+        note: "State tracking built in."
+      - find: "Orchestration: one pipeline runs the notebooks in order, retries, alerts on failure"
+        note: "The pipeline orchestrates. It does not re-create copying."
+  takeaway: |
+    Mirroring for curated databases, Copy job for bronze, Eventstream for events, Spark or Dataflow Gen2 for transformation, and pipelines to orchestrate.
+
+exercises:
+  - id: C4-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You need raw CSV deliveries from ADLS copied into a bronze lakehouse every hour, only new files each time. Which tool does Microsoft Learn recommend starting with?
+    options:
+      - {id: a, text: "Mirroring"}
+      - {id: b, text: "Copy job"}
+      - {id: c, text: "Dataflow Gen2"}
+      - {id: d, text: "A pipeline with a copy activity and a control table"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Copy job supports incremental copy and scheduling natively for bronze ingestion."}
+      - {id: r2, text: "Copy job is the only tool that reads ADLS."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Mirroring replicates databases and catalogs. This is file ingestion into bronze."
+      - answer: c
+        feedback: "Dataflow Gen2 is for low-code transformation. Nothing needs transforming yet."
+      - answer: d
+        feedback: "It works, but you build and maintain the incremental state that Copy job tracks for you."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Pipelines and shortcuts read ADLS too."
+    hints:
+      - "Which layer is this?"
+      - "Which tool tracks incremental state itself?"
+      - "Copy job."
+    explanation: |
+      Bronze ingestion starts with Copy job: incremental copy without building a pipeline.
+
+  - id: C4-L1-E2
+    type: design
+    difficulty: 2
+    prompt: |
+      Pick the tool for each need.
+    slots:
+      - id: erp
+        label: "An ERP database's curated tables, kept current for reporting"
+        options: &tools
+          - {id: mirroring, text: "Mirroring"}
+          - {id: copyjob, text: "Copy job"}
+          - {id: eventstream, text: "Eventstream"}
+          - {id: spark, text: "Spark notebook"}
+          - {id: pipeline, text: "Pipeline"}
+        answer: mirroring
+      - id: iot
+        label: "Sensor events that must trigger alerts within seconds"
+        options: *tools
+        answer: eventstream
+      - id: transform
+        label: "Joining and cleaning 300 M rows a day into silver"
+        options: *tools
+        answer: spark
+      - id: orchestrate
+        label: "Run copy, then three notebooks in order, and email on failure"
+        options: *tools
+        answer: pipeline
+    model_answer: |
+      - Curated database tables: mirroring.
+      - Low-latency events: Eventstream.
+      - Heavy transformation: Spark.
+      - Ordering, branching and alerts across steps: a pipeline.
+    wrong_answers:
+      - answer: {erp: copyjob}
+        feedback: "A Copy job works, but mirroring replicates the whole database with free replication compute and no schedule to manage."
+      - answer: {iot: copyjob}
+        feedback: "Copy jobs run on schedules. Seconds-level events need Eventstream."
+      - answer: {orchestrate: spark}
+        feedback: "A notebook can call others, but retries, branches and alerts across steps are what pipelines are for."
+    hints:
+      - "Replicate, stream, transform or orchestrate?"
+      - "Which tool is event-driven?"
+      - "Which tool coordinates other tools?"
+    explanation: |
+      Each tool has a lane. Stay in it and there is less to build and maintain.
+
+  - id: C4-L1-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the questions in the decision sequence from this lesson.
+    items:
+      - {id: replicate, text: "Replicate a whole database or catalog?"}
+      - {id: copy, text: "Copy tables or files into bronze?"}
+      - {id: events, text: "Events that must arrive within seconds?"}
+      - {id: transform, text: "Transformation needed, and by whom?"}
+      - {id: orchestrate, text: "Several steps that need ordering and alerts?"}
+    answer: [replicate, copy, events, transform, orchestrate]
+    wrong_answers:
+      - answer: [orchestrate, replicate, copy, events, transform]
+        feedback: "Starting with a pipeline leads to building copy logic inside it. Choose the movement tools first, then orchestrate them."
+      - answer: [transform, replicate, copy, events, orchestrate]
+        feedback: "Decide how data arrives before how it is transformed."
+    hints:
+      - "Movement first."
+      - "Transformation next."
+      - "Orchestration wraps the rest."
+    explanation: |
+      Choose movement tools, then transformation, then wrap them in orchestration only where needed.
+
+  - id: C4-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `recommend(need: str) -> str` encoding the decision rule. Accepted needs and answers:
+
+      - `"replicate_database"` → `"Mirroring"`
+      - `"bronze_copy"` → `"Copy job"`
+      - `"low_latency_events"` → `"Eventstream"`
+      - `"code_transform"` → `"Spark notebook"`
+      - `"lowcode_transform"` → `"Dataflow Gen2"`
+      - `"orchestrate"` → `"Pipeline"`
+
+      Raise `ValueError` for anything else, with the unknown need in the message.
+    starter: |
+      def recommend(need):
+          return "Pipeline"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: recommend
+          typed: true
+          docstring: true
+          message: "Give `recommend` type hints and a docstring."
+      tests:
+        - id: mapping
+          code: |
+            expected = {
+                "replicate_database": "Mirroring", "bronze_copy": "Copy job",
+                "low_latency_events": "Eventstream", "code_transform": "Spark notebook",
+                "lowcode_transform": "Dataflow Gen2", "orchestrate": "Pipeline",
+            }
+            for need, tool in expected.items():
+                assert recommend(need) == tool, need
+          message: "Each need maps to one tool, as listed."
+        - id: unknown
+          code: |
+            try:
+                recommend("teleport")
+            except ValueError as err:
+                assert "teleport" in str(err)
+            else:
+                raise AssertionError("no ValueError")
+          message: "Unknown needs must raise ValueError naming the need."
+    solution: |
+      TOOL_FOR_NEED: dict[str, str] = {
+          "replicate_database": "Mirroring",
+          "bronze_copy": "Copy job",
+          "low_latency_events": "Eventstream",
+          "code_transform": "Spark notebook",
+          "lowcode_transform": "Dataflow Gen2",
+          "orchestrate": "Pipeline",
+      }
+
+
+      def recommend(need: str) -> str:
+          """Fabric tool for a data movement or processing need.
+
+          Raises:
+              ValueError: If the need is not in the table.
+          """
+          if need not in TOOL_FOR_NEED:
+              raise ValueError(f"unknown need: {need}")
+          return TOOL_FOR_NEED[need]
+    seeded_bugs:
+      - |
+        def recommend(need: str) -> str:
+            """Defaults to Pipeline."""
+            table = {"replicate_database": "Mirroring", "bronze_copy": "Copy job", "low_latency_events": "Eventstream",
+                     "code_transform": "Spark notebook", "lowcode_transform": "Dataflow Gen2", "orchestrate": "Pipeline"}
+            return table.get(need, "Pipeline")
+      - |
+        def recommend(need: str) -> str:
+            """Pipelines for bronze copies."""
+            table = {"replicate_database": "Mirroring", "bronze_copy": "Pipeline", "low_latency_events": "Eventstream",
+                     "code_transform": "Spark notebook", "lowcode_transform": "Dataflow Gen2", "orchestrate": "Pipeline"}
+            if need not in table:
+                raise ValueError(need)
+            return table[need]
+    wrong_answers:
+      - answer: |
+          def recommend(need: str) -> str:
+              """Defaults to Pipeline."""
+              table = {"replicate_database": "Mirroring", "bronze_copy": "Copy job", "low_latency_events": "Eventstream",
+                       "code_transform": "Spark notebook", "lowcode_transform": "Dataflow Gen2", "orchestrate": "Pipeline"}
+              return table.get(need, "Pipeline")
+        triggers: unknown
+    hints:
+      - "A dictionary from need to tool."
+      - "Check membership before returning."
+      - "Put the need in the error message."
+    explanation: |
+      An explicit table makes the team's convention reviewable, and a clear error beats a silent default.
+
+  - id: C4-L1-E5
+    type: mcq
+    difficulty: 4
+    prompt: |
+      A team copies 60 tables from Azure SQL into bronze with 60 pipelines, each using a copy activity, a control table for the last watermark, and a stored procedure to update it. Two tables lose rows every night. What change removes the whole class of bug?
+    options:
+      - {id: a, text: "Add a retry to each copy activity."}
+      - {id: b, text: "Move the tables to Copy jobs with incremental copy, which track state themselves."}
+      - {id: c, text: "Run the pipelines twice a night."}
+      - {id: d, text: "Replace the stored procedure with a Dataflow Gen2."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Copy job manages the state of the last successful run, so there is no hand-written watermark logic to get wrong."}
+      - {id: r2, text: "Pipelines cannot copy incrementally."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Retries repeat the same logic, including its watermark bug."
+      - answer: c
+        feedback: "More runs repeat the off-by-one error more often."
+      - answer: d
+        feedback: "That moves the hand-built state into another tool without removing it."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Pipelines can copy incrementally, but you build the state tracking."
+    hints:
+      - "Where does the bug live?"
+      - "In hand-written state tracking."
+      - "Which tool does that for you?"
+    explanation: |
+      Removing hand-built incremental state removes the bugs it causes. Copy job tracks the last successful run itself.
+
+recap:
+  - front: "Microsoft's starting rule by layer"
+    back: "Gold from existing systems: Mirroring. Bronze ingestion: Copy job. Low-latency events: Eventstream."
+  - front: "What a pipeline is for"
+    back: "Orchestration: ordering, branching, loops, retries and alerts across activities."
+  - front: "Spark or Dataflow Gen2?"
+    back: "Spark for code-first, large-volume engineering. Dataflow Gen2 for low-code Power Query authors."
+  - front: "Copy activity vs Copy job for incremental loads"
+    back: "Copy activity needs hand-built state. Copy job tracks the last successful run itself."
+
+claims:
+  - claim: "Data movement guide: Mirroring for gold from existing systems, Copy job for bronze ingestion, Eventstream for low-latency events; copy activity requires managing incremental state yourself."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-factory/decision-guide-data-movement (updated 2026-04-13)"
+  - claim: "Copy job supports full copy, watermark-based and CDC-based incremental copy, and tracks the state of the last successful run."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-factory/what-is-copy-job (updated 2026-09-17)"

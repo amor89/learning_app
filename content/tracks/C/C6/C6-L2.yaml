@@ -1,0 +1,270 @@
+id: C6-L2
+title: DAX measures that state their filter context
+
+concept: |
+  In a semantic model, arithmetic belongs in **measures**. A measure is evaluated at query time, in the **filter context** of the visual: the slicers, rows and columns that apply to that cell. A calculated column is evaluated row by row when the model refreshes and stored, which costs memory and refresh time and cannot react to slicers.
+
+  Three habits make measures correct and readable (Microsoft's DAX guidance, checked September 2026):
+
+  - **Use `DIVIDE`, not `/`.** `DIVIDE(numerator, denominator)` returns BLANK when the denominator is zero or BLANK, instead of an error or infinity. You can pass an alternate result as a third argument. Microsoft notes it is also faster than testing for zero yourself.
+  - **Use variables.** `VAR ... RETURN` evaluates an expression once and names it. That improves performance, readability and debugging.
+  - **Change filter context only with `CALCULATE`**, and say why. `CALCULATE([Weighted base], ALL(dim_brand))` removes the brand filter, which is what a share-of-total denominator needs.
+
+  A weighted share, the survey version of lesson B8-L1:
+
+  ```text
+  Weighted aware % =
+  VAR aware_w = SUMX ( fact_awareness, fact_awareness[aware] * fact_awareness[weight] )
+  VAR base_w  = SUM ( fact_awareness[weight] )
+  RETURN DIVIDE ( aware_w, base_w )
+  ```
+
+  Put the unweighted base next to it as a separate measure, `Base (n) = DISTINCTCOUNT(fact_awareness[respondent_key])`, so report users see how many respondents stand behind each percentage.
+
+  Name measures for what they return, store them in one place (a measures table or the fact table), and set their format strings. A measure that nobody can read is a measure nobody can check.
+
+why_it_matters: |
+  A report computed awareness as `SUM(aware_weight) / SUM(weight)` in a measure. In a new market with no fieldwork yet, the base was zero, and the visual showed "Infinity" and "NaN" in cells that the board pack exported to PDF. `DIVIDE` would have returned BLANK, and the empty cells would have been left empty.
+
+worked_example:
+  language: dax
+  weak:
+    code: |
+      Aware % = SUM(fact_awareness[aware_weight]) / SUM(fact_awareness[weight])
+      Brand share = [Aware %] / CALCULATE([Aware %], ALL(fact_awareness))
+    annotations:
+      - find: "Aware % = SUM(fact_awareness[aware_weight]) / SUM(fact_awareness[weight])"
+        note: "The / operator breaks on a zero base."
+      - find: "Brand share = [Aware %] / CALCULATE([Aware %], ALL(fact_awareness))"
+        note: "ALL on the whole fact table removes every filter, including date and region. The share compares against the wrong total."
+  strong:
+    code: |
+      Weighted aware % =
+      VAR aware_w = SUMX ( fact_awareness, fact_awareness[aware] * fact_awareness[weight] )
+      VAR base_w = SUM ( fact_awareness[weight] )
+      RETURN DIVIDE ( aware_w, base_w )
+
+      Share of aware across brands =
+      VAR this_brand = [Weighted aware %]
+      VAR all_brands = CALCULATE ( [Weighted aware %], ALL ( dim_brand ) )
+      RETURN DIVIDE ( this_brand, all_brands )
+    annotations:
+      - find: "RETURN DIVIDE ( aware_w, base_w )"
+        note: "BLANK on a zero base, not an error."
+      - find: "VAR all_brands = CALCULATE ( [Weighted aware %], ALL ( dim_brand ) )"
+        note: "Removes only the brand filter. Date, region and wave filters still apply."
+  takeaway: |
+    Measures, not calculated columns. DIVIDE for every ratio, variables for clarity, and CALCULATE with the narrowest filter change.
+
+exercises:
+  - id: C6-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      What does `DIVIDE(10, 0)` return in DAX?
+    options:
+      - {id: a, text: "An error"}
+      - {id: b, text: "BLANK"}
+      - {id: c, text: "0"}
+      - {id: d, text: "Infinity"}
+    answer: b
+    reasons:
+      - {id: r1, text: "DIVIDE returns BLANK when the denominator is zero or BLANK, unless an alternate result is given."}
+      - {id: r2, text: "DAX has no concept of division by zero."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "DIVIDE was designed to handle division by zero without an error."
+      - answer: c
+        feedback: "Only if you pass 0 as the alternate result."
+      - answer: d
+        feedback: "That is what the / operator can return. DIVIDE returns BLANK."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The / operator does divide by zero. DIVIDE handles it."
+    hints:
+      - "What was DIVIDE designed for?"
+      - "What is returned without an alternate result?"
+      - "BLANK."
+    explanation: |
+      BLANK keeps empty cells empty in visuals.
+
+  - id: C6-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A share-of-total measure uses `CALCULATE([Weighted aware %], ALL(fact_awareness))` as its denominator. A report filters to wave 12 and region North. What does the denominator ignore?
+    options:
+      - {id: a, text: "Only the brand filter"}
+      - {id: b, text: "Every filter on fact_awareness, including wave and region"}
+      - {id: c, text: "Nothing: ALL only affects slicers"}
+      - {id: d, text: "Only filters from other pages"}
+    answer: b
+    reasons:
+      - {id: r1, text: "ALL on the fact table removes all its filters, including those that reach it through dimensions."}
+      - {id: r2, text: "ALL always removes every filter in the model."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That is ALL(dim_brand). ALL(fact_awareness) removes much more."
+      - answer: c
+        feedback: "ALL changes filter context for every filter on the table, not just slicers."
+      - answer: d
+        feedback: "Filter context comes from the visual and the page. ALL removes the table's filters wherever they come from."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. ALL removes filters from the table or column you give it."
+    hints:
+      - "Which table does ALL name?"
+      - "Filters from dimensions reach the fact table."
+      - "Remove only the brand filter."
+    explanation: |
+      Use `ALL(dim_brand)` to compare against all brands within the same wave and region.
+
+  - id: C6-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: dax
+    prompt: |
+      Complete the weighted share measure.
+    template: |
+      Weighted aware % =
+      [[g1]] aware_w = SUMX ( fact_awareness, fact_awareness[aware] * fact_awareness[weight] )
+      VAR base_w = SUM ( fact_awareness[weight] )
+      RETURN [[g2]] ( aware_w, base_w )
+    gaps:
+      g1: {accepted: [VAR], case_sensitive: false}
+      g2: {accepted: [DIVIDE], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: LET}
+        feedback: "DAX variables use VAR ... RETURN."
+    hints:
+      - "The DAX keyword for a variable."
+      - "The safe division function."
+      - "`VAR` and `DIVIDE`."
+    explanation: |
+      Variables name each part. DIVIDE handles a zero base.
+
+  - id: C6-L2-E4
+    type: write_function
+    difficulty: 3
+    language: dax
+    prompt: |
+      Write a measure `Share of aware across brands` that divides `[Weighted aware %]` by the same measure with the brand filter removed through `ALL ( dim_brand )`. Use variables named `this_brand` and `all_brands`, and `DIVIDE`.
+    starter: |
+      Share of aware across brands = [Weighted aware %] / CALCULATE ( [Weighted aware %], ALL ( fact_awareness ) )
+    checker:
+      kind: text
+      comments: dax
+      rules:
+        - id: name
+          type: required
+          pattern: "Share of aware across brands\\s*="
+          message: "Name the measure `Share of aware across brands`."
+        - id: var_this
+          type: required
+          pattern: "VAR\\s+this_brand\\s*=\\s*\\[Weighted aware %\\]"
+          message: "Define `VAR this_brand = [Weighted aware %]`."
+        - id: var_all
+          type: required
+          pattern: "VAR\\s+all_brands\\s*=\\s*CALCULATE\\s*\\(\\s*\\[Weighted aware %\\]\\s*,\\s*ALL\\s*\\(\\s*dim_brand\\s*\\)\\s*\\)"
+          message: "Remove only the brand filter: `CALCULATE ( [Weighted aware %], ALL ( dim_brand ) )`."
+        - id: divide
+          type: required
+          pattern: "RETURN\\s+DIVIDE\\s*\\(\\s*this_brand\\s*,\\s*all_brands\\s*\\)"
+          message: "Return `DIVIDE ( this_brand, all_brands )`."
+        - id: no_slash
+          type: forbidden
+          pattern: "\\]\\s*/\\s*|\\)\\s*/\\s*"
+          message: "Use DIVIDE, not the / operator."
+        - id: no_all_fact
+          type: forbidden
+          pattern: "ALL\\s*\\(\\s*fact_awareness\\s*\\)"
+          message: "ALL(fact_awareness) removes every filter, including wave and region."
+    solution: |
+      Share of aware across brands =
+      VAR this_brand = [Weighted aware %]
+      VAR all_brands = CALCULATE ( [Weighted aware %], ALL ( dim_brand ) )
+      RETURN DIVIDE ( this_brand, all_brands )
+    seeded_bugs:
+      - |
+        Share of aware across brands =
+        VAR this_brand = [Weighted aware %]
+        VAR all_brands = CALCULATE ( [Weighted aware %], ALL ( fact_awareness ) )
+        RETURN DIVIDE ( this_brand, all_brands )
+      - |
+        Share of aware across brands =
+        VAR this_brand = [Weighted aware %]
+        VAR all_brands = CALCULATE ( [Weighted aware %], ALL ( dim_brand ) )
+        RETURN this_brand / all_brands
+    wrong_answers:
+      - answer: |
+          Share of aware across brands =
+          VAR this_brand = [Weighted aware %]
+          VAR all_brands = CALCULATE ( [Weighted aware %], ALL ( fact_awareness ) )
+          RETURN DIVIDE ( this_brand, all_brands )
+        triggers: var_all
+    hints:
+      - "Two variables, then RETURN."
+      - "ALL on the brand dimension only."
+      - "DIVIDE the two."
+    explanation: |
+      Removing only the brand filter keeps the comparison inside the same wave and region, and DIVIDE handles an empty denominator.
+
+  - id: C6-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Decide where each calculation lives in a Direct Lake model on the SQL analytics endpoint.
+    slots:
+      - id: ageband
+        label: "Respondent age band"
+        options: &where
+          - {id: gold, text: "Gold table column"}
+          - {id: measure, text: "DAX measure"}
+          - {id: calc_col, text: "Calculated column"}
+        answer: gold
+      - id: share
+        label: "Weighted awareness percentage"
+        options: *where
+        answer: measure
+      - id: base
+        label: "Unweighted base (number of respondents)"
+        options: *where
+        answer: measure
+    model_answer: |
+      - Age band is a property of each respondent: compute it in gold.
+      - Percentages depend on the visual's filters: measures.
+      - The base count also depends on filters: a measure, shown beside every percentage.
+    wrong_answers:
+      - answer: {ageband: calc_col}
+        feedback: "Direct Lake on SQL analytics endpoints does not support calculated columns."
+      - answer: {share: gold}
+        feedback: "A stored percentage cannot re-aggregate correctly when users filter or group differently."
+      - answer: {base: gold}
+        feedback: "The base changes with every filter. It must be computed at query time."
+    hints:
+      - "Does the value depend on the visual's filters?"
+      - "Is it a property of one row?"
+      - "Calculated columns are not an option here."
+    explanation: |
+      Row properties in gold, filter-dependent arithmetic in measures.
+
+recap:
+  - front: "Measure vs calculated column"
+    back: "Measures compute at query time in the visual's filter context. Calculated columns are stored at refresh."
+  - front: "DIVIDE in DAX"
+    back: "Returns BLANK (or an alternate result) when the denominator is zero or BLANK."
+  - front: "VAR ... RETURN"
+    back: "Evaluates once, names parts, improves performance, readability and debugging."
+  - front: "Share of total across brands"
+    back: "CALCULATE([measure], ALL(dim_brand)): remove only the brand filter."
+
+claims:
+  - claim: "DIVIDE returns BLANK for a zero or BLANK denominator unless an alternate result is passed; it outperforms explicit zero checks."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/dax/best-practices/dax-divide-function-operator"
+  - claim: "Variables improve performance, reliability, readability and debugging."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/dax/best-practices/dax-variables"
+  - claim: "Materialised calculated columns can hurt refresh performance because values are derived at refresh time."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/power-bi/transform-model/desktop-calculated-columns (updated 2026-08-23)"

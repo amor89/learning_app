@@ -1,0 +1,301 @@
+id: C5-L3
+title: Delta tables shared between Databricks and Fabric
+
+concept: |
+  Delta is an open format, so a table written by Databricks can be read by Fabric through a shortcut or Unity Catalog mirroring (lessons C3-L1 and C3-L3). Open does not mean every reader supports every **table feature**. A table's features decide which Fabric experiences can read it.
+
+  From Microsoft Learn's Delta interoperability matrix (updated May 2026):
+
+  | Feature | Spark Runtime 2.0 | SQL analytics endpoint | Direct Lake | Python notebooks |
+  |---|---|---|---|---|
+  | Deletion vectors | yes | yes | yes | no |
+  | Column mapping, name mode | yes | yes | yes | no |
+  | Column mapping, id mode | yes | no | yes | no |
+  | `TIMESTAMP_NTZ` | yes | no | no | yes |
+  | Liquid clustering | yes | yes | yes | no |
+
+  Three more limits from the same page:
+
+  - **V2 checkpoints**: only Spark notebooks and Spark jobs read and write them. The lakehouse and the SQL analytics endpoint do not list such tables correctly.
+  - **Databricks-only features**, such as writing identity columns and Lakeflow Spark Declarative Pipelines tables, are not supported.
+  - Newer **Delta 4.x features**, such as collations and the variant type, work only in Spark notebooks and jobs, not in the SQL endpoint or Direct Lake.
+
+  Fabric's own writers differ too. Runtime 2.0 writes new tables at reader version 3 and writer version 7 with **deletion vectors** on by default. Runtime 1.3 writes reader 1, writer 2.
+
+  The practical rule: **the table's writer decides which features the table has, and every reader must support all of them.** For gold tables that Power BI or T-SQL users read, use timestamps with a time zone (`TIMESTAMP`) instead of `TIMESTAMP_NTZ`, avoid column mapping in id mode, and check `DESCRIBE DETAIL` for the protocol versions and table features before you publish.
+
+why_it_matters: |
+  A Databricks team stored event times as `TIMESTAMP_NTZ` in a gold table and shared it with Fabric through a shortcut. Spark in Fabric read it fine. The SQL analytics endpoint and the Direct Lake report did not show the table's time columns, so the Power BI team built a workaround copy with converted columns. One type choice in the writer created a second dataset.
+
+worked_example:
+  language: sql
+  weak:
+    code: |
+      CREATE TABLE gold.events (
+          event_id STRING,
+          event_time TIMESTAMP_NTZ
+      )
+      TBLPROPERTIES ("delta.columnMapping.mode" = "id");
+    annotations:
+      - find: "event_time TIMESTAMP_NTZ"
+        note: "Not supported by the SQL analytics endpoint or Direct Lake."
+      - find: 'TBLPROPERTIES ("delta.columnMapping.mode" = "id");'
+        note: "Column mapping in id mode is not supported by the SQL analytics endpoint."
+  strong:
+    code: |
+      CREATE TABLE gold.events (
+          event_id STRING,
+          event_time TIMESTAMP
+      );
+
+      -- Before sharing: check protocol versions and table features
+      DESCRIBE DETAIL gold.events;
+    annotations:
+      - find: "event_time TIMESTAMP"
+        note: "A time-zone-aware timestamp that every Fabric reader supports."
+      - find: "DESCRIBE DETAIL gold.events;"
+        note: "Shows minReaderVersion, minWriterVersion and table features to compare with the readers' support."
+  takeaway: |
+    Open format, but not every feature for every reader. Design shared gold tables for the weakest reader that needs them.
+
+exercises:
+  - id: C5-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A Databricks gold table uses `TIMESTAMP_NTZ` columns. Which Fabric reader handles them?
+    options:
+      - {id: a, text: "The SQL analytics endpoint"}
+      - {id: b, text: "Direct Lake semantic models"}
+      - {id: c, text: "Fabric Spark Runtime 2.0"}
+      - {id: d, text: "All of them"}
+    answer: c
+    reasons:
+      - {id: r1, text: "The interoperability matrix lists TIMESTAMP_NTZ as supported in Spark but not in the SQL endpoint or Direct Lake."}
+      - {id: r2, text: "Only Spark can read Delta tables."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The SQL analytics endpoint does not support TIMESTAMP_NTZ."
+      - answer: b
+        feedback: "Direct Lake does not support TIMESTAMP_NTZ."
+      - answer: d
+        feedback: "Support differs by experience. Check the matrix."
+      - answer: c|r2
+        feedback: "Right answer, wrong reason. Every listed experience reads Delta. This feature is the issue."
+    hints:
+      - "Which experiences list TIMESTAMP_NTZ as supported?"
+      - "Spark does."
+      - "SQL and Direct Lake do not."
+    explanation: |
+      Use `TIMESTAMP` for columns that SQL or Power BI users need.
+
+  - id: C5-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      You create a new Delta table with a Spark notebook on Fabric Runtime 2.0 and default settings. Which reader might fail to read it?
+    options:
+      - {id: a, text: "The SQL analytics endpoint"}
+      - {id: b, text: "A Python notebook (non-Spark) using the default Delta reader"}
+      - {id: c, text: "Direct Lake"}
+      - {id: d, text: "Fabric Spark Runtime 2.0"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Runtime 2.0 writes deletion vectors by default, and Python notebooks do not support deletion vectors."}
+      - {id: r2, text: "Python notebooks cannot read OneLake."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The SQL analytics endpoint supports deletion vectors."
+      - answer: c
+        feedback: "Direct Lake supports deletion vectors."
+      - answer: d
+        feedback: "The writer's own runtime supports everything it writes."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Python notebooks read OneLake. Deletion vectors are the problem."
+    hints:
+      - "Which table feature does Runtime 2.0 add by default?"
+      - "Deletion vectors."
+      - "Which reader lacks them?"
+    explanation: |
+      Runtime 2.0 writes reader 3, writer 7 with deletion vectors. Python notebooks do not support them.
+
+  - id: C5-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: sql
+    prompt: |
+      Inspect a table's protocol versions and features before sharing it.
+    template: |
+      [[g1]] DETAIL gold.events;
+    gaps:
+      g1: {accepted: [DESCRIBE], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: SHOW}
+        feedback: "SHOW TBLPROPERTIES lists properties. DESCRIBE DETAIL shows protocol versions and table features."
+    hints:
+      - "The Delta command that returns one row of table details."
+      - "DESCRIBE ..."
+      - "`DESCRIBE`."
+    explanation: |
+      `DESCRIBE DETAIL` returns minReaderVersion, minWriterVersion and the table features.
+
+  - id: C5-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `unsupported(reader: str, features: set[str]) -> list[str]` using this support table from the lesson. Return the table's features the reader does not support, sorted. Raise `KeyError` for an unknown reader.
+
+      - `spark_2_0`: supports all of `deletion_vectors`, `column_mapping_name`, `column_mapping_id`, `timestamp_ntz`, `liquid_clustering`.
+      - `sql_endpoint`: all except `column_mapping_id` and `timestamp_ntz`.
+      - `direct_lake`: all except `timestamp_ntz`.
+      - `python_notebook`: only `timestamp_ntz`.
+    starter: |
+      def unsupported(reader, features):
+          return []
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: unsupported
+          typed: true
+          docstring: true
+          message: "Give `unsupported` type hints and a docstring."
+      tests:
+        - id: sql
+          code: |
+            assert unsupported("sql_endpoint", {"deletion_vectors", "timestamp_ntz", "column_mapping_id"}) == ["column_mapping_id", "timestamp_ntz"]
+          message: "The SQL endpoint lacks column mapping id mode and TIMESTAMP_NTZ."
+        - id: others
+          code: |
+            assert unsupported("direct_lake", {"timestamp_ntz", "liquid_clustering"}) == ["timestamp_ntz"]
+            assert unsupported("python_notebook", {"deletion_vectors", "timestamp_ntz"}) == ["deletion_vectors"]
+            assert unsupported("spark_2_0", {"deletion_vectors", "timestamp_ntz"}) == []
+          message: "Check each reader against its supported set."
+        - id: unknown
+          code: |
+            try:
+                unsupported("excel", {"deletion_vectors"})
+            except KeyError:
+                pass
+            else:
+                raise AssertionError("unknown reader accepted")
+          message: "Unknown readers must raise KeyError."
+    solution: |
+      ALL_FEATURES = frozenset(
+          {"deletion_vectors", "column_mapping_name", "column_mapping_id", "timestamp_ntz", "liquid_clustering"}
+      )
+      SUPPORTED: dict[str, frozenset[str]] = {
+          "spark_2_0": ALL_FEATURES,
+          "sql_endpoint": ALL_FEATURES - {"column_mapping_id", "timestamp_ntz"},
+          "direct_lake": ALL_FEATURES - {"timestamp_ntz"},
+          "python_notebook": frozenset({"timestamp_ntz"}),
+      }
+
+
+      def unsupported(reader: str, features: set[str]) -> list[str]:
+          """Table features a Fabric reader does not support.
+
+          Raises:
+              KeyError: For an unknown reader.
+          """
+          return sorted(features - SUPPORTED[reader])
+    seeded_bugs:
+      - |
+        def unsupported(reader: str, features: set[str]) -> list[str]:
+            """Treats the SQL endpoint like Spark."""
+            supported = {
+                "spark_2_0": {"deletion_vectors", "column_mapping_name", "column_mapping_id", "timestamp_ntz", "liquid_clustering"},
+                "sql_endpoint": {"deletion_vectors", "column_mapping_name", "column_mapping_id", "timestamp_ntz", "liquid_clustering"},
+                "direct_lake": {"deletion_vectors", "column_mapping_name", "column_mapping_id", "liquid_clustering"},
+                "python_notebook": {"timestamp_ntz"},
+            }
+            return sorted(features - supported[reader])
+      - |
+        def unsupported(reader: str, features: set[str]) -> list[str]:
+            """Unknown readers support nothing, silently."""
+            supported = {
+                "spark_2_0": {"deletion_vectors", "column_mapping_name", "column_mapping_id", "timestamp_ntz", "liquid_clustering"},
+                "sql_endpoint": {"deletion_vectors", "column_mapping_name", "liquid_clustering"},
+                "direct_lake": {"deletion_vectors", "column_mapping_name", "column_mapping_id", "liquid_clustering"},
+                "python_notebook": {"timestamp_ntz"},
+            }
+            return sorted(features - supported.get(reader, set()))
+    wrong_answers:
+      - answer: |
+          def unsupported(reader: str, features: set[str]) -> list[str]:
+              """Unknown readers support nothing, silently."""
+              supported = {
+                  "spark_2_0": {"deletion_vectors", "column_mapping_name", "column_mapping_id", "timestamp_ntz", "liquid_clustering"},
+                  "sql_endpoint": {"deletion_vectors", "column_mapping_name", "liquid_clustering"},
+                  "direct_lake": {"deletion_vectors", "column_mapping_name", "column_mapping_id", "liquid_clustering"},
+                  "python_notebook": {"timestamp_ntz"},
+              }
+              return sorted(features - supported.get(reader, set()))
+        triggers: unknown
+    hints:
+      - "Store each reader's supported set."
+      - "Set difference gives what is missing."
+      - "Index the dict so unknown readers raise KeyError."
+    explanation: |
+      Encoding the matrix lets a release check refuse to publish a gold table with features its readers cannot handle.
+
+  - id: C5-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A Databricks team publishes a gold table that Fabric users read through the SQL endpoint and Direct Lake. Choose the table design.
+    slots:
+      - id: time
+        label: "Event time column"
+        options:
+          - {id: ts, text: "TIMESTAMP"}
+          - {id: ntz, text: "TIMESTAMP_NTZ"}
+        answer: ts
+      - id: mapping
+        label: "Column mapping"
+        options:
+          - {id: name_mode, text: "None, or name mode if renames are needed"}
+          - {id: id_mode, text: "id mode"}
+        answer: name_mode
+      - id: gate
+        label: "Before each release"
+        options:
+          - {id: check, text: "Check DESCRIBE DETAIL features against the readers' support"}
+          - {id: trust, text: "Trust that Delta is an open format"}
+        answer: check
+    model_answer: |
+      - TIMESTAMP is supported by both readers. TIMESTAMP_NTZ is not.
+      - Column mapping in id mode is not supported by the SQL endpoint.
+      - A feature check before release catches changes a Databricks upgrade introduces.
+    wrong_answers:
+      - answer: {time: ntz}
+        feedback: "Neither the SQL endpoint nor Direct Lake supports TIMESTAMP_NTZ."
+      - answer: {mapping: id_mode}
+        feedback: "The SQL analytics endpoint does not support column mapping in id mode."
+      - answer: {gate: trust}
+        feedback: "Open format does not mean every reader supports every feature."
+    hints:
+      - "Which readers need this table?"
+      - "Which features do they lack?"
+      - "Check before release."
+    explanation: |
+      Design for the readers that matter and check features on every release.
+
+recap:
+  - front: "Delta interoperability rule"
+    back: "Every reader must support every feature the writer put in the table."
+  - front: "TIMESTAMP_NTZ in Fabric"
+    back: "Spark yes. SQL analytics endpoint and Direct Lake no."
+  - front: "Runtime 2.0 default table protocol"
+    back: "Reader 3, writer 7, deletion vectors on. Python notebooks cannot read deletion vectors."
+  - front: "Check a table's features"
+    back: "DESCRIBE DETAIL: minReaderVersion, minWriterVersion, table features."
+
+claims:
+  - claim: "Feature support matrix for deletion vectors, column mapping, TIMESTAMP_NTZ and liquid clustering across Spark runtimes, SQL analytics endpoint, Direct Lake and Python notebooks; Runtime 2.0 writes reader 3, writer 7 with deletion vectors; V2 checkpoints, identity columns writing, Lakeflow Spark Declarative Pipelines and Delta 4.x features outside Spark are limitations."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/delta-lake-interoperability (updated 2026-05-08)"

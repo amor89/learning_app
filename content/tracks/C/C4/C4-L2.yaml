@@ -1,0 +1,283 @@
+id: C4-L2
+title: Incremental copy with a watermark, or with CDC
+
+concept: |
+  A **Copy job** copies data in one of two modes. **Full copy** moves everything on every run. **Incremental copy** moves everything on the first run, then only new or changed data. The job tracks the state of the last successful run itself (Microsoft Learn, checked September 2026).
+
+  Incremental copy works in one of two ways:
+
+  - **Watermark.** You pick an incremental column, such as a `ROWVERSION`, a datetime, a date or an increasing integer. Each subsequent load copies rows whose value is **larger than any value copied before**.
+  - **CDC.** If change data capture is enabled on the source database, the job reads its change stream and copies every insert, update and delete since the last run. You do not choose a column.
+
+  The watermark method has two blind spots, and both follow from "larger than":
+
+  - It **cannot see deletes**. A deleted row simply stops appearing, and the destination keeps it.
+  - It **misses late rows**. A row committed after the run, with a watermark value at or below the one already copied, is never picked up. A `modified_at` set by the application clock, or several rows written in the same second, causes this.
+
+  Prefer CDC when you need deletes, or a `ROWVERSION` column, which the database increments on every change. Microsoft also lets you reset incremental copy to a full copy, for the whole job or per table, to recover.
+
+  Choose the **update method** for the destination on purpose. The default is **Append**, which keeps full history, and appends every changed row again as a new row. **Merge** updates existing rows by key (the primary key by default), **Overwrite** replaces the data, and **SCD Type 2** keeps versioned history. For a silver table that must hold one row per key, choose Merge.
+
+why_it_matters: |
+  An order table was copied incrementally on `modified_at`, set by the ordering app. At 23:59:59 one batch committed after the nightly run had read up to 23:59:59. Those rows carried the same timestamp as the last copied row, so they were never picked up. Finance found 212 missing orders at month end. CDC, or a `ROWVERSION` column, would have caught them.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def next_batch(rows, last_wm):
+          batch = [r for r in rows if r["modified_at"] >= last_wm]
+          return batch, max(r["modified_at"] for r in batch)
+    annotations:
+      - find: 'batch = [r for r in rows if r["modified_at"] >= last_wm]'
+        note: ">= re-copies the last run's boundary rows every time, which Append turns into duplicates."
+      - find: 'return batch, max(r["modified_at"] for r in batch)'
+        note: "Fails with ValueError on a run with no new rows."
+  strong:
+    code: |
+      Row = dict[str, int]
+
+
+      def next_batch(rows: list[Row], last_wm: int | None) -> tuple[list[Row], int | None]:
+          """Rows with a watermark above last_wm, and the new watermark."""
+          batch = [r for r in rows if last_wm is None or r["rv"] > last_wm]
+          if not batch:
+              return [], last_wm
+          return batch, max(r["rv"] for r in batch)
+    annotations:
+      - find: 'batch = [r for r in rows if last_wm is None or r["rv"] > last_wm]'
+        note: "Strictly greater, as Copy job does, on a ROWVERSION-style column."
+      - find: "return [], last_wm"
+        note: "An empty run keeps the old watermark instead of failing."
+  takeaway: |
+    Watermarks copy rows above the last value seen: no deletes, no late rows. Use CDC or a ROWVERSION column, and Merge for one row per key.
+
+exercises:
+  - id: C4-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A Copy job uses watermark-based incremental copy on `modified_at`. A row is deleted in the source. What happens in the destination?
+    options:
+      - {id: a, text: "The row is deleted on the next run."}
+      - {id: b, text: "Nothing. Watermark-based incremental copy cannot detect deletes."}
+      - {id: c, text: "The row is marked with a soft-delete flag."}
+      - {id: d, text: "The job fails until you reset it."}
+    answer: b
+    reasons:
+      - {id: r1, text: "A watermark only finds rows with a larger value. A deleted row has no value to find."}
+      - {id: r2, text: "Deletes are never supported by Copy job."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That needs CDC, which captures delete events."
+      - answer: c
+        feedback: "Soft deletes come from CDC with SCD Type 2. A watermark sees nothing."
+      - answer: d
+        feedback: "The job succeeds. The deleted row just stays in the destination."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. CDC-based incremental copy does replicate deletes."
+    hints:
+      - "What does a watermark look for?"
+      - "Does a deleted row have a new value?"
+      - "CDC captures deletes."
+    explanation: |
+      Watermarks only see rows that exist with a larger value. Use CDC when deletes matter.
+
+  - id: C4-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      Run 1 copied up to watermark 105. A late row with `rv` 104 commits afterwards. What does run 2 copy?
+    code: |
+      rows = [{"id": 1, "rv": 101}, {"id": 2, "rv": 105}, {"id": 3, "rv": 104}, {"id": 4, "rv": 107}]
+      last_wm = 105
+      batch = [r["id"] for r in rows if r["rv"] > last_wm]
+      print(batch)
+    answer: "[4]"
+    wrong_answers:
+      - answer: "[3, 4]"
+        feedback: "Row 3 has rv 104, below the watermark 105, so it is never copied. That is the late-row blind spot."
+    hints:
+      - "Which rows have rv above 105?"
+      - "Where does row 3 fall?"
+      - "Below the watermark."
+    explanation: |
+      Only row 4 is copied. Row 3 is lost for good unless you reset to a full copy, which is why commit-order columns such as ROWVERSION, or CDC, are safer.
+
+  - id: C4-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the Copy job settings for a silver table that must hold one current row per `order_id` and reflect source deletes.
+    template: |
+      Incremental method: [[g1]]
+      Update method: [[g2]]
+    gaps:
+      g1: {accepted: [CDC], case_sensitive: false}
+      g2: {accepted: [Merge], case_sensitive: false}
+    wrong_answers:
+      - answer: {g2: Append}
+        feedback: "Append adds each changed row again, so a key appears many times."
+      - answer: {g1: Watermark}
+        feedback: "A watermark cannot see deletes."
+    hints:
+      - "Which method captures deletes?"
+      - "Which update method keeps one row per key?"
+      - "`CDC` and `Merge`."
+    explanation: |
+      CDC replicates inserts, updates and deletes. Merge keeps one row per key.
+
+  - id: C4-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `next_batch(rows, last_wm)` for a hand-built incremental load that behaves like Copy job's watermark method. `rows` is a list of dicts with an integer `rv`. `last_wm` is `None` before the first run. Return `(batch, new_wm)`: rows with `rv` strictly greater than `last_wm` (all rows when `last_wm` is `None`), and the largest `rv` in the batch. On an empty batch return `([], last_wm)`.
+    starter: |
+      def next_batch(rows, last_wm):
+          batch = [r for r in rows if r["rv"] >= last_wm]
+          return batch, max(r["rv"] for r in batch)
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: next_batch
+          typed: true
+          docstring: true
+          message: "Give `next_batch` type hints and a docstring."
+      tests:
+        - id: first_run
+          code: |
+            rows = [{"rv": 3}, {"rv": 1}]
+            assert next_batch(rows, None) == (rows, 3)
+          message: "With last_wm None, copy every row and return the largest rv."
+        - id: strictly_greater
+          code: |
+            rows = [{"rv": 5}, {"rv": 6}, {"rv": 7}]
+            batch, wm = next_batch(rows, 6)
+            assert batch == [{"rv": 7}] and wm == 7
+          message: "Copy only rows strictly greater than the watermark. >= re-copies the boundary row."
+        - id: empty
+          code: |
+            assert next_batch([{"rv": 2}], 9) == ([], 9)
+            assert next_batch([], None) == ([], None)
+          message: "An empty batch keeps the previous watermark and must not raise."
+    solution: |
+      Row = dict[str, int]
+
+
+      def next_batch(rows: list[Row], last_wm: int | None) -> tuple[list[Row], int | None]:
+          """Rows above the watermark, and the new watermark.
+
+          Args:
+              rows: Source rows, each with an integer rv.
+              last_wm: Largest rv copied so far, or None before the first run.
+
+          Returns:
+              The rows to copy and the watermark to store.
+          """
+          batch = [r for r in rows if last_wm is None or r["rv"] > last_wm]
+          if not batch:
+              return [], last_wm
+          return batch, max(r["rv"] for r in batch)
+    seeded_bugs:
+      - |
+        Row = dict[str, int]
+
+
+        def next_batch(rows: list[Row], last_wm: int | None) -> tuple[list[Row], int | None]:
+            """Uses >=."""
+            batch = [r for r in rows if last_wm is None or r["rv"] >= last_wm]
+            if not batch:
+                return [], last_wm
+            return batch, max(r["rv"] for r in batch)
+      - |
+        Row = dict[str, int]
+
+
+        def next_batch(rows: list[Row], last_wm: int | None) -> tuple[list[Row], int | None]:
+            """Fails on empty batches."""
+            batch = [r for r in rows if last_wm is None or r["rv"] > last_wm]
+            return batch, max(r["rv"] for r in batch)
+    wrong_answers:
+      - answer: |
+          Row = dict[str, int]
+
+
+          def next_batch(rows: list[Row], last_wm: int | None) -> tuple[list[Row], int | None]:
+              """Uses >=."""
+              batch = [r for r in rows if last_wm is None or r["rv"] >= last_wm]
+              if not batch:
+                  return [], last_wm
+              return batch, max(r["rv"] for r in batch)
+        triggers: strictly_greater
+    hints:
+      - "Handle last_wm None first."
+      - "Strictly greater than, to avoid re-copying the boundary."
+      - "Return ([], last_wm) when nothing is new."
+    explanation: |
+      Strictly greater avoids duplicates, and the empty-run guard keeps the watermark stable. The late-row gap remains, which is why CDC or ROWVERSION matters.
+
+  - id: C4-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Configure incremental copy of an orders table into silver. Orders are updated and sometimes deleted. The source has CDC enabled.
+    slots:
+      - id: method
+        label: "Incremental method"
+        options:
+          - {id: cdc, text: "CDC"}
+          - {id: wm_modified, text: "Watermark on modified_at"}
+        answer: cdc
+      - id: update
+        label: "Update method"
+        options:
+          - {id: merge, text: "Merge on order_id"}
+          - {id: append, text: "Append (default)"}
+        answer: merge
+      - id: recovery
+        label: "After an outage caused missed changes"
+        options:
+          - {id: reset, text: "Reset incremental copy to a full copy for the affected table"}
+          - {id: wait, text: "Wait for the next run to catch up"}
+        answer: reset
+    model_answer: |
+      - CDC captures inserts, updates and deletes, with no watermark blind spots.
+      - Merge keeps one current row per order.
+      - Reset to a full copy for the table when you know changes were missed.
+    wrong_answers:
+      - answer: {method: wm_modified}
+        feedback: "A watermark misses deletes and late rows."
+      - answer: {update: append}
+        feedback: "Append adds each changed order again, breaking one row per key."
+      - answer: {recovery: wait}
+        feedback: "Changes below the stored state are not picked up by later runs."
+    hints:
+      - "Deletes matter here."
+      - "One row per key."
+      - "How do you recover missed changes?"
+    explanation: |
+      CDC plus Merge keeps silver in step with the source, and a per-table reset repairs known gaps.
+
+recap:
+  - front: "Copy job incremental copy"
+    back: "First run copies everything. Later runs copy new or changed data. State is tracked by the job."
+  - front: "Watermark blind spots"
+    back: "Cannot see deletes. Misses late rows at or below the stored watermark."
+  - front: "When to use CDC"
+    back: "When deletes must replicate, or changes arrive out of order."
+  - front: "Copy job update methods"
+    back: "Append (default), Merge, Overwrite, SCD Type 2. Merge for one row per key."
+
+claims:
+  - claim: "Copy job modes, watermark column types, strictly larger watermark rule, CDC captures deletes, watermark cannot detect deletes, reset to full copy per job or table."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-factory/incremental-copy-job (updated 2026-09-15) and .../what-is-copy-job (updated 2026-09-17)"
+  - claim: "Update methods Append (default), Merge (primary key by default), Overwrite and SCD Type 2."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-factory/what-is-copy-job (updated 2026-09-17)"

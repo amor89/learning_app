@@ -1,0 +1,295 @@
+id: C6-L1
+title: Star schemas for semantic models
+
+concept: |
+  A Power BI semantic model works best on a **star schema**: fact tables surrounded by dimension tables. Microsoft's Power BI guidance (checked September 2026) defines the parts:
+
+  - **Fact tables** store observations or events: survey responses, orders, balances. They hold dimension key columns and numeric measure columns. The dimension keys decide the fact table's **grain**, for example one row per respondent per wave per brand.
+  - **Dimension tables** describe business entities: respondent, brand, region, date. Each has a unique key column and descriptive columns used to filter and group. A **date dimension** belongs in almost every model.
+
+  Relationships run **one-to-many** from each dimension to the fact table, and filters flow from the dimension to the fact. Microsoft recommends that you **minimise bi-directional relationships**, which can slow queries and confuse report users with unexpected filtering. Many-to-many relationships between facts and dimensions usually mean the grain is unclear.
+
+  Build the star in the gold layer, not in the model:
+
+  - Compute derived columns such as age bands or weighted flags in Spark or SQL, in gold tables. Direct Lake on SQL analytics endpoints does not support calculated columns, and on OneLake they are in preview with restrictions. Materialised calculated columns in Import models slow refresh.
+  - Give every fact table a clear grain in its docstring and table comment (lesson A2-L3).
+  - Use surrogate or natural keys consistently, and check they are unique in each dimension (lesson C2-L2 showed warehouse keys are not enforced).
+
+  A good model is boring: one fact table per grain, conformed dimensions shared between facts, single-direction one-to-many relationships, and measures that do the arithmetic (lesson C6-L2).
+
+why_it_matters: |
+  A brand tracker model joined a respondent table and a brand-awareness table with a bi-directional many-to-many relationship, because both held respondent_id and brand. Selecting a brand in a slicer filtered respondents, which filtered back to every brand those respondents had mentioned. Awareness for small brands showed as much higher than the survey measured. A single fact table at respondent-brand grain with one-way dimensions returned the correct figures.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      respondents (respondent_id, age, region, weight, brand_list)
+      brand_awareness (respondent_id, brand, aware)
+      Relationship: respondents[respondent_id] <-> brand_awareness[respondent_id], many-to-many, both directions
+      Calculated column: respondents[age_band] = SWITCH(TRUE(), ...)
+    annotations:
+      - find: "respondents (respondent_id, age, region, weight, brand_list)"
+        note: "A list column mixes grains: one respondent, many brands."
+      - find: "Relationship: respondents[respondent_id] <-> brand_awareness[respondent_id], many-to-many, both directions"
+        note: "Bi-directional many-to-many: filters flow both ways and inflate results."
+      - find: "Calculated column: respondents[age_band] = SWITCH(TRUE(), ...)"
+        note: "Derived column in the model. Not supported in Direct Lake on SQL endpoints."
+  strong:
+    code: |
+      fact_awareness (respondent_key, brand_key, date_key, region_key, aware, weight)   grain: respondent x brand x wave
+      dim_respondent (respondent_key, age_band, gender)
+      dim_brand (brand_key, brand, category)
+      dim_date (date_key, date, wave, month)
+      dim_region (region_key, region, nation)
+      Relationships: each dim[key] 1 -> * fact_awareness[key], single direction
+    annotations:
+      - find: "fact_awareness (respondent_key, brand_key, date_key, region_key, aware, weight)   grain: respondent x brand x wave"
+        note: "One fact table with a stated grain."
+      - find: "dim_respondent (respondent_key, age_band, gender)"
+        note: "age_band computed in gold, not in the model."
+      - find: "Relationships: each dim[key] 1 -> * fact_awareness[key], single direction"
+        note: "Filters flow one way, from dimensions to facts."
+  takeaway: |
+    Facts with a stated grain, dimensions with unique keys, one-to-many single-direction relationships, and derived columns computed upstream.
+
+exercises:
+  - id: C6-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      In a star schema, what decides the grain of a fact table?
+    options:
+      - {id: a, text: "The number of measure columns"}
+      - {id: b, text: "The dimension keys it holds, and their values"}
+      - {id: c, text: "The number of rows"}
+      - {id: d, text: "The storage mode"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Dimension key columns set the dimensionality, and their values set the granularity."}
+      - {id: r2, text: "Grain is chosen in Power BI settings."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Measures are the numbers at that grain. They do not define it."
+      - answer: c
+        feedback: "Row count follows from the grain and the data. It does not define it."
+      - answer: d
+        feedback: "Import, DirectQuery or Direct Lake changes how data is read, not the grain."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Grain comes from the data design."
+    hints:
+      - "What does one row mean?"
+      - "Which columns say which entities it concerns?"
+      - "The dimension keys."
+    explanation: |
+      One row per combination of the dimension keys: that is the grain.
+
+  - id: C6-L1-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      What does Microsoft's Power BI guidance recommend about bi-directional relationships?
+    options:
+      - {id: a, text: "Use them by default so slicers work everywhere."}
+      - {id: b, text: "Minimise them. They can hurt performance and confuse report users."}
+      - {id: c, text: "Use them only on date tables."}
+      - {id: d, text: "They are not supported in Direct Lake."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Bi-directional filters can slow queries and filter in ways users do not expect."}
+      - {id: r2, text: "They are deprecated."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The guidance is the opposite: minimise them."
+      - answer: c
+        feedback: "Date tables filter facts one way, like other dimensions."
+      - answer: d
+        feedback: "The concern is behaviour and performance, not support."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. They still exist. Use them sparingly and on purpose."
+    hints:
+      - "Which way should filters flow in a star?"
+      - "Dimension to fact."
+      - "Bi-directional breaks that."
+    explanation: |
+      Single-direction one-to-many relationships keep filtering predictable.
+
+  - id: C6-L1-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the steps to build a model for a brand tracker.
+    items:
+      - {id: grain, text: "State the fact table's grain"}
+      - {id: dims, text: "Build dimension tables with unique keys in gold"}
+      - {id: fact, text: "Build the fact table with dimension keys and measure columns"}
+      - {id: rels, text: "Create one-to-many, single-direction relationships"}
+      - {id: measures, text: "Write DAX measures"}
+    answer: [grain, dims, fact, rels, measures]
+    wrong_answers:
+      - answer: [fact, grain, dims, rels, measures]
+        feedback: "Decide the grain before you build the fact table, or you will rebuild it."
+      - answer: [grain, dims, fact, measures, rels]
+        feedback: "Measures depend on relationships to filter correctly."
+    hints:
+      - "What must be decided first?"
+      - "Dimensions provide keys to facts."
+      - "Relationships before measures."
+    explanation: |
+      Grain, dimensions, facts, relationships, then measures.
+
+  - id: C6-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `model_warnings(relationships: list[dict[str, str]]) -> list[str]` for a model review. Each relationship has `from_table`, `to_table`, `cardinality` (`"one_to_many"` or `"many_to_many"`) and `direction` (`"single"` or `"both"`). Return, in input order, a warning for each problem:
+
+      - `"<from>-<to>: many-to-many"` for a many-to-many relationship,
+      - `"<from>-<to>: bi-directional"` for direction both.
+
+      A relationship with both problems produces both warnings, many-to-many first.
+    starter: |
+      def model_warnings(relationships):
+          return []
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: model_warnings
+          typed: true
+          docstring: true
+          message: "Give `model_warnings` type hints and a docstring."
+      tests:
+        - id: clean
+          code: |
+            rels = [{"from_table": "dim_brand", "to_table": "fact_awareness", "cardinality": "one_to_many", "direction": "single"}]
+            assert model_warnings(rels) == []
+          message: "A one-to-many single-direction relationship has no warnings."
+        - id: problems
+          code: |
+            rels = [
+                {"from_table": "respondents", "to_table": "brand_awareness", "cardinality": "many_to_many", "direction": "both"},
+                {"from_table": "dim_date", "to_table": "fact_awareness", "cardinality": "one_to_many", "direction": "both"},
+            ]
+            assert model_warnings(rels) == [
+                "respondents-brand_awareness: many-to-many",
+                "respondents-brand_awareness: bi-directional",
+                "dim_date-fact_awareness: bi-directional",
+            ]
+          message: "Flag many-to-many and bi-directional relationships, in order."
+    solution: |
+      def model_warnings(relationships: list[dict[str, str]]) -> list[str]:
+          """Warnings for relationships that break star-schema guidance.
+
+          Args:
+              relationships: Dicts with from_table, to_table, cardinality and direction.
+
+          Returns:
+              Warning strings in input order.
+          """
+          warnings = []
+          for rel in relationships:
+              name = f"{rel['from_table']}-{rel['to_table']}"
+              if rel["cardinality"] == "many_to_many":
+                  warnings.append(f"{name}: many-to-many")
+              if rel["direction"] == "both":
+                  warnings.append(f"{name}: bi-directional")
+          return warnings
+    seeded_bugs:
+      - |
+        def model_warnings(relationships: list[dict[str, str]]) -> list[str]:
+            """Only one warning per relationship."""
+            warnings = []
+            for rel in relationships:
+                name = f"{rel['from_table']}-{rel['to_table']}"
+                if rel["cardinality"] == "many_to_many":
+                    warnings.append(f"{name}: many-to-many")
+                elif rel["direction"] == "both":
+                    warnings.append(f"{name}: bi-directional")
+            return warnings
+    wrong_answers:
+      - answer: |
+          def model_warnings(relationships: list[dict[str, str]]) -> list[str]:
+              """Only one warning per relationship."""
+              warnings = []
+              for rel in relationships:
+                  name = f"{rel['from_table']}-{rel['to_table']}"
+                  if rel["cardinality"] == "many_to_many":
+                      warnings.append(f"{name}: many-to-many")
+                  elif rel["direction"] == "both":
+                      warnings.append(f"{name}: bi-directional")
+              return warnings
+        triggers: problems
+    hints:
+      - "Loop over relationships and build a name."
+      - "Two independent checks, not elif."
+      - "Append in the order given."
+    explanation: |
+      Independent checks report every problem. A review script like this runs on models exported with tools such as Tabular Editor.
+
+  - id: C6-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A Direct Lake model on the SQL analytics endpoint needs an age band on respondents. Choose where it is built.
+    slots:
+      - id: where
+        label: "Where age_band is computed"
+        options:
+          - {id: gold, text: "In the gold dim_respondent table, in Spark or SQL"}
+          - {id: calc_col, text: "A calculated column in the semantic model"}
+        answer: gold
+      - id: grain
+        label: "Awareness fact table grain"
+        options:
+          - {id: rbw, text: "Respondent x brand x wave"}
+          - {id: resp, text: "Respondent, with brands in a list column"}
+        answer: rbw
+      - id: rel
+        label: "Relationship from dim_respondent to the fact"
+        options:
+          - {id: single, text: "One-to-many, single direction"}
+          - {id: both, text: "One-to-many, both directions"}
+        answer: single
+    model_answer: |
+      - Compute age_band upstream: Direct Lake on SQL endpoints does not support calculated columns.
+      - One row per respondent, brand and wave gives a clean fact grain.
+      - Single-direction relationships keep filters predictable.
+    wrong_answers:
+      - answer: {where: calc_col}
+        feedback: "Calculated columns are not supported in Direct Lake on SQL analytics endpoints."
+      - answer: {grain: resp}
+        feedback: "A list column mixes grains and cannot be filtered by brand."
+      - answer: {rel: both}
+        feedback: "Bi-directional filtering is rarely needed and can inflate results."
+    hints:
+      - "What does Direct Lake on SQL support?"
+      - "What does one row mean?"
+      - "Which way should filters flow?"
+    explanation: |
+      Do the modelling work in gold, keep the grain clean, and filter one way.
+
+recap:
+  - front: "Star schema parts"
+    back: "Fact tables (keys and measures, with a grain) and dimension tables (unique key, descriptive columns)."
+  - front: "Relationship guidance"
+    back: "One-to-many, single direction. Minimise bi-directional relationships."
+  - front: "Calculated columns and Direct Lake"
+    back: "Not supported on SQL endpoints, preview on OneLake. Compute derived columns in gold."
+  - front: "Grain"
+    back: "Set by the fact table's dimension keys. State it in the table's docstring and comment."
+
+claims:
+  - claim: "Fact and dimension definitions; dimension keys set dimensionality and their values granularity."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/power-bi/guidance/star-schema"
+  - claim: "Microsoft recommends minimising bi-directional relationships because of performance and confusing experiences."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/power-bi/guidance/relationships-bidirectional-filtering"
+  - claim: "Calculated columns: Direct Lake on SQL analytics endpoints no; Direct Lake on OneLake user-context only, preview."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/direct-lake-overview (updated 2026-09-02)"

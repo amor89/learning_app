@@ -1,0 +1,308 @@
+id: C4-L3
+title: Pipelines that fail fast, retry sensibly and alert
+
+concept: |
+  A Data Factory **pipeline** runs activities: Copy job, notebook, stored procedure, Dataflow, If Condition, ForEach, Until, and more. By default a pipeline holds up to 120 activities. Three settings on each activity decide how a failure behaves (Microsoft Learn, checked September 2026):
+
+  - **Timeout.** How long an activity may run before it is stopped. The default is **12 hours**, and the maximum is seven days, written `D.HH:MM:SS`. A notebook that normally takes 10 minutes and hangs will hold its slot, and its capacity, for 12 hours unless you lower this.
+  - **Retry.** Retries happen only if you enable them. The retry count then defaults to 1, with **30 seconds** between attempts. Retry steps that fail for passing reasons, such as a busy source or a network drop. Do not retry a step that failed because its data is wrong. It will fail again, later.
+  - **Dependency branches.** Each activity connects to the next through a condition: **Upon Success**, **Upon Failure**, **Upon Completion** (either way) or **Upon Skip**. Put alerts and clean-up on Upon Failure. Upon Completion runs even when the step succeeded.
+
+  **Parameters and expressions** keep one pipeline reusable across sources and environments. Expressions start with `@`: `@pipeline().parameters.wave`. Inside a string, `@{...}` interpolates: `"landing/@{pipeline().parameters.wave}/"`. The result of interpolation is always a **string**, so `"@{pipeline().parameters.max_rows}"` passes text, not a number. When a setting needs a number, use the bare expression `@pipeline().parameters.max_rows`.
+
+  Keep business logic out of the pipeline. Transformations belong in notebooks and SQL, where they can be tested (lesson A9-L1). The pipeline decides order, retries and alerts.
+
+why_it_matters: |
+  A nightly pipeline ran a 10-minute notebook that sometimes hung on a locked source. With the default 12-hour timeout and no failure branch, each hang held its capacity until mid-morning. Downstream reports showed yesterday's data, and nobody was told. A 30-minute timeout, one retry and an Upon Failure email would have raised the alarm at 02:30 instead of 10:00.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Activity: nb_silver_orders (notebook)
+        Timeout: default
+        Retries: not enabled
+      Activity: nb_gold_sales  depends on nb_silver_orders: Upon Completion
+      Activity: send_failure_email  depends on nb_gold_sales: Upon Completion
+    annotations:
+      - find: "Timeout: default"
+        note: "12 hours for a 10-minute job: a hang goes unnoticed until morning."
+      - find: "Activity: nb_gold_sales  depends on nb_silver_orders: Upon Completion"
+        note: "Gold runs even when silver failed, publishing stale or partial data."
+      - find: "Activity: send_failure_email  depends on nb_gold_sales: Upon Completion"
+        note: "The 'failure' email is sent every night, so people learn to ignore it."
+  strong:
+    code: |
+      Activity: nb_silver_orders (notebook)
+        Timeout: 0.00:30:00
+        Retries: enabled, 1 retry, 60 seconds apart
+      Activity: nb_gold_sales  depends on nb_silver_orders: Upon Success
+      Activity: send_failure_email  depends on nb_silver_orders: Upon Failure
+      Activity: send_failure_email_gold  depends on nb_gold_sales: Upon Failure
+    annotations:
+      - find: "Timeout: 0.00:30:00"
+        note: "Three times the normal run time: a hang fails within half an hour."
+      - find: "Activity: nb_gold_sales  depends on nb_silver_orders: Upon Success"
+        note: "Gold runs only on good silver."
+      - find: "Activity: send_failure_email  depends on nb_silver_orders: Upon Failure"
+        note: "Alerts fire only when something failed."
+  takeaway: |
+    Set timeouts near the real run time, retry only transient failures, chain on Upon Success and alert on Upon Failure.
+
+exercises:
+  - id: C4-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You leave an activity's timeout at its default. How long can it run before Fabric stops it?
+    options:
+      - {id: a, text: "30 minutes"}
+      - {id: b, text: "1 hour"}
+      - {id: c, text: "12 hours"}
+      - {id: d, text: "7 days"}
+    answer: c
+    reasons:
+      - {id: r1, text: "The documented default timeout is 12 hours. Seven days is the maximum you can set."}
+      - {id: r2, text: "Timeouts match the capacity's pause schedule."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "30 seconds is the default retry interval. The default timeout is 12 hours."
+      - answer: d
+        feedback: "Seven days is the maximum, not the default."
+      - answer: b
+        feedback: "The default is 12 hours."
+      - answer: c|r2
+        feedback: "Right answer, wrong reason. Timeouts are unrelated to capacity pausing."
+    hints:
+      - "It is much longer than most jobs."
+      - "Half a day."
+      - "12 hours."
+    explanation: |
+      12 hours by default. Set each activity's timeout close to its real run time, with some headroom.
+
+  - id: C4-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      An alert activity is attached to a notebook with **Upon Completion**. When does it run?
+    options:
+      - {id: a, text: "Only when the notebook fails"}
+      - {id: b, text: "Only when the notebook succeeds"}
+      - {id: c, text: "Whether the notebook succeeds or fails"}
+      - {id: d, text: "Only when the notebook is skipped"}
+    answer: c
+    reasons:
+      - {id: r1, text: "Upon Completion runs after success or failure. Upon Failure is the failure-only branch."}
+      - {id: r2, text: "Completion means the capacity finished all jobs."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That is Upon Failure."
+      - answer: b
+        feedback: "That is Upon Success."
+      - answer: d
+        feedback: "That is Upon Skip."
+      - answer: c|r2
+        feedback: "Right answer, wrong reason. It refers to this activity finishing, either way."
+    hints:
+      - "Four branches: success, failure, completion, skip."
+      - "Completion is not a failure."
+      - "Either outcome."
+    explanation: |
+      A failure alert on Upon Completion fires every night. Use Upon Failure.
+
+  - id: C4-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Build a folder path from the pipeline parameter `wave`, and pass the numeric parameter `max_rows` as a number.
+    template: |
+      Folder path: landing/[[g1]]pipeline().parameters.wave}/
+      Max rows:    [[g2]]pipeline().parameters.max_rows
+    gaps:
+      g1: {accepted: ["@{"]}
+      g2: {accepted: ["@"]}
+    wrong_answers:
+      - answer: {g2: "@{"}
+        feedback: "String interpolation always returns a string. For a number, use the bare @ expression."
+    hints:
+      - "Inside a string, expressions are wrapped in @{ }."
+      - "A whole value that must stay a number starts with @ alone."
+      - "`@{` and `@`."
+    explanation: |
+      `@{...}` inside text interpolates to a string. A bare `@...` expression keeps the value's type.
+
+  - id: C4-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `parse_timeout(value: str) -> int` for a pipeline linter. It parses the `D.HH:MM:SS` format and returns the total seconds. Raise `ValueError` if the format is wrong, if hours are above 23 or minutes or seconds above 59, or if the total exceeds 7 days.
+    starter: |
+      def parse_timeout(value):
+          days, rest = value.split(".")
+          h, m, s = rest.split(":")
+          return int(days) * 86400 + int(h) * 3600 + int(m) * 60 + int(s)
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: parse_timeout
+          typed: true
+          docstring: true
+          message: "Give `parse_timeout` type hints and a docstring."
+      tests:
+        - id: values
+          code: |
+            assert parse_timeout("0.12:00:00") == 43200
+            assert parse_timeout("0.00:30:00") == 1800
+            assert parse_timeout("7.00:00:00") == 604800
+          message: "Convert days, hours, minutes and seconds to seconds."
+        - id: bad_format
+          code: |
+            for bad in ("12:00:00", "0.12:00", "a.00:00:00", "0.24:00:00", "0.00:60:00", ""):
+                try:
+                    parse_timeout(bad)
+                except ValueError:
+                    continue
+                raise AssertionError(bad)
+          message: "Reject a missing day part, missing fields, non-numbers and out-of-range hours or minutes."
+        - id: max
+          code: |
+            try:
+                parse_timeout("7.00:00:01")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("over seven days accepted")
+          message: "The maximum timeout is seven days."
+    solution: |
+      import re
+
+      TIMEOUT_PATTERN = re.compile(r"(\d+)\.(\d{2}):(\d{2}):(\d{2})")
+      MAX_SECONDS = 7 * 24 * 3600
+
+
+      def parse_timeout(value: str) -> int:
+          """Seconds in a pipeline activity timeout written as D.HH:MM:SS.
+
+          Raises:
+              ValueError: On a bad format, out-of-range fields, or more than seven days.
+          """
+          match = TIMEOUT_PATTERN.fullmatch(value)
+          if match is None:
+              raise ValueError(f"timeout must be D.HH:MM:SS, got {value!r}")
+          days, hours, minutes, seconds = (int(g) for g in match.groups())
+          if hours > 23 or minutes > 59 or seconds > 59:
+              raise ValueError(f"field out of range in {value!r}")
+          total = days * 86400 + hours * 3600 + minutes * 60 + seconds
+          if total > MAX_SECONDS:
+              raise ValueError("timeout exceeds the seven-day maximum")
+          return total
+    seeded_bugs:
+      - |
+        def parse_timeout(value: str) -> int:
+            """No range checks."""
+            days, rest = value.split(".")
+            h, m, s = rest.split(":")
+            return int(days) * 86400 + int(h) * 3600 + int(m) * 60 + int(s)
+      - |
+        import re
+
+
+        def parse_timeout(value: str) -> int:
+            """No seven-day cap."""
+            m = re.fullmatch(r"(\d+)\.(\d{2}):(\d{2}):(\d{2})", value)
+            if m is None:
+                raise ValueError(value)
+            d, h, mi, s = (int(g) for g in m.groups())
+            if h > 23 or mi > 59 or s > 59:
+                raise ValueError(value)
+            return d * 86400 + h * 3600 + mi * 60 + s
+    wrong_answers:
+      - answer: |
+          import re
+
+
+          def parse_timeout(value: str) -> int:
+              """No seven-day cap."""
+              m = re.fullmatch(r"(\d+)\.(\d{2}):(\d{2}):(\d{2})", value)
+              if m is None:
+                  raise ValueError(value)
+              d, h, mi, s = (int(g) for g in m.groups())
+              if h > 23 or mi > 59 or s > 59:
+                  raise ValueError(value)
+              return d * 86400 + h * 3600 + mi * 60 + s
+        triggers: max
+    hints:
+      - "A regular expression with fullmatch validates the shape."
+      - "Check each field's range."
+      - "Cap the total at 7 × 24 × 3600 seconds."
+    explanation: |
+      A linter that parses timeouts can flag every activity still on the 12-hour default, or set far above its normal run time.
+
+  - id: C4-L3-E5
+    type: spot_bug
+    difficulty: 4
+    language: text
+    prompt: |
+      This pipeline publishes gold tables even when silver fails. Tap the line that causes it, then rewrite the dependencies so gold runs only on success and an alert fires on failure.
+    code: |
+      Activity: nb_silver_orders
+        Timeout: 0.00:30:00
+      Activity: nb_gold_sales  depends on nb_silver_orders: Upon Completion
+      Activity: email_on_failure  depends on nb_silver_orders: Upon Failure
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: none
+      rules:
+        - id: gold_on_success
+          type: required
+          pattern: "nb_gold_sales\\s+depends on nb_silver_orders:\\s*Upon Success"
+          message: "Gold must depend on silver with Upon Success."
+        - id: no_completion_for_gold
+          type: forbidden
+          pattern: "nb_gold_sales\\s+depends on nb_silver_orders:\\s*Upon Completion"
+          message: "Upon Completion runs gold after a failed silver step."
+        - id: alert_kept
+          type: required
+          pattern: "email_on_failure\\s+depends on nb_silver_orders:\\s*Upon Failure"
+          message: "Keep the failure alert on Upon Failure."
+    fix_solution: |
+      Activity: nb_silver_orders
+        Timeout: 0.00:30:00
+      Activity: nb_gold_sales  depends on nb_silver_orders: Upon Success
+      Activity: email_on_failure  depends on nb_silver_orders: Upon Failure
+    wrong_answers:
+      - lines: [4]
+        feedback: "The alert is correctly on Upon Failure."
+      - lines: [2]
+        feedback: "A 30-minute timeout is sensible for a 10-minute notebook."
+    hints:
+      - "Which branch lets gold run after a failure?"
+      - "Completion means either outcome."
+      - "Use Upon Success."
+    explanation: |
+      Upon Completion runs gold after a failed silver, publishing stale or partial data. Chain data steps on Upon Success.
+
+recap:
+  - front: "Activity timeout default"
+    back: "12 hours, maximum seven days, format D.HH:MM:SS. Set it near the real run time."
+  - front: "Activity retries"
+    back: "Only when enabled. Count defaults to 1, interval 30 seconds. Retry transient failures only."
+  - front: "Dependency branches"
+    back: "Upon Success, Upon Failure, Upon Completion (either way), Upon Skip."
+  - front: "@{...} vs @..."
+    back: "@{...} inside text always yields a string. A bare @ expression keeps the value's type."
+
+claims:
+  - claim: "Activity timeout defaults to 12 hours with a seven-day maximum in D.HH:MM:SS; retries when enabled default to 1 with a 30-second interval; up to 120 activities per pipeline; UponSuccess, UponFailure, UponCompletion and UponSkip branches."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-factory/activity-overview (updated 2026-08-10)"
+  - claim: "Pipeline expressions use @pipeline().parameters; string interpolation with @{...} always returns a string."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-factory/expression-language (updated 2024-12-18)"

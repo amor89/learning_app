@@ -1,0 +1,297 @@
+id: C6-L3
+title: Direct Lake, framing and the fallback you did not plan
+
+concept: |
+  **Direct Lake** lets a semantic model read Delta tables in OneLake directly, loading only the columns a query needs into memory. It combines Import-like query speed with no copy of the data. A refresh does not reload data. It performs **framing**: it records which Delta table versions the model uses. Framing takes seconds, and afterwards queries see the data as of that frame. Automatic updates, a schedule or an API call can trigger framing.
+
+  There are two kinds (Microsoft Learn, updated September 2026):
+
+  - **Direct Lake on OneLake** reads Delta tables from one or more Fabric items. It never falls back to DirectQuery. If it cannot load data, the query fails.
+  - **Direct Lake on SQL analytics endpoints** reads one Fabric item through its endpoint. When it cannot load a table directly, it **falls back to DirectQuery**: for example when the table is a SQL view, or when the warehouse uses SQL-based granular access control. Fallback queries are slower.
+
+  The model property **Direct Lake behavior** controls fallback for the SQL kind:
+
+  - `Automatic` (default): silently fall back to DirectQuery. Reports keep working, more slowly.
+  - `DirectLakeOnly`: fail with an error instead. Use it in development to find fallbacks.
+  - `DirectQueryOnly`: always use DirectQuery, to measure the difference.
+
+  **Guardrails depend on the SKU.** For each table, Fabric limits Parquet files, row groups and rows. Over a guardrail, framing can fail (or, on the SQL kind, queries fall back). From Learn's table:
+
+  | SKU | Parquet files per table | Rows per table | Max memory |
+  |---|---|---|---|
+  | F2 to F32 | 1,000 | 300 million | 3 to 10 GB |
+  | F64 | 5,000 | 1.5 billion | 25 GB |
+  | F512 and above | 10,000 | 12 to 24 billion | 200 to 400 GB |
+
+  Small files hit the file guardrail first. Compact gold tables with `OPTIMIZE` (lesson A3-L3), and give Direct Lake tables V-Order (lesson C5-L2).
+
+why_it_matters: |
+  A sales model on an F32 capacity was fast in testing. After six months of hourly appends, the fact table held 2,400 small Parquet files, above the F32 guardrail of 1,000. The model used Direct Lake on the SQL endpoint with the Automatic behaviour, so queries quietly fell back to DirectQuery. Reports took 40 seconds instead of two. Nobody saw an error. A nightly `OPTIMIZE` kept the table at a few dozen files and restored Direct Lake.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Model: sales (Direct Lake on SQL analytics endpoint), behaviour: Automatic
+      Table fact_sales: 2,400 Parquet files, appended hourly, never optimised
+      Table v_sales_clean: SQL view over fact_sales
+      Capacity: F32
+    annotations:
+      - find: "Table fact_sales: 2,400 Parquet files, appended hourly, never optimised"
+        note: "Above the F32 guardrail of 1,000 files per table."
+      - find: "Table v_sales_clean: SQL view over fact_sales"
+        note: "A SQL view always forces DirectQuery fallback on the SQL kind."
+      - find: "Model: sales (Direct Lake on SQL analytics endpoint), behaviour: Automatic"
+        note: "Automatic hides both problems: queries silently fall back."
+  strong:
+    code: |
+      Model: sales (Direct Lake on SQL analytics endpoint), behaviour: DirectLakeOnly in dev, Automatic in prod
+      Table fact_sales: nightly OPTIMIZE, V-Order on, about 40 Parquet files
+      Table gold.sales_clean: Delta table written by Spark, replacing the SQL view
+      Capacity: F32, fact rows 120 million (limit 300 million)
+      Check: framing failures reviewed in refresh history each morning
+    annotations:
+      - find: "Model: sales (Direct Lake on SQL analytics endpoint), behaviour: DirectLakeOnly in dev, Automatic in prod"
+        note: "Development fails loudly on fallback. Production keeps working if one slips through."
+      - find: "Table gold.sales_clean: Delta table written by Spark, replacing the SQL view"
+        note: "Materialise the view's logic as a Delta table so Direct Lake reads it directly."
+      - find: "Capacity: F32, fact rows 120 million (limit 300 million)"
+        note: "Row count checked against the SKU's guardrail."
+  takeaway: |
+    Direct Lake stays fast when tables are Delta (not views), compact, within the SKU's guardrails, and fallback is made visible in development.
+
+exercises:
+  - id: C6-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      What does a refresh of a Direct Lake semantic model do?
+    options:
+      - {id: a, text: "Reloads all data into the model, like Import."}
+      - {id: b, text: "Frames the model: records which Delta table versions queries will use."}
+      - {id: c, text: "Rewrites the Delta tables."}
+      - {id: d, text: "Switches the model to DirectQuery."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Framing copies metadata only, takes seconds, and sets the point in time queries see."}
+      - {id: r2, text: "Direct Lake models never refresh."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Import copies data. Direct Lake refresh copies metadata only."
+      - answer: c
+        feedback: "The model reads Delta tables. It never writes them."
+      - answer: d
+        feedback: "Refresh does not change storage mode."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. They do refresh. The refresh is framing."
+    hints:
+      - "Does Direct Lake copy data?"
+      - "What does it need to know about the tables?"
+      - "Which version to read."
+    explanation: |
+      Framing takes seconds and fixes the table versions queries see until the next frame.
+
+  - id: C6-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A Direct Lake on SQL analytics endpoint model includes a SQL view. The Direct Lake behavior property is Automatic. What happens when a report queries the view?
+    options:
+      - {id: a, text: "The query fails."}
+      - {id: b, text: "The query falls back to DirectQuery and runs more slowly."}
+      - {id: c, text: "The view is materialised automatically."}
+      - {id: d, text: "The view is read directly from OneLake."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Views cannot be loaded directly from Delta, and Automatic falls back silently."}
+      - {id: r2, text: "Views are always faster than tables."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That is DirectLakeOnly, or Direct Lake on OneLake, which never falls back."
+      - answer: c
+        feedback: "Fabric does not materialise views for you. Write a Delta table instead."
+      - answer: d
+        feedback: "A view has no Delta files to read."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Fallback is slower."
+    hints:
+      - "Can a view be read as Delta files?"
+      - "What does Automatic do when direct loading fails?"
+      - "Fallback."
+    explanation: |
+      Automatic keeps the report working through DirectQuery, silently. Replace views with Delta tables.
+
+  - id: C6-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Set the Direct Lake behaviour so that development fails loudly on fallback, and production keeps working.
+    template: |
+      Development model: Direct Lake behavior = [[g1]]
+      Production model:  Direct Lake behavior = [[g2]]
+    gaps:
+      g1: {accepted: [DirectLakeOnly]}
+      g2: {accepted: [Automatic]}
+    wrong_answers:
+      - answer: {g1: DirectQueryOnly}
+        feedback: "DirectQueryOnly always uses DirectQuery. It measures fallback cost but does not reveal where fallback happens."
+    hints:
+      - "Which option errors when Direct Lake cannot be used?"
+      - "Which is the default?"
+      - "`DirectLakeOnly` and `Automatic`."
+    explanation: |
+      DirectLakeOnly exposes fallback causes during development. Automatic protects users in production.
+
+  - id: C6-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `guardrail_problems(sku: str, parquet_files: int, rows_millions: float) -> list[str]` using these limits from the lesson: F2 to F32 allow 1,000 files and 300 million rows per table, F64 allows 5,000 and 1,500, F128 5,000 and 3,000, F256 5,000 and 6,000. Return `"files"` and/or `"rows"` for each limit exceeded, in that order. Raise `KeyError` for other SKUs.
+    starter: |
+      def guardrail_problems(sku, parquet_files, rows_millions):
+          return []
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: guardrail_problems
+          typed: true
+          docstring: true
+          message: "Give `guardrail_problems` type hints and a docstring."
+      tests:
+        - id: small_sku
+          code: |
+            assert guardrail_problems("F32", 2400, 120) == ["files"]
+            assert guardrail_problems("F8", 900, 301) == ["rows"]
+            assert guardrail_problems("F2", 1000, 300) == []
+          message: "F2 to F32: 1,000 files and 300 million rows. Equal to the limit is allowed."
+        - id: bigger
+          code: |
+            assert guardrail_problems("F64", 5001, 1600) == ["files", "rows"]
+            assert guardrail_problems("F256", 4000, 5000) == []
+          message: "F64: 5,000 files, 1,500 million rows. F256: 5,000 files, 6,000 million rows."
+        - id: unknown
+          code: |
+            try:
+                guardrail_problems("P9", 1, 1)
+            except KeyError:
+                pass
+            else:
+                raise AssertionError("unknown SKU accepted")
+          message: "Unknown SKUs must raise KeyError."
+    solution: |
+      SMALL = (1000, 300)
+      GUARDRAILS: dict[str, tuple[int, float]] = {
+          "F2": SMALL, "F4": SMALL, "F8": SMALL, "F16": SMALL, "F32": SMALL,
+          "F64": (5000, 1500), "F128": (5000, 3000), "F256": (5000, 6000),
+      }
+
+
+      def guardrail_problems(sku: str, parquet_files: int, rows_millions: float) -> list[str]:
+          """Direct Lake per-table guardrails a table exceeds on a SKU.
+
+          Raises:
+              KeyError: For a SKU not in the table.
+          """
+          max_files, max_rows = GUARDRAILS[sku]
+          problems = []
+          if parquet_files > max_files:
+              problems.append("files")
+          if rows_millions > max_rows:
+              problems.append("rows")
+          return problems
+    seeded_bugs:
+      - |
+        def guardrail_problems(sku: str, parquet_files: int, rows_millions: float) -> list[str]:
+            """Uses >= and one limit for all SKUs."""
+            problems = []
+            if parquet_files >= 1000:
+                problems.append("files")
+            if rows_millions >= 300:
+                problems.append("rows")
+            return problems
+    wrong_answers:
+      - answer: |
+          def guardrail_problems(sku: str, parquet_files: int, rows_millions: float) -> list[str]:
+              """Uses >= and one limit for all SKUs."""
+              problems = []
+              if parquet_files >= 1000:
+                  problems.append("files")
+              if rows_millions >= 300:
+                  problems.append("rows")
+              return problems
+        triggers: small_sku
+    hints:
+      - "A dict from SKU to (files, rows)."
+      - "Strictly greater than the limit is a problem."
+      - "Index the dict so unknown SKUs raise KeyError."
+    explanation: |
+      A nightly check against the guardrails catches small-file build-up before Direct Lake falls back or framing fails.
+
+  - id: C6-L3-E5
+    type: spot_bug
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      A gold table read by Direct Lake on an F32 grows by one small file per hour and has passed the file guardrail. Tap the line that causes the build-up, and rewrite the job so the table is compacted after the append.
+    code: |
+      def publish_hourly(df, table):
+          """Append the latest hour to a Direct Lake gold table."""
+          df.repartition(1).write.mode("append").saveAsTable(table)
+          return None
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: none
+      rules:
+        - id: still_appends
+          type: required
+          pattern: "mode\\(\\s*[\"']append[\"']\\s*\\)\\.saveAsTable\\(\\s*table\\s*\\)"
+          message: "Keep appending the hour."
+        - id: optimize
+          type: required
+          pattern: "OPTIMIZE\\s*\\{table\\}|OPTIMIZE \\\" \\+ table|OPTIMIZE ' \\+ table|\\.optimize\\(\\)"
+          message: "Compact the table after the append, for example spark.sql(f\"OPTIMIZE {table}\")."
+    fix_solution: |
+      from pyspark.sql import DataFrame
+
+
+      def publish_hourly(df: DataFrame, table: str) -> None:
+          """Append the latest hour, then compact small files for Direct Lake."""
+          df.repartition(1).write.mode("append").saveAsTable(table)
+          df.sparkSession.sql(f"OPTIMIZE {table}")
+          return None
+    wrong_answers:
+      - lines: [2]
+        feedback: "The docstring is fine."
+      - lines: [4]
+        feedback: "Returning None is harmless."
+    hints:
+      - "How many files does each append add?"
+      - "What merges small files?"
+      - "OPTIMIZE after the write."
+    explanation: |
+      Hourly appends add a file each hour. OPTIMIZE compacts them, keeping the table under the guardrail. On busy tables, run it on a schedule rather than every hour.
+
+recap:
+  - front: "Direct Lake refresh"
+    back: "Framing: records Delta table versions in seconds. No data copy."
+  - front: "Direct Lake on OneLake vs on SQL"
+    back: "OneLake: never falls back. SQL: falls back to DirectQuery for views and SQL-based security."
+  - front: "Direct Lake behavior values"
+    back: "Automatic (default, silent fallback), DirectLakeOnly (error), DirectQueryOnly (always DirectQuery)."
+  - front: "F64 per-table guardrails"
+    back: "5,000 Parquet files, 1.5 billion rows, 25 GB max memory."
+
+claims:
+  - claim: "Direct Lake on OneLake never falls back; Direct Lake on SQL falls back to DirectQuery for SQL views and SQL-based granular access control; framing copies metadata in seconds; guardrails per SKU table."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/direct-lake-overview (updated 2026-09-02)"
+  - claim: "Direct Lake behavior values Automatic (default), DirectLakeOnly and DirectQueryOnly; framing can fail when a table exceeds guardrails."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/direct-lake-how-it-works (updated 2025-09-22)"

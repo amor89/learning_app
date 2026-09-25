@@ -1,0 +1,307 @@
+id: C5-L1
+title: From Databricks notebooks to Fabric notebooks
+
+concept: |
+  Fabric notebooks run the same PySpark you wrote in Track A. The surroundings differ, and those differences break ported code (Microsoft Learn, checked September 2026).
+
+  **Utilities.** There is no `dbutils`. Fabric has **NotebookUtils**, formerly MSSparkUtils. The `mssparkutils` namespace still works but is being retired, so write `notebookutils`:
+
+  | Databricks | Fabric |
+  |---|---|
+  | `dbutils.fs.ls(path)` | `notebookutils.fs.ls(path)` |
+  | `dbutils.secrets.get(scope, key)` | `notebookutils.credentials.getSecret("https://<vault>.vault.azure.net/", "name")` |
+  | `dbutils.notebook.run(path, timeout, args)` | `notebookutils.notebook.run(path, timeout_seconds, arguments)` |
+  | `dbutils.notebook.exit(value)` | `notebookutils.notebook.exit(value)` |
+
+  Secrets live in **Azure Key Vault**, not in Databricks secret scopes. You need Get permission on the vault. Output that prints a secret is redacted, but do not print secrets.
+
+  **Child notebooks time out at 90 seconds by default.** `notebookutils.notebook.run(path, timeout_seconds=90, ...)`. A child notebook that runs for five minutes fails unless you pass a longer timeout. For several notebooks, `notebookutils.notebook.runMultiple` runs a DAG of them in parallel.
+
+  **Default lakehouse.** A notebook can attach a default lakehouse. Relative paths such as `Files/landing` and bare table names resolve against it. Name the lakehouse and schema in shared code (lesson C2-L1), so a changed attachment does not change what the code reads.
+
+  **Inline installs.** `%pip install` affects only the current session, and inline commands are **turned off by default in pipeline runs**. Put libraries in an environment instead (lesson C5-L2).
+
+  **Runtime.** Runtime 2.0 (Spark 4.1, Delta Lake 4.2, Python 3.13, Java 21) is GA and recommended for production. New workspaces still default to Runtime 1.3 (Spark 3.5), whose end of support has been announced. Set the runtime deliberately. It changes the Spark version your code meets.
+
+why_it_matters: |
+  A team ported a Databricks orchestration notebook that called six child notebooks with `mssparkutils.notebook.run(path)`. In development each child took under a minute. On month-end data, the largest took four minutes. Every run failed at 90 seconds with a timeout, and the error pointed at the parent notebook. Passing `timeout_seconds` sized to the real run time fixed it.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      password = dbutils.secrets.get("prod", "sql-password")
+      %pip install great_expectations
+      result = mssparkutils.notebook.run("nb_silver_orders")
+      df = spark.read.table("orders")
+    annotations:
+      - find: 'password = dbutils.secrets.get("prod", "sql-password")'
+        note: "dbutils does not exist in Fabric. Secrets come from Azure Key Vault."
+      - find: "%pip install great_expectations"
+        note: "Inline installs are turned off by default in pipeline runs, and give unpinned dependencies."
+      - find: 'result = mssparkutils.notebook.run("nb_silver_orders")'
+        note: "Old namespace, and a 90-second default timeout for the child."
+      - find: 'df = spark.read.table("orders")'
+        note: "Depends on whichever lakehouse is attached as default, and the dbo schema."
+  strong:
+    code: |
+      VAULT_URL = "https://kv-sales-prod.vault.azure.net/"
+
+      password = notebookutils.credentials.getSecret(VAULT_URL, "sql-password")
+      result = notebookutils.notebook.run(
+          "nb_silver_orders", timeout_seconds=1800, arguments={"wave": "2026-09"}
+      )
+      df = spark.read.table("lh_sales.silver.orders")
+    annotations:
+      - find: 'password = notebookutils.credentials.getSecret(VAULT_URL, "sql-password")'
+        note: "Key Vault through NotebookUtils. The vault URL belongs in config."
+      - find: '"nb_silver_orders", timeout_seconds=1800, arguments={"wave": "2026-09"}'
+        note: "A timeout sized to the child's real run time, and explicit arguments."
+      - find: 'df = spark.read.table("lh_sales.silver.orders")'
+        note: "Lakehouse and schema named, independent of the default attachment."
+  takeaway: |
+    Replace dbutils with notebookutils, secrets with Key Vault, inline installs with environments, and pass real timeouts to child notebooks.
+
+exercises:
+  - id: C5-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which call reads a secret in a Fabric notebook?
+    options:
+      - {id: a, text: "`dbutils.secrets.get(\"prod\", \"sql-password\")`"}
+      - {id: b, text: "`notebookutils.credentials.getSecret(\"https://kv-sales.vault.azure.net/\", \"sql-password\")`"}
+      - {id: c, text: "`os.environ[\"SQL_PASSWORD\"]` set in the workspace settings"}
+      - {id: d, text: "`spark.conf.get(\"secret.sql-password\")`"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Fabric reads secrets from Azure Key Vault through notebookutils.credentials."}
+      - {id: r2, text: "getSecret caches the secret in the notebook."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "dbutils is Databricks-only. Fabric has no secret scopes."
+      - answer: c
+        feedback: "Workspace settings do not hold secrets as environment variables. Use Key Vault."
+      - answer: d
+        feedback: "Spark configuration is not a secret store."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. It reads from Key Vault at runtime."
+    hints:
+      - "Where do Fabric secrets live?"
+      - "Which utility module handles credentials?"
+      - "notebookutils.credentials."
+    explanation: |
+      `getSecret(vault_url, name)` reads from Azure Key Vault, with your identity's Get permission.
+
+  - id: C5-L1-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      `notebookutils.notebook.run("nb_big_load")` calls a child notebook that takes four minutes. What happens?
+    options:
+      - {id: a, text: "It completes after four minutes."}
+      - {id: b, text: "It fails after 90 seconds, the default timeout."}
+      - {id: c, text: "It fails after 12 hours."}
+      - {id: d, text: "It runs in the background and returns at once."}
+    answer: b
+    reasons:
+      - {id: r1, text: "run() has timeout_seconds with a default of 90."}
+      - {id: r2, text: "Child notebooks are limited to one Spark job."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Only if you pass a longer timeout_seconds."
+      - answer: c
+        feedback: "12 hours is the pipeline activity default. notebook.run defaults to 90 seconds."
+      - answer: d
+        feedback: "run() waits for the child and returns its exit value."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The limit is time, not job count."
+    hints:
+      - "Look at run()'s signature."
+      - "timeout_seconds has a default."
+      - "90."
+    explanation: |
+      Pass `timeout_seconds` sized to the child's real run time with headroom.
+
+  - id: C5-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Port this Databricks line to Fabric.
+    template: |
+      files = [[g1]].fs.ls("Files/landing")
+      value = [[g1]].notebook.run("nb_child", [[g2]]=600)
+    gaps:
+      g1: {accepted: [notebookutils]}
+      g2: {accepted: [timeout_seconds]}
+    wrong_answers:
+      - answer: {g1: dbutils}
+        feedback: "dbutils does not exist in Fabric."
+      - answer: {g1: mssparkutils}
+        feedback: "mssparkutils still works but is being retired. Use notebookutils."
+    hints:
+      - "The Fabric utility module."
+      - "The name of run()'s timeout parameter."
+      - "`notebookutils` and `timeout_seconds`."
+    explanation: |
+      `notebookutils` replaces dbutils, and `timeout_seconds` sets the child's time limit.
+
+  - id: C5-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `port_line(line: str) -> str` for a migration helper. It rewrites Databricks utility calls to Fabric:
+
+      - `dbutils.fs.` → `notebookutils.fs.`
+      - `dbutils.notebook.` → `notebookutils.notebook.`
+      - `mssparkutils.` → `notebookutils.`
+
+      If the line contains `dbutils.secrets.`, raise `ValueError` with a message that mentions Key Vault, because it needs a manual change. Leave other text unchanged.
+    starter: |
+      def port_line(line):
+          return line.replace("dbutils", "notebookutils")
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: port_line
+          typed: true
+          docstring: true
+          message: "Give `port_line` type hints and a docstring."
+      tests:
+        - id: rewrites
+          code: |
+            assert port_line('x = dbutils.fs.ls("Files")') == 'x = notebookutils.fs.ls("Files")'
+            assert port_line('v = dbutils.notebook.run("nb", 600)') == 'v = notebookutils.notebook.run("nb", 600)'
+            assert port_line("mssparkutils.fs.rm(p, True)") == "notebookutils.fs.rm(p, True)"
+          message: "Rewrite dbutils.fs., dbutils.notebook. and mssparkutils. to notebookutils."
+        - id: secrets
+          code: |
+            try:
+                port_line('pw = dbutils.secrets.get("prod", "pw")')
+            except ValueError as err:
+                assert "Key Vault" in str(err)
+            else:
+                raise AssertionError("secrets line rewritten silently")
+          message: "Secrets need a manual change to Key Vault: raise ValueError mentioning Key Vault."
+        - id: untouched
+          code: |
+            assert port_line("my_dbutils_helper(x)") == "my_dbutils_helper(x)"
+          message: "Do not change text that only contains the word dbutils."
+    solution: |
+      REWRITES: tuple[tuple[str, str], ...] = (
+          ("dbutils.fs.", "notebookutils.fs."),
+          ("dbutils.notebook.", "notebookutils.notebook."),
+          ("mssparkutils.", "notebookutils."),
+      )
+
+
+      def port_line(line: str) -> str:
+          """Rewrite Databricks and legacy Fabric utility calls to notebookutils.
+
+          Raises:
+              ValueError: For secret lookups, which must move to Azure Key Vault by hand.
+          """
+          if "dbutils.secrets." in line:
+              raise ValueError("secrets need a manual change: use notebookutils.credentials.getSecret with Azure Key Vault")
+          for old, new in REWRITES:
+              line = line.replace(old, new)
+          return line
+    seeded_bugs:
+      - |
+        def port_line(line: str) -> str:
+            """Blind replace."""
+            return line.replace("dbutils", "notebookutils").replace("mssparkutils", "notebookutils")
+      - |
+        def port_line(line: str) -> str:
+            """Rewrites secrets to a call that does not exist."""
+            for old, new in (("dbutils.", "notebookutils."), ("mssparkutils.", "notebookutils.")):
+                line = line.replace(old, new)
+            return line
+    wrong_answers:
+      - answer: |
+          def port_line(line: str) -> str:
+              """Rewrites secrets to a call that does not exist."""
+              for old, new in (("dbutils.", "notebookutils."), ("mssparkutils.", "notebookutils.")):
+                  line = line.replace(old, new)
+              return line
+        triggers: secrets
+    hints:
+      - "Check for dbutils.secrets. first and raise."
+      - "Replace the specific prefixes, including the trailing dot."
+      - "Leave anything else alone."
+    explanation: |
+      Mechanical rewrites are safe for fs and notebook calls. Secrets need a design change, so the tool stops and says so.
+
+  - id: C5-L1-E5
+    type: spot_bug
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      This notebook runs from a nightly pipeline. It worked when run by hand and fails in the pipeline. Tap the line that fails there, and rewrite the notebook without it.
+    code: |
+      %pip install pandera==0.33.1
+      import pandera.pandas as pa
+      df = spark.read.table("lh_sales.silver.orders").toPandas()
+      SCHEMA.validate(df, lazy=True)
+    bug_lines: [1]
+    fix_checker:
+      kind: text
+      comments: none
+      rules:
+        - id: no_inline_pip
+          type: forbidden
+          pattern: "%pip|%conda|!pip"
+          message: "Inline installs are turned off by default in pipeline runs. Install pandera in the attached environment."
+        - id: keeps_import
+          type: required
+          pattern: "import pandera\\.pandas as pa"
+          message: "Keep the import. The library now comes from the environment."
+    fix_solution: |
+      # pandera==0.33.1 is installed in the environment attached to this notebook.
+      import pandera.pandas as pa
+      df = spark.read.table("lh_sales.silver.orders").toPandas()
+      SCHEMA.validate(df, lazy=True)
+    wrong_answers:
+      - lines: [2]
+        feedback: "The import fails only because the install on line 1 did not run."
+      - lines: [3]
+        feedback: "Reading the table is fine."
+    hints:
+      - "What differs between an interactive session and a pipeline run?"
+      - "Inline commands."
+      - "Move the library to an environment."
+    explanation: |
+      Inline installs are off by default in pipeline runs. Put the library in an environment (Full mode for pipelines), which also pins the version reproducibly.
+
+recap:
+  - front: "Fabric replacement for dbutils"
+    back: "notebookutils (formerly mssparkutils)."
+  - front: "Secrets in Fabric notebooks"
+    back: "notebookutils.credentials.getSecret(vault_url, name), from Azure Key Vault."
+  - front: "notebookutils.notebook.run default timeout"
+    back: "90 seconds. Pass timeout_seconds."
+  - front: "%pip in pipeline runs"
+    back: "Turned off by default. Use an environment."
+
+claims:
+  - claim: "MsSparkUtils is renamed NotebookUtils; the mssparkutils namespace will be retired."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/notebook-utilities"
+  - claim: "notebookutils.notebook.run(path, timeout_seconds=90, arguments=None, workspace='') returns the exit value; runMultiple runs a DAG."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/notebookutils/notebookutils-notebook-run"
+  - claim: "notebookutils.credentials.getSecret reads from Azure Key Vault and needs Get permission; output redaction is attempted."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/notebookutils/notebookutils-credentials (updated 2026-09-23)"
+  - claim: "Inline installs are turned off by default in pipeline runs."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/library-management (updated 2026-03-25)"
+  - claim: "Runtime 2.0 (Spark 4.1, Delta 4.2, Python 3.13, Java 21) is GA and recommended; new workspaces default to Runtime 1.3, which is at end-of-support-announced stage."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/runtime (updated 2026-07-24)"

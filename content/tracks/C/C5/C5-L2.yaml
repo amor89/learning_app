@@ -1,0 +1,285 @@
+id: C5-L2
+title: Environments, resource profiles and V-Order
+
+concept: |
+  An **environment** is a Fabric item that fixes what a Spark session starts with: the runtime version, compute settings, libraries and small resource files. Attach it to notebooks and Spark job definitions, or make it the **workspace default** so every notebook set to "Workspace default" inherits it. Once an environment is the workspace default, only workspace admins can change its contents.
+
+  Libraries publish in one of two modes (Microsoft Learn, checked September 2026):
+
+  - **Quick mode** installs libraries when each session starts. It is flexible, and it adds one to three minutes to start-up.
+  - **Full mode** builds a snapshot of the dependencies once. Microsoft recommends Full mode for pipelines, scheduled runs and shared workloads that need reproducible environments. It is the Fabric equivalent of the lock file in lesson B6-L3.
+
+  **Resource profiles** set a tested group of Spark and Delta settings with one property. New workspaces default to `writeHeavy`, tuned for ingestion. `readHeavyForSpark` and `readHeavyForPBI` suit read-heavy work.
+
+  **V-Order** is a Fabric write-time layout for Parquet files. It keeps files standard, open Parquet, and speeds up reads, especially for Power BI Direct Lake and the SQL engines. The cost is slower writes: Learn cites **around 15%** on average. Since the `writeHeavy` default, **V-Order is off by default in new workspaces** (`spark.sql.parquet.vorder.default=false`).
+
+  Turn it on where reads dominate, at the narrowest useful level:
+
+  - per table: `TBLPROPERTIES("delta.parquet.vorder.enabled" = "true")`, the best choice for gold tables that Power BI reads,
+  - per write: the DataFrame option `parquet.vorder.enabled`,
+  - per session: `spark.sql.parquet.vorder.default`, or the `readHeavyForPBI` profile, which enables it.
+
+  In Runtime 1.3 and later the older `spark.sql.parquet.vorder.enable` setting is removed. Code copied from older posts that sets it does nothing.
+
+why_it_matters: |
+  A team moved its gold layer to a new Fabric workspace and noticed Power BI reports running noticeably slower than before. The old workspace had V-Order on for every write. The new one used the `writeHeavy` default, with V-Order off. Setting `delta.parquet.vorder.enabled` on the dozen gold tables, and optimising them once, restored read performance without slowing bronze and silver ingestion.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      spark.conf.set("spark.sql.parquet.vorder.enable", "true")
+      bronze.write.mode("append").saveAsTable("lh.bronze.orders")
+      gold.write.mode("overwrite").saveAsTable("lh.gold.sales_by_region")
+    annotations:
+      - find: 'spark.conf.set("spark.sql.parquet.vorder.enable", "true")'
+        note: "Removed setting in Runtime 1.3 and later. It has no effect."
+      - find: 'bronze.write.mode("append").saveAsTable("lh.bronze.orders")'
+        note: "Had the setting worked, bronze would pay the write cost for reads nobody makes."
+  strong:
+    code: |
+      bronze.write.mode("append").saveAsTable("lh.bronze.orders")
+
+      spark.sql("""
+          CREATE TABLE IF NOT EXISTS lh.gold.sales_by_region (region STRING, sales DECIMAL(19, 4))
+          USING DELTA
+          TBLPROPERTIES ("delta.parquet.vorder.enabled" = "true")
+      """)
+      gold.write.mode("overwrite").saveAsTable("lh.gold.sales_by_region")
+    annotations:
+      - find: 'bronze.write.mode("append").saveAsTable("lh.bronze.orders")'
+        note: "Write-heavy bronze keeps the fast default."
+      - find: 'TBLPROPERTIES ("delta.parquet.vorder.enabled" = "true")'
+        note: "V-Order only on the gold table that Power BI reads."
+  takeaway: |
+    Pin libraries in a Full mode environment, keep the writeHeavy default for ingestion, and turn V-Order on for read-heavy gold tables.
+
+exercises:
+  - id: C5-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      In a workspace created in 2026 with default settings, is V-Order applied when a notebook writes a Delta table?
+    options:
+      - {id: a, text: "Yes, V-Order is always on in Fabric."}
+      - {id: b, text: "No. New workspaces default to the writeHeavy profile, with V-Order off."}
+      - {id: c, text: "Only for tables under Files."}
+      - {id: d, text: "Only when the table is larger than 1 GB."}
+    answer: b
+    reasons:
+      - {id: r1, text: "spark.sql.parquet.vorder.default is false in new workspaces to favour write performance."}
+      - {id: r2, text: "V-Order has been retired."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That was true for older workspaces. New ones default to writeHeavy, with V-Order off."
+      - answer: c
+        feedback: "Files holds non-table data. V-Order applies to Delta table writes."
+      - answer: d
+        feedback: "There is no size threshold. It depends on settings."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. V-Order still exists. You turn it on where reads matter."
+    hints:
+      - "Which resource profile do new workspaces use?"
+      - "What does it do to V-Order?"
+      - "Off, for faster writes."
+    explanation: |
+      New workspaces favour writes. Turn V-Order on for tables that are read far more than written.
+
+  - id: C5-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A nightly pipeline runs notebooks that need pandera and a pinned version of a statistics library. How should the libraries be delivered?
+    options:
+      - {id: a, text: "%pip install at the top of each notebook"}
+      - {id: b, text: "An environment in Full mode, attached to the notebooks or set as workspace default"}
+      - {id: c, text: "An environment in Quick mode"}
+      - {id: d, text: "Upload wheel files to Files and install them at runtime"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Full mode builds a reproducible snapshot, and Microsoft recommends it for pipelines and scheduled runs."}
+      - {id: r2, text: "Full mode is the only mode that supports pandera."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Inline installs are turned off by default in pipeline runs, and resolve dependencies differently from run to run."
+      - answer: c
+        feedback: "Quick mode installs at every session start, adding minutes, and suits development more than scheduled runs."
+      - answer: d
+        feedback: "That is an inline install by another route: session-scoped and hard to reproduce."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Both modes install the same packages. Full mode is reproducible."
+    hints:
+      - "Which option is reproducible?"
+      - "Which mode does Microsoft recommend for pipelines?"
+      - "Full mode."
+    explanation: |
+      A Full mode environment pins the dependency snapshot for every scheduled run.
+
+  - id: C5-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: sql
+    prompt: |
+      Turn on V-Order for one gold table only.
+    template: |
+      ALTER TABLE lh.gold.sales_by_region
+      SET TBLPROPERTIES ("[[g1]]" = "[[g2]]");
+    gaps:
+      g1: {accepted: [delta.parquet.vorder.enabled]}
+      g2: {accepted: ["true"]}
+    wrong_answers:
+      - answer: {g1: spark.sql.parquet.vorder.enable}
+        feedback: "That old session setting is removed in Runtime 1.3 and later, and it is not a table property."
+    hints:
+      - "The table-level property starts with delta."
+      - "delta.parquet.vorder.enabled."
+      - "Set it to true."
+    explanation: |
+      The table property applies V-Order to future writes to this table only.
+
+  - id: C5-L2-E4
+    type: write_function
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      Write `write_gold(df, table)` that overwrites a gold Delta table with V-Order enabled for this write, using the DataFrame writer option `parquet.vorder.enabled` set to `"true"`. Do not change the session-wide default.
+    starter: |
+      def write_gold(df, table):
+          spark.conf.set("spark.sql.parquet.vorder.default", "true")
+          df.write.mode("overwrite").saveAsTable(table)
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: write_gold
+          typed: true
+          docstring: true
+          message: "Give `write_gold` type hints and a docstring."
+        - id: writer_option
+          kind: requires_pattern
+          pattern: "\\.option\\(\\s*[\"']parquet\\.vorder\\.enabled[\"']\\s*,\\s*[\"']true[\"']\\s*\\)"
+          message: "Use .option(\"parquet.vorder.enabled\", \"true\") on the writer."
+        - id: no_session_change
+          kind: forbids_pattern
+          pattern: "spark\\.conf\\.set"
+          message: "Do not change the session default. That slows every later write."
+        - id: overwrite
+          kind: requires_pattern
+          pattern: "mode\\(\\s*[\"']overwrite[\"']\\s*\\)"
+          message: "Gold is rebuilt: use mode(\"overwrite\")."
+        - id: save_table
+          kind: requires_call
+          name: saveAsTable
+          message: "Write the table with saveAsTable(table)."
+    solution: |
+      from pyspark.sql import DataFrame
+
+
+      def write_gold(df: DataFrame, table: str) -> None:
+          """Overwrite a read-heavy gold table with V-Order for this write only.
+
+          Args:
+              df: Gold rows.
+              table: Target table, such as lh.gold.sales_by_region.
+          """
+          df.write.mode("overwrite").option("parquet.vorder.enabled", "true").saveAsTable(table)
+    seeded_bugs:
+      - |
+        from pyspark.sql import DataFrame
+
+
+        def write_gold(df: DataFrame, table: str) -> None:
+            """Changes the session default."""
+            df.sparkSession.conf.set("spark.sql.parquet.vorder.default", "true")
+            df.write.mode("overwrite").saveAsTable(table)
+      - |
+        from pyspark.sql import DataFrame
+
+
+        def write_gold(df: DataFrame, table: str) -> None:
+            """Uses the removed setting name."""
+            df.write.mode("overwrite").option("spark.sql.parquet.vorder.enable", "true").saveAsTable(table)
+    wrong_answers:
+      - answer: |
+          from pyspark.sql import DataFrame
+
+
+          def write_gold(df: DataFrame, table: str) -> None:
+              """Uses the removed setting name."""
+              df.write.mode("overwrite").option("spark.sql.parquet.vorder.enable", "true").saveAsTable(table)
+        triggers: writer_option
+    hints:
+      - "The option belongs on df.write."
+      - "Its name is parquet.vorder.enabled."
+      - "Chain mode, option, saveAsTable."
+    explanation: |
+      A writer option scopes V-Order to one write, so ingestion elsewhere in the session keeps the fast default.
+
+  - id: C5-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Set up Spark for a workspace with bronze and silver ingestion and a gold layer read by Power BI Direct Lake.
+    slots:
+      - id: libs
+        label: "Libraries for scheduled notebooks"
+        options:
+          - {id: full_default, text: "One Full mode environment, set as workspace default"}
+          - {id: inline, text: "%pip in each notebook"}
+        answer: full_default
+      - id: session
+        label: "Session-wide resource profile"
+        options:
+          - {id: write_heavy, text: "Keep writeHeavy"}
+          - {id: read_pbi, text: "readHeavyForPBI everywhere"}
+        answer: write_heavy
+      - id: gold
+        label: "Gold tables"
+        options:
+          - {id: table_prop, text: "delta.parquet.vorder.enabled = true on each gold table"}
+          - {id: none_vorder, text: "No V-Order"}
+        answer: table_prop
+    model_answer: |
+      - A Full mode default environment gives every scheduled notebook the same pinned libraries.
+      - writeHeavy suits ingestion, which is most of the Spark work.
+      - V-Order on gold tables speeds up the reads Power BI makes, without slowing ingestion.
+    wrong_answers:
+      - answer: {libs: inline}
+        feedback: "Inline installs are off in pipeline runs and are not reproducible."
+      - answer: {session: read_pbi}
+        feedback: "That applies V-Order to every write, including bronze and silver, which pay the write cost for no reader."
+      - answer: {gold: none_vorder}
+        feedback: "Direct Lake reads gold constantly. V-Order is worth its write cost there."
+    hints:
+      - "Reproducible libraries."
+      - "Most writes are ingestion."
+      - "Where are reads heavy?"
+    explanation: |
+      Pin libraries once, optimise for writes by default, and pay for read layout only where reads happen.
+
+recap:
+  - front: "Environment publishing modes"
+    back: "Quick: installs at session start (adds minutes). Full: reproducible snapshot, recommended for pipelines."
+  - front: "V-Order in new workspaces"
+    back: "Off by default (writeHeavy profile). Write cost around 15%, faster reads."
+  - front: "Turn V-Order on for one table"
+    back: "TBLPROPERTIES(\"delta.parquet.vorder.enabled\" = \"true\")."
+  - front: "spark.sql.parquet.vorder.enable"
+    back: "Removed in Runtime 1.3 and later. Use spark.sql.parquet.vorder.default or table and writer options."
+
+claims:
+  - claim: "Environments set runtime, compute, libraries and resources; a workspace default environment can be changed only by workspace admins."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/create-and-use-environment (updated 2026-03-25)"
+  - claim: "Quick mode installs at session start adding one to three minutes; Full mode is recommended for pipelines and scheduled runs."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/library-management (updated 2026-03-25)"
+  - claim: "V-Order is off by default in new workspaces (writeHeavy); write cost around 15%; table property, writer option and session default; spark.sql.parquet.vorder.enable removed in Runtime 1.3+."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/delta-optimization-and-v-order (updated 2026-03-01)"
+  - claim: "New workspaces default to writeHeavy; readHeavyForPBI enables V-Order."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/resource-profiles-overview (updated 2026-07-23)"
