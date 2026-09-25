@@ -1,0 +1,321 @@
+id: D3-L2
+title: Type coercion and timezone drift
+
+concept: |
+  Two more silent errors: values that change type, and times that change meaning with the zone.
+
+  **Type coercion.** Checked on pandas 3.0.2, PySpark 4.0.4 and Python 3.13:
+
+  - `pd.read_csv` turns `respondent_id` `0123` into the integer `123`. The leading zero is gone, and joins to the panel file fail. Pass `dtype={"respondent_id": "string"}` for identifiers.
+  - An integer column with one missing value becomes `float64` in pandas. `1` becomes `1.0`, and string keys built from it read `"1.0"`.
+  - Strings sort as text: `sorted(["10", "9", "2"])` gives `['10', '2', '9']`. Wave "W10" sorts before "W2". Pad your ids, or sort on a number.
+  - Spark's `df.union(other)` matches columns **by position**, not by name. A delivery with `wave_id` and `respondent_id` swapped unions without error, with the values in the wrong columns. Use `unionByName`.
+  - Under ANSI mode, Spark casts a string column compared with a number: `F.col("age") > 9` raises `CAST_INVALID_INPUT` on the value `'x'`. Cast explicitly with `try_cast` first.
+
+  **Timezone drift.** A timestamp without a zone is a guess.
+
+  - `datetime.utcnow()` returns a **naive** datetime and is deprecated from Python 3.12. Comparing naive with aware raises `TypeError: can't compare offset-naive and offset-aware datetimes`. Use `datetime.now(timezone.utc)`.
+  - Spark's `TIMESTAMP` type is an instant, displayed in the **session time zone** (`spark.sql.session.timeZone`). `F.to_date` on `2026-06-30T23:30:00Z` gives 30 June in UTC and **1 July** in Europe/London. A wave cut-off at midnight moves respondents between waves.
+  - The same text without an offset, `'2026-06-30 23:30:00'`, parses to instants 4 hours apart in UTC and America/New_York sessions.
+  - Some local times do not exist. pandas refuses to localise `2026-03-29 01:30` to Europe/London: the clocks skipped that hour.
+
+  Store instants in UTC. Convert to local time only for display, or for a business rule that names its zone, such as "fieldwork closes at midnight UK time".
+
+why_it_matters: |
+  A wave closed at midnight UK time on 30 June. The pipeline ran with the session time zone set to UTC and assigned every interview completed between 23:00 and 00:00 UTC on 30 June to wave W14. In British Summer Time those interviews happened after midnight, in W15. 340 respondents moved wave. Both waves' reach figures shifted by up to 1.5 points.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      from datetime import datetime
+
+      def in_wave(completed_at: datetime, close_at: datetime) -> bool:
+          """Was the interview completed before the wave closed?"""
+          return completed_at < close_at
+
+      close = datetime(2026, 6, 30, 23, 59, 59)
+      in_wave(datetime.utcnow(), close)
+    annotations:
+      - find: "close = datetime(2026, 6, 30, 23, 59, 59)"
+        note: "Naive: is this UK time or UTC? The code cannot tell, and nor can a reader."
+      - find: "in_wave(datetime.utcnow(), close)"
+        note: "Deprecated since Python 3.12, and naive too."
+  strong:
+    code: |
+      from datetime import datetime, timedelta, timezone
+
+      BST = timezone(timedelta(hours=1), "BST")
+
+      def in_wave(completed_at: datetime, close_at: datetime) -> bool:
+          """Was the interview completed before the wave closed?
+
+          Raises:
+              ValueError: If either datetime is naive.
+          """
+          if completed_at.tzinfo is None or close_at.tzinfo is None:
+              raise ValueError("datetimes must carry a time zone")
+          return completed_at < close_at
+
+      close = datetime(2026, 7, 1, 0, 0, tzinfo=BST)
+      in_wave(datetime.now(timezone.utc), close)
+    annotations:
+      - find: 'BST = timezone(timedelta(hours=1), "BST")'
+        note: "The business rule names its zone. In production, use zoneinfo.ZoneInfo(\"Europe/London\") to handle the clock change."
+      - find: "if completed_at.tzinfo is None or close_at.tzinfo is None:"
+        note: "Refuse naive values instead of guessing."
+      - find: "in_wave(datetime.now(timezone.utc), close)"
+        note: "Aware UTC now. Aware datetimes compare correctly across zones."
+  takeaway: |
+    Read identifiers as strings, union by name, and keep every timestamp aware and stored in UTC.
+
+exercises:
+  - id: D3-L2-E1
+    type: predict_output
+    difficulty: 1
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      waves = ["W10", "W9", "W2"]
+      print(sorted(waves))
+    answer: "['W10', 'W2', 'W9']"
+    wrong_answers:
+      - answer: "['W2', 'W9', 'W10']"
+        feedback: "That is numeric order. Strings compare character by character, and '1' comes before '2'."
+      - answer: "['W9', 'W2', 'W10']"
+        feedback: "Strings sort ascending by character. 'W1...' comes first."
+    hints:
+      - "Compare 'W10' and 'W2' character by character."
+      - "'1' < '2'."
+      - "W10 first."
+    explanation: |
+      Text sorts by character. Pad ids (`W02`, `W09`, `W10`) or sort by the number: `sorted(waves, key=lambda w: int(w[1:]))`.
+
+  - id: D3-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A Spark session has `spark.sql.session.timeZone` set to `Europe/London`. An interview's `completed_at` is the instant `2026-06-30T23:30:00Z`. What does `F.to_date("completed_at")` return?
+    options:
+      - {id: a, text: "2026-07-01"}
+      - {id: b, text: "2026-06-30"}
+      - {id: c, text: "It depends on the cluster's operating system clock"}
+      - {id: d, text: "null"}
+    answer: a
+    reasons:
+      - {id: r1, text: "TIMESTAMP is an instant. to_date uses the session time zone, where 23:30 UTC is 00:30 on 1 July in BST."}
+      - {id: r2, text: "Spark always converts to local time before storing."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That is the date in UTC. The session time zone here is London, one hour ahead in summer."
+      - answer: c
+        feedback: "Spark uses the session time zone setting, not the OS clock."
+      - answer: d
+        feedback: "The conversion succeeds. It just gives a different day."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Spark stores the instant. It applies the zone when converting or displaying."
+    hints:
+      - "What is 23:30 UTC in London in summer?"
+      - "BST is UTC+1."
+      - "00:30 the next day."
+    explanation: |
+      Date boundaries depend on the zone. Set the session time zone deliberately, or convert with a named zone in the rule itself.
+
+  - id: D3-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Replace the deprecated call with an aware UTC timestamp.
+    template: |
+      from datetime import datetime, timezone
+
+      run_timestamp = datetime.[[g1]]([[g2]])
+    gaps:
+      g1: {accepted: [now]}
+      g2: {accepted: [timezone.utc, "tz=timezone.utc"]}
+    wrong_answers:
+      - answer: {g1: utcnow}
+        feedback: "utcnow() is deprecated from Python 3.12 and returns a naive datetime."
+    hints:
+      - "Which method takes a time zone argument?"
+      - "Pass the UTC zone object."
+      - "`now` and `timezone.utc`."
+    explanation: |
+      `datetime.now(timezone.utc)` returns an aware datetime in UTC.
+
+  - id: D3-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Write `load_delivery(csv_text: str) -> pd.DataFrame`. Read the CSV with `respondent_id` and `postcode_area` as strings, keeping leading zeros. Convert `final_weight` to float. If any non-empty weight fails to parse, raise `ValueError` naming how many. Empty weights stay missing.
+    starter: |
+      import io
+
+      import pandas as pd
+
+
+      def load_delivery(csv_text):
+          return pd.read_csv(io.StringIO(csv_text))
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: load_delivery
+          typed: true
+          docstring: true
+          message: "Give `load_delivery` type hints and a docstring."
+      tests:
+        - id: leading_zeros
+          code: |
+            df = load_delivery("respondent_id,postcode_area,final_weight\n0123,01,1.5\n0456,02,0.5\n")
+            assert list(df["respondent_id"]) == ["0123", "0456"], list(df["respondent_id"])
+            assert list(df["postcode_area"]) == ["01", "02"]
+          message: "Keep identifiers as strings so leading zeros survive."
+        - id: weights
+          code: |
+            df = load_delivery("respondent_id,postcode_area,final_weight\n0123,01,1.5\n0456,02,\n")
+            assert df["final_weight"].iloc[0] == 1.5 and df["final_weight"].isna().iloc[1]
+          message: "Weights are floats. An empty weight stays missing."
+        - id: bad_weight
+          code: |
+            try:
+                load_delivery("respondent_id,postcode_area,final_weight\n0123,01,1.5\n0456,02,abc\n0789,03,x\n")
+            except ValueError as err:
+                assert "2" in str(err), str(err)
+            else:
+                raise AssertionError("no ValueError")
+          message: "Two weights failed to parse. Raise ValueError with the count, instead of turning them into missing values."
+    solution: |
+      import io
+
+      import pandas as pd
+
+      ID_COLUMNS = {"respondent_id": "string", "postcode_area": "string"}
+
+
+      def load_delivery(csv_text: str) -> pd.DataFrame:
+          """Read a delivery CSV with identifiers as strings and weights as floats.
+
+          Args:
+              csv_text: CSV text with respondent_id, postcode_area and final_weight.
+
+          Returns:
+              The delivery as a DataFrame.
+
+          Raises:
+              ValueError: If any non-empty weight cannot be parsed.
+          """
+          df = pd.read_csv(io.StringIO(csv_text), dtype={**ID_COLUMNS, "final_weight": "string"})
+          raw = df["final_weight"]
+          parsed = pd.to_numeric(raw, errors="coerce")
+          failed = int((raw.notna() & parsed.isna()).sum())
+          if failed:
+              raise ValueError(f"{failed} weights could not be parsed")
+          return df.assign(final_weight=parsed.astype("float64"))
+    seeded_bugs:
+      - |
+        import io
+
+        import pandas as pd
+
+
+        def load_delivery(csv_text: str) -> pd.DataFrame:
+            """Default dtypes lose leading zeros."""
+            df = pd.read_csv(io.StringIO(csv_text))
+            df["final_weight"] = pd.to_numeric(df["final_weight"], errors="coerce")
+            return df
+      - |
+        import io
+
+        import pandas as pd
+
+
+        def load_delivery(csv_text: str) -> pd.DataFrame:
+            """Coerces bad weights to missing without reporting them."""
+            df = pd.read_csv(io.StringIO(csv_text), dtype={"respondent_id": "string", "postcode_area": "string"})
+            df["final_weight"] = pd.to_numeric(df["final_weight"], errors="coerce")
+            return df
+    wrong_answers:
+      - answer: |
+          import io
+
+          import pandas as pd
+
+
+          def load_delivery(csv_text: str) -> pd.DataFrame:
+              """Coerces bad weights to missing without reporting them."""
+              df = pd.read_csv(io.StringIO(csv_text), dtype={"respondent_id": "string", "postcode_area": "string"})
+              df["final_weight"] = pd.to_numeric(df["final_weight"], errors="coerce")
+              return df
+        triggers: bad_weight
+    hints:
+      - "Pass `dtype=` to read_csv for the id columns."
+      - "Read the weight as a string first, then `pd.to_numeric(..., errors=\"coerce\")`."
+      - "Failed = present before, missing after."
+    explanation: |
+      Read as text, convert explicitly, and count what the conversion lost. Silent coercion hides bad data.
+
+  - id: D3-L2-E5
+    type: spot_bug
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      A redelivery arrives with its columns in a different order. After this step, some respondent ids read `W14`. Tap the line, then fix it.
+    code: |
+      from pyspark.sql import functions as F
+
+      combined = original.union(redelivery)
+      combined = combined.withColumn("loaded_at", F.current_timestamp())
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: by_name
+          kind: requires_call
+          name: unionByName
+          message: "Use unionByName, which matches columns by name."
+        - id: no_positional
+          kind: forbids_call
+          name: union
+          message: "union matches columns by position."
+    fix_solution: |
+      from pyspark.sql import functions as F
+
+      combined = original.unionByName(redelivery)
+      combined = combined.withColumn("loaded_at", F.current_timestamp())
+    wrong_answers:
+      - lines: [4]
+        feedback: "Adding a timestamp cannot move ids into the wave column. The union already mixed them."
+    hints:
+      - "How does union match columns?"
+      - "By position."
+      - "unionByName matches by name."
+    explanation: |
+      `union` pairs the first column with the first column, whatever their names. `unionByName` pairs by name, and fails if a name is missing.
+
+recap:
+  - front: "pd.read_csv and leading zeros"
+    back: "Default parsing makes 0123 into 123. Pass dtype='string' for identifiers."
+  - front: "Spark union vs unionByName"
+    back: "union matches columns by position, silently. unionByName matches by name."
+  - front: "datetime.utcnow()"
+    back: "Deprecated from Python 3.12 and naive. Use datetime.now(timezone.utc)."
+  - front: "Spark TIMESTAMP and the session time zone"
+    back: "An instant, shown and converted in spark.sql.session.timeZone. to_date can move a row to another day."
+
+claims:
+  - claim: "pandas 3.0.2: read_csv drops leading zeros by default; int with None becomes float64; tz_localize rejects a nonexistent DST time."
+    status: verified
+    source: "Local run on pandas 3.0.2, September 2026."
+  - claim: "Python 3.13: utcnow() raises a DeprecationWarning and is naive; comparing naive and aware datetimes raises TypeError."
+    status: verified
+    source: "Local run on CPython 3.13.12, September 2026."
+  - claim: "PySpark 4.0.4: union matches by position; to_date depends on session time zone; naive strings parse relative to the session zone; ANSI casts a string compared with an int and raises CAST_INVALID_INPUT on 'x'."
+    status: verified
+    source: "Local run on PySpark 4.0.4, September 2026."
