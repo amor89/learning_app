@@ -1,0 +1,379 @@
+id: C8-L3
+title: Verify what Copilot writes
+
+concept: |
+  Microsoft's own guidance for Copilot in notebooks (preview, Microsoft Learn, checked September 2026) says: always review AI-generated code before you apply it. Output might be inaccurate, incomplete, or based on outdated library syntax. The chat pane shows changes as an approval diff. Approving the diff is your review, so make it a real one.
+
+  Code that runs without error proves only that the names exist and the syntax parses. Use four checks, in this order.
+
+  1. **Read every line.** Check each table, column and function against the schema and the docs. Check the grain: one row per what? Check joins: inner joins drop unmatched rows.
+  2. **Run it on known data.** Build five to ten rows where you have worked out the answer by hand. Include the awkward cases: a null, a zero denominator, a duplicate key, an empty group.
+  3. **Compare with a second method.** Compute the same number another way: a plain `count()` against the generated aggregate, SQL against PySpark, the new query against last month's report.
+  4. **Keep the checks.** Turn steps 2 and 3 into tests that run with the pipeline, so the next edit, by you or by Copilot, is checked too.
+
+  Errors to look for first, because they run cleanly and give plausible numbers:
+
+  - **Average of averages.** `AVG(avg_basket)` over stores weights a small store the same as a large one. Divide total sales by total baskets instead.
+  - **Wrong join type.** An inner join to a dimension drops facts with no match.
+  - **`COUNT(*)` for distinct things.** Customers with two orders count twice.
+  - **Unguarded division.** A zero denominator fails in some engines and returns null or infinity in others.
+  - **Invented names.** A column or function that does not exist. This one fails loudly.
+
+why_it_matters: |
+  An analyst asked Copilot for average basket value by region. The query ran and the numbers looked sensible. It averaged each store's average, so a pop-up store with four baskets counted as much as a flagship with 40,000. The regional figure was 11% too high. A five-row test with two stores of different sizes shows the difference at once.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      # Copilot suggestion, applied after it ran without error
+      region_basket = (
+          store_summary.join(dim_region, "store_id")
+          .groupBy("region")
+          .agg(F.avg("avg_basket").alias("avg_basket"))
+      )
+    annotations:
+      - find: "# Copilot suggestion, applied after it ran without error"
+        note: "Running is not a check."
+      - find: '.agg(F.avg("avg_basket").alias("avg_basket"))'
+        note: "Average of averages: every store weighs the same."
+  strong:
+    code: |
+      from pyspark.sql import functions as F
+
+      region_basket = (
+          store_summary.join(dim_region, "store_id", "left")
+          .groupBy("region")
+          .agg(F.try_divide(F.sum("total_sales"), F.sum("basket_count")).alias("avg_basket"))
+      )
+
+      # Known data: store A 4 baskets, 40.00 total. Store B 400 baskets, 2,000.00 total.
+      # Hand answer: 2,040.00 / 404 = 5.0495...  Average of averages would give 7.50.
+      assert abs(result_for("North") - 2040.0 / 404) < 1e-9
+    annotations:
+      - find: '.agg(F.try_divide(F.sum("total_sales"), F.sum("basket_count")).alias("avg_basket"))'
+        note: "Total over total: each basket counts once. try_divide returns null for a zero denominator, where plain division fails under ANSI mode."
+      - find: "# Hand answer: 2,040.00 / 404 = 5.0495...  Average of averages would give 7.50."
+        note: "Known data picked so the wrong method gives a visibly different answer."
+  takeaway: |
+    Read it, run it on data with a hand-worked answer, compare it with a second method, and keep those checks as tests.
+
+exercises:
+  - id: C8-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A Copilot-generated query runs without an error. What has that shown?
+    options:
+      - {id: a, text: "The results are correct"}
+      - {id: b, text: "The syntax parses and the referenced names exist"}
+      - {id: c, text: "The query is efficient"}
+      - {id: d, text: "The grain matches the requirement"}
+    answer: b
+    reasons:
+      - {id: r1, text: "An engine checks syntax and names before it runs a query. It does not know what answer you wanted."}
+      - {id: r2, text: "Copilot tests its own queries before it shows them."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "An average of averages runs cleanly and returns a wrong number."
+      - answer: c
+        feedback: "A query that scans a whole table runs without error too."
+      - answer: d
+        feedback: "The engine does not know the grain you intended."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Microsoft says to review all generated code. The engine did the checking, not Copilot."
+    hints:
+      - "What does the engine check before running?"
+      - "Does it know what answer you expected?"
+      - "Syntax and names only."
+    explanation: |
+      A clean run is the start of verification, not the end.
+
+  - id: C8-L3-E2
+    type: spot_bug
+    difficulty: 2
+    language: sql
+    prompt: |
+      Copilot wrote this T-SQL for average basket value by region. `store_summary` has one row per store with `total_sales`, `basket_count` and `avg_basket`. Tap the line that gives the wrong number, then fix it. Guard the division.
+    code: |
+      SELECT r.region,
+             AVG(s.avg_basket) AS avg_basket
+      FROM dbo.store_summary AS s
+      LEFT JOIN dbo.dim_region AS r ON s.store_id = r.store_id
+      GROUP BY r.region;
+    bug_lines: [2]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: total_over_total
+          type: required
+          pattern: "SUM\\(\\s*s\\.total_sales\\s*\\)\\s*/\\s*NULLIF\\(\\s*SUM\\(\\s*s\\.basket_count\\s*\\)\\s*,\\s*0\\s*\\)"
+          message: "Divide total sales by total baskets, with NULLIF(SUM(s.basket_count), 0) as the denominator."
+        - id: no_avg_of_avg
+          type: forbidden
+          pattern: "AVG\\(\\s*s\\.avg_basket"
+          message: "AVG(s.avg_basket) is an average of averages."
+        - id: grouped
+          type: required
+          pattern: "GROUP\\s+BY\\s+r\\.region"
+          message: "Keep GROUP BY r.region."
+    fix_solution: |
+      SELECT r.region,
+             SUM(s.total_sales) / NULLIF(SUM(s.basket_count), 0) AS avg_basket
+      FROM dbo.store_summary AS s
+      LEFT JOIN dbo.dim_region AS r ON s.store_id = r.store_id
+      GROUP BY r.region;
+    wrong_answers:
+      - lines: [4]
+        feedback: "A left join keeps stores without a region. That line is fine."
+      - lines: [5]
+        feedback: "Grouping by region matches the requirement."
+    hints:
+      - "Does every store weigh the same in the result?"
+      - "Should it?"
+      - "Total sales over total baskets."
+    explanation: |
+      Recompute ratios from their totals at the level you report.
+
+  - id: C8-L3-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the checks for a Copilot-generated transformation.
+    items:
+      - {id: read, text: "Read every line: names, grain, join types"}
+      - {id: known, text: "Run it on a small dataset with a hand-worked answer"}
+      - {id: second, text: "Compare the result with a second method on real data"}
+      - {id: tests, text: "Keep the known-data and comparison checks as tests"}
+    answer: [read, known, second, tests]
+    wrong_answers:
+      - answer: [known, read, second, tests]
+        feedback: "Read first. A wrong join or invented column is cheaper to catch on paper."
+      - answer: [read, second, known, tests]
+        feedback: "Known data first: it tells you which answer is right when the two methods disagree."
+    hints:
+      - "Cheapest check first."
+      - "Which check gives you a known right answer?"
+      - "Keep what you built."
+    explanation: |
+      Read, known data, second method, then keep the checks.
+
+  - id: C8-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `mismatches(candidate: Callable[[list[float]], float | None], reference: Callable[[list[float]], float | None], cases: list[list[float]]) -> list[int]`. Run both functions on each case. Return the indexes of cases where the candidate raises an exception, or where the results differ. Two `None` results match. Floats match within `math.isclose` defaults. Import `Callable` from `collections.abc`.
+    starter: |
+      def mismatches(candidate, reference, cases):
+          return [i for i, case in enumerate(cases) if candidate(case) != reference(case)]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: mismatches
+          typed: true
+          docstring: true
+          message: "Give `mismatches` type hints and a docstring."
+      tests:
+        - id: differ
+          code: |
+            def ref(xs):
+                return sum(xs) / len(xs) if xs else None
+            def cand(xs):
+                return max(xs) if xs else None
+            assert mismatches(cand, ref, [[1.0, 1.0], [1.0, 3.0]]) == [1]
+          message: "Report the index where the results differ."
+        - id: raises
+          code: |
+            def ref(xs):
+                return sum(xs) / len(xs) if xs else None
+            def cand(xs):
+                return sum(xs) / len(xs)
+            assert mismatches(cand, ref, [[2.0], []]) == [1]
+          message: "A candidate that raises on a case is a mismatch, not a crash of the harness."
+        - id: float_tolerance
+          code: |
+            def ref(xs):
+                return 0.3
+            def cand(xs):
+                return 0.1 + 0.2
+            assert mismatches(cand, ref, [[0.0]]) == []
+          message: "0.1 + 0.2 and 0.3 differ in the last bit. Compare floats with math.isclose."
+        - id: none_vs_value
+          code: |
+            def ref(xs):
+                return None
+            def cand(xs):
+                return 0.0
+            assert mismatches(cand, ref, [[]]) == [0]
+          message: "None and 0.0 are different results."
+    solution: |
+      import math
+      from collections.abc import Callable
+
+
+      def mismatches(
+          candidate: Callable[[list[float]], float | None],
+          reference: Callable[[list[float]], float | None],
+          cases: list[list[float]],
+      ) -> list[int]:
+          """Indexes of cases where a candidate function disagrees with a reference.
+
+          Args:
+              candidate: Function under test, such as Copilot-generated code.
+              reference: Trusted implementation.
+              cases: Inputs to run through both.
+
+          Returns:
+              Case indexes where the candidate raised or returned a different result.
+          """
+          failed: list[int] = []
+          for index, case in enumerate(cases):
+              expected = reference(case)
+              try:
+                  got = candidate(case)
+              except Exception:
+                  failed.append(index)
+                  continue
+              if expected is None or got is None:
+                  if expected is not got:
+                      failed.append(index)
+              elif not math.isclose(got, expected):
+                  failed.append(index)
+          return failed
+    seeded_bugs:
+      - |
+        import math
+        from collections.abc import Callable
+
+
+        def mismatches(
+            candidate: Callable[[list[float]], float | None],
+            reference: Callable[[list[float]], float | None],
+            cases: list[list[float]],
+        ) -> list[int]:
+            """Lets candidate exceptions escape."""
+            failed: list[int] = []
+            for index, case in enumerate(cases):
+                expected = reference(case)
+                got = candidate(case)
+                if expected is None or got is None:
+                    if expected is not got:
+                        failed.append(index)
+                elif not math.isclose(got, expected):
+                    failed.append(index)
+            return failed
+      - |
+        from collections.abc import Callable
+
+
+        def mismatches(
+            candidate: Callable[[list[float]], float | None],
+            reference: Callable[[list[float]], float | None],
+            cases: list[list[float]],
+        ) -> list[int]:
+            """Exact float comparison."""
+            failed: list[int] = []
+            for index, case in enumerate(cases):
+                expected = reference(case)
+                try:
+                    got = candidate(case)
+                except Exception:
+                    failed.append(index)
+                    continue
+                if got != expected:
+                    failed.append(index)
+            return failed
+    wrong_answers:
+      - answer: |
+          from collections.abc import Callable
+
+
+          def mismatches(
+              candidate: Callable[[list[float]], float | None],
+              reference: Callable[[list[float]], float | None],
+              cases: list[list[float]],
+          ) -> list[int]:
+              """Exact float comparison."""
+              failed: list[int] = []
+              for index, case in enumerate(cases):
+                  expected = reference(case)
+                  try:
+                      got = candidate(case)
+                  except Exception:
+                      failed.append(index)
+                      continue
+                  if got != expected:
+                      failed.append(index)
+              return failed
+        triggers: float_tolerance
+    hints:
+      - "Wrap only the candidate call in try/except."
+      - "Handle None before math.isclose, which rejects None."
+      - "`expected is not got` is True when one is None and the other is not."
+    explanation: |
+      A comparison harness turns "looks right" into a list of failing cases. Keep it with the pipeline tests.
+
+  - id: C8-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Copilot wrote a PySpark step that deduplicates survey respondents and computes weighted reach per wave. Plan its verification before it goes into the silver pipeline.
+    slots:
+      - id: data
+        label: "Known dataset"
+        options:
+          - {id: awkward, text: "8 rows: a duplicate respondent, a null weight, a wave with zero total weight"}
+          - {id: sample, text: "A 1% random sample of production"}
+        answer: awkward
+      - id: second
+        label: "Second method"
+        options:
+          - {id: pandas, text: "The same metric in pandas on the known rows, compared with math.isclose"}
+          - {id: rerun, text: "Run the Copilot code twice and compare"}
+        answer: pandas
+      - id: keep
+        label: "After it passes"
+        options:
+          - {id: tests, text: "Commit the known rows and comparison as a pytest test"}
+          - {id: note, text: "Note 'verified' in the notebook markdown"}
+        answer: tests
+    model_answer: |
+      - Hand-built rows cover the cases that break code quietly. A random sample rarely contains them.
+      - A second, independent method on the same rows catches logic errors.
+      - A committed test checks every later change, including the next Copilot edit.
+    wrong_answers:
+      - answer: {data: sample}
+        feedback: "You have no hand-worked answer for a random sample, and it seldom contains the awkward cases."
+      - answer: {second: rerun}
+        feedback: "The same code gives the same wrong answer twice. The second method must be independent."
+      - answer: {keep: note}
+        feedback: "A note does not run. A test fails when a later change breaks the logic."
+    hints:
+      - "Which dataset has an answer you know?"
+      - "Is the second method independent?"
+      - "What checks the next change?"
+    explanation: |
+      Known awkward data, an independent second method, and a committed test.
+
+recap:
+  - front: "A Copilot query ran without error. What does that prove?"
+    back: "Syntax parses and names exist. Nothing about correctness."
+  - front: "Four checks for Copilot output"
+    back: "Read every line. Run on known data. Compare with a second method. Keep the checks as tests."
+  - front: "Average of averages"
+    back: "Weights small groups like large ones. Divide total by total instead."
+  - front: "Known data for verification"
+    back: "Five to ten hand-built rows with a null, a zero denominator, a duplicate key and an empty group."
+
+claims:
+  - claim: "Copilot for Data Engineering and Data Science is preview; always review AI-generated code; output might be inaccurate, incomplete or based on outdated library syntax; chat pane uses an approval diff."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/copilot-notebooks-overview (updated 2026-04-01)"
+  - claim: "With ANSI mode on, Spark division by zero raises DIVIDE_BY_ZERO; F.try_divide returns null instead."
+    status: verified
+    source: "Local run on PySpark 4.x (practice venv), September 2026; error message names try_divide."

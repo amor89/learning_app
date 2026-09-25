@@ -1,0 +1,326 @@
+id: C8-L1
+title: Copilot in Fabric, where it runs and what it costs
+
+concept: |
+  **Copilot in Fabric** is an AI assistant built into each workload. It writes notebook code, pipelines, SQL, KQL and DAX, and summarises reports. Before you rely on it, check three things.
+
+  **1. Is it switched on for you?** Copilot needs a paid Fabric capacity of **F2 or higher**, or Power BI Premium **P1 or higher**, in a supported region. Fabric administrators control it through tenant settings, scoped to security groups. If your capacity's region lacks Azure OpenAI, an admin must also allow data to be processed outside that region. Copilot stops working when a Fabric trial expires.
+
+  **2. What is its status?** Release status differs by workload (Microsoft Learn, checked September 2026):
+
+  | Experience | Status |
+  | --- | --- |
+  | Copilot in notebooks (Data Engineering, Data Science) | Preview |
+  | Data agents | Preview |
+  | Copilot in Data Factory (Dataflow Gen2, pipelines) | GA |
+  | Copilot for SQL queries in a Warehouse | Preview |
+  | Copilot for semantic models and reports in Power BI | GA |
+
+  **3. What does it cost?** Copilot requests consume capacity units, metered per 1,000 tokens. About 1,000 tokens equal 750 words. Input costs 100 CU seconds per 1,000 tokens, cached input 10 and output 400. A request with 2,000 input tokens and 500 output tokens costs (2,000 × 100 + 500 × 400) / 1,000 = 400 CU seconds. Copilot runs as a **background** operation, so Fabric smooths its cost over 24 hours.
+
+  On data handling, Microsoft states your data is not used to train models. It also states that Copilot output is sometimes inaccurate, and that people able to judge its accuracy should review it. Lesson C8-L3 shows you how.
+
+why_it_matters: |
+  An analytics team put Copilot-generated SQL into a scheduled report during the Warehouse Copilot preview. Nobody recorded which features were preview. When a reviewer asked whether the process relied on anything outside GA, the team spent a week tracing it. Check status first, record it, and keep production logic reviewed and owned by a person.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Plan: use Copilot to write all transformation SQL
+      Capacity: trial
+      Review: none, Copilot output goes straight to the scheduled job
+      Cost estimate: Copilot is included
+    annotations:
+      - find: "Capacity: trial"
+        note: "Copilot stops working when the trial expires."
+      - find: "Review: none, Copilot output goes straight to the scheduled job"
+        note: "Microsoft states output is sometimes inaccurate. Someone qualified must review it."
+      - find: "Cost estimate: Copilot is included"
+        note: "Every request consumes CUs from your capacity."
+  strong:
+    code: |
+      Plan: Copilot drafts SQL, an engineer reviews, tests and owns it
+      Capacity: F8, Copilot tenant setting scoped to the data-engineering group
+      Status check: Warehouse Copilot = preview (Learn, September 2026), noted in the design record
+      Cost estimate: about 400 CU seconds per request, smoothed over 24 hours
+    annotations:
+      - find: "Plan: Copilot drafts SQL, an engineer reviews, tests and owns it"
+        note: "Copilot drafts. A person decides."
+      - find: "Status check: Warehouse Copilot = preview (Learn, September 2026), noted in the design record"
+        note: "Preview features change. Record the status and the date."
+      - find: "Cost estimate: about 400 CU seconds per request, smoothed over 24 hours"
+        note: "Estimated from the published token rates."
+  takeaway: |
+    Confirm Copilot is enabled on a paid capacity, record the release status of each experience, and budget its CU use.
+
+exercises:
+  - id: C8-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which capacity runs Copilot in Fabric?
+    options:
+      - {id: a, text: "Any capacity, including an expired trial"}
+      - {id: b, text: "A paid F2 or higher, or P1 or higher, in a supported region"}
+      - {id: c, text: "Only F64 or higher"}
+      - {id: d, text: "No capacity: Copilot runs on the user's licence"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Microsoft Learn lists a paid F2+ or P1+ capacity in a supported region, with tenant settings enabled."}
+      - {id: r2, text: "Copilot is part of every Power BI Pro licence."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Copilot stops working when a trial expires."
+      - answer: c
+        feedback: "F64 matters for free-licence viewers (lesson C1-L1). Copilot starts at F2."
+      - answer: d
+        feedback: "Copilot consumes capacity units from the workspace's capacity."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Copilot depends on the capacity and tenant settings, not a Pro licence."
+    hints:
+      - "Copilot consumes CUs. Where do CUs come from?"
+      - "Paid, not trial."
+      - "F2 or P1 and up."
+    explanation: |
+      Paid F2+ or P1+, a supported region, and tenant settings switched on.
+
+  - id: C8-L1-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Your design uses Copilot in notebooks and Copilot in Data Factory pipelines. What do you record about their status?
+    options:
+      - {id: a, text: "Both GA"}
+      - {id: b, text: "Notebooks preview, Data Factory GA, with the date you checked"}
+      - {id: c, text: "Both preview"}
+      - {id: d, text: "Nothing: Copilot has one status across Fabric"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Microsoft Learn's release-status page lists each Copilot experience separately."}
+      - {id: r2, text: "Everything in Data Factory is GA."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Copilot in notebooks is preview (Learn, September 2026)."
+      - answer: c
+        feedback: "Copilot in Data Factory is GA (Learn, September 2026)."
+      - answer: d
+        feedback: "Status differs by workload and changes over time. Record each one with a date."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Status is per feature. Some Data Factory features are preview."
+    hints:
+      - "Is Copilot one feature or many?"
+      - "Check the release-status page per workload."
+      - "Record the date: status changes."
+    explanation: |
+      Status is per experience. Record each one with the date you checked.
+
+  - id: C8-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the Copilot cost for 1,000 input tokens and 1,000 output tokens, with no cache.
+    template: |
+      input:  1,000 tokens x 100 / 1,000 = 100 CU seconds
+      output: 1,000 tokens x [[g1]] / 1,000 = [[g2]] CU seconds
+      total: 500 CU seconds
+    gaps:
+      g1: {accepted: ["400"]}
+      g2: {accepted: ["400"]}
+    wrong_answers:
+      - answer: {g1: "100"}
+        feedback: "Output tokens cost more than input: 400 CU seconds per 1,000."
+    hints:
+      - "Output and input rates differ."
+      - "Output is four times the input rate."
+      - "400 and 400."
+    explanation: |
+      Output costs 400 CU seconds per 1,000 tokens. Long answers cost more than long questions.
+
+  - id: C8-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `copilot_cu_seconds(input_tokens: int, output_tokens: int, cached_input_tokens: int = 0) -> float`. `cached_input_tokens` is the part of `input_tokens` served from the prompt cache. Rates per 1,000 tokens: input 100, cached input 10, output 400 CU seconds. Raise `ValueError` if any count is negative or if cached tokens exceed input tokens.
+    starter: |
+      def copilot_cu_seconds(input_tokens, output_tokens, cached_input_tokens=0):
+          return (input_tokens + output_tokens) * 100 / 1000
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: copilot_cu_seconds
+          typed: true
+          docstring: true
+          message: "Give `copilot_cu_seconds` type hints and a docstring."
+      tests:
+        - id: example
+          code: |
+            assert copilot_cu_seconds(2000, 500) == 400.0
+          message: "2,000 input and 500 output tokens cost 400 CU seconds. Output is 400 per 1,000."
+        - id: cached
+          code: |
+            assert copilot_cu_seconds(2000, 500, cached_input_tokens=1000) == 310.0
+          message: "Cached input costs 10 per 1,000, and those tokens are not charged at the full input rate as well."
+        - id: too_many_cached
+          code: |
+            try:
+                copilot_cu_seconds(100, 0, cached_input_tokens=200)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no error")
+          message: "Cached tokens are part of input tokens. More cached than input is invalid."
+        - id: negative
+          code: |
+            try:
+                copilot_cu_seconds(-1, 0)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no error")
+          message: "Negative token counts are invalid."
+    solution: |
+      INPUT_RATE = 100
+      CACHED_INPUT_RATE = 10
+      OUTPUT_RATE = 400
+      TOKENS_PER_UNIT = 1000
+
+
+      def copilot_cu_seconds(
+          input_tokens: int, output_tokens: int, cached_input_tokens: int = 0
+      ) -> float:
+          """CU seconds for one Copilot request at the published token rates.
+
+          Args:
+              input_tokens: All input tokens, cached or not.
+              output_tokens: Output tokens.
+              cached_input_tokens: Input tokens served from the prompt cache.
+
+          Returns:
+              Capacity unit seconds consumed.
+
+          Raises:
+              ValueError: If a count is negative or cached exceeds input.
+          """
+          if min(input_tokens, output_tokens, cached_input_tokens) < 0:
+              raise ValueError("token counts must not be negative")
+          if cached_input_tokens > input_tokens:
+              raise ValueError("cached tokens cannot exceed input tokens")
+          uncached = input_tokens - cached_input_tokens
+          total = (
+              uncached * INPUT_RATE
+              + cached_input_tokens * CACHED_INPUT_RATE
+              + output_tokens * OUTPUT_RATE
+          )
+          return total / TOKENS_PER_UNIT
+    seeded_bugs:
+      - |
+        def copilot_cu_seconds(
+            input_tokens: int, output_tokens: int, cached_input_tokens: int = 0
+        ) -> float:
+            """Charges cached tokens twice."""
+            if min(input_tokens, output_tokens, cached_input_tokens) < 0:
+                raise ValueError("negative")
+            if cached_input_tokens > input_tokens:
+                raise ValueError("cached > input")
+            return (input_tokens * 100 + cached_input_tokens * 10 + output_tokens * 400) / 1000
+      - |
+        def copilot_cu_seconds(
+            input_tokens: int, output_tokens: int, cached_input_tokens: int = 0
+        ) -> float:
+            """One rate for everything."""
+            if min(input_tokens, output_tokens, cached_input_tokens) < 0:
+                raise ValueError("negative")
+            if cached_input_tokens > input_tokens:
+                raise ValueError("cached > input")
+            return (input_tokens + output_tokens) * 100 / 1000
+    wrong_answers:
+      - answer: |
+          def copilot_cu_seconds(
+              input_tokens: int, output_tokens: int, cached_input_tokens: int = 0
+          ) -> float:
+              """Charges cached tokens twice."""
+              if min(input_tokens, output_tokens, cached_input_tokens) < 0:
+                  raise ValueError("negative")
+              if cached_input_tokens > input_tokens:
+                  raise ValueError("cached > input")
+              return (input_tokens * 100 + cached_input_tokens * 10 + output_tokens * 400) / 1000
+        triggers: cached
+    hints:
+      - "Three rates: 100, 10 and 400 per 1,000 tokens."
+      - "Uncached input = input_tokens - cached_input_tokens."
+      - "Validate before you compute."
+    explanation: |
+      Charge each token once, at its own rate. Put the rates in named constants so you update one place when prices change.
+
+  - id: C8-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Your organisation wants Copilot for its data-engineering team only, on an F16 capacity, with an audit trail of which Copilot features the pipelines depend on.
+    slots:
+      - id: scope
+        label: "Tenant setting scope"
+        options:
+          - {id: group, text: "Enabled for the data-engineering security group"}
+          - {id: everyone, text: "Enabled for the whole organisation"}
+        answer: group
+      - id: record
+        label: "Design record"
+        options:
+          - {id: status_date, text: "Each Copilot experience used, its status and the date checked"}
+          - {id: copilot_yes, text: "Uses Copilot: yes"}
+        answer: status_date
+      - id: prod
+        label: "Copilot output in production"
+        options:
+          - {id: reviewed, text: "Reviewed, tested and committed by an engineer"}
+          - {id: direct, text: "Pasted into the job after it runs once without error"}
+        answer: reviewed
+    model_answer: |
+      - Scope the tenant setting to the security group that needs Copilot.
+      - Record each experience with its status and date, since status differs by workload.
+      - Treat Copilot output as a draft: a person reviews, tests and owns it.
+    wrong_answers:
+      - answer: {scope: everyone}
+        feedback: "Scope tenant settings to the groups that need them. Every request draws on the F16."
+      - answer: {record: copilot_yes}
+        feedback: "Status is per experience. 'Yes' tells an auditor nothing."
+      - answer: {prod: direct}
+        feedback: "Running without error is not correctness. Lesson C8-L3 shows how to check."
+    hints:
+      - "Tenant settings take security groups."
+      - "Is Copilot one feature?"
+      - "Who owns production logic?"
+    explanation: |
+      Scoped access, a dated status record, and human ownership of every output.
+
+recap:
+  - front: "Copilot in Fabric capacity requirement"
+    back: "Paid F2+ or P1+ in a supported region, with tenant settings enabled. Not after a trial expires."
+  - front: "Copilot release status"
+    back: "Per experience. Notebooks and data agents preview, Data Factory and Power BI GA (September 2026)."
+  - front: "Copilot token rates per 1,000 tokens"
+    back: "Input 100, cached input 10, output 400 CU seconds. Background job, smoothed over 24 hours."
+  - front: "Copilot output"
+    back: "Sometimes inaccurate. A person able to judge it reviews it before use."
+
+claims:
+  - claim: "Copilot requires a paid F2+ or P1+ capacity in a supported region; tenant settings scoped to security groups; cross-geo processing settings; stops after trial expiry."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/copilot-enable-fabric (updated 2026-08-10); troubleshoot-copilot-unavailable-after-trial (updated 2026-07-10)"
+  - claim: "Release status: notebooks preview, data agent preview, Data Factory GA, Warehouse SQL Copilot preview, Power BI semantic models and reports GA."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/copilot-ai-feature-state (updated 2026-06-19)"
+  - claim: "Copilot consumption: 100 CU seconds per 1,000 input tokens, 10 cached input, 400 output; about 1,000 tokens = 750 words; background operation smoothed over 24 hours; worked example 400 CU seconds."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/copilot-fabric-consumption (updated 2026-05-22)"
+  - claim: "Data not used to train models; output is sometimes inaccurate and should be reviewed by people able to evaluate it."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/copilot-privacy-security (updated 2025-06-25)"

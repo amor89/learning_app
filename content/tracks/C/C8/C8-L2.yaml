@@ -1,0 +1,343 @@
+id: C8-L2
+title: Data agents, questions in plain language
+
+concept: |
+  A **Fabric data agent** (preview, Microsoft Learn, checked September 2026) answers questions in plain language over your data. It picks a data source, writes a query and runs it:
+
+  - **SQL** for lakehouses and warehouses.
+  - **DAX** for Power BI semantic models.
+  - **KQL** for KQL databases in an eventhouse.
+
+  One agent takes up to **five data sources**. Users do not write the query, but the query is still what decides the answer.
+
+  Three rules keep it safe:
+
+  - **Read-only.** The agent generates only read queries. It never creates, updates or deletes data, and it does not run notebooks or other write workflows.
+  - **The user's permissions.** The agent runs with the credentials of the person asking, so each user only reaches data they already have access to.
+  - **No unstructured files.** PDFs, Word documents and text files are not supported sources.
+
+  The agent is only as good as the context you give it. Microsoft's guidance:
+
+  - **Select only the tables and columns** the agent needs. Every extra table is another chance to pick the wrong one.
+  - **Use clear names** such as `order_submission_date`, not `date1`.
+  - **Write instructions** that explain business terms and which source answers which kind of question.
+  - **Add example queries**: question and query pairs. Each example is validated against the schema, and invalid ones are not used. Lakehouses, warehouses and KQL databases support examples. Semantic models do not.
+
+  Then **evaluate** the agent. Build a ground-truth set of questions with known answers, run them through the agent, and measure how many it gets right. The `fabric-data-agent-sdk` package provides an evaluation API for this. Rerun the set after every change to instructions, examples or schema.
+
+  Every query costs tokens. Instructions, example queries and conversation history all add to the input and so to CU use.
+
+why_it_matters: |
+  A sales team published a data agent over a lakehouse with 60 tables, including three with a column called `revenue`: gross, net and forecast. "What was revenue last quarter?" returned the forecast. Nobody noticed for a month. Selecting only the net-revenue table, plus an instruction defining revenue as net of returns, fixed it. A 20-question ground-truth test would have caught it on day one.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Sources: sales_lakehouse (all 60 tables)
+      Instructions: (none)
+      Example queries: (none)
+      Testing: tried three questions in the chat, looked fine
+    annotations:
+      - find: "Sources: sales_lakehouse (all 60 tables)"
+        note: "Three revenue columns. The agent picks one."
+      - find: "Testing: tried three questions in the chat, looked fine"
+        note: "Looking fine is not a measured accuracy."
+  strong:
+    code: |
+      Sources: sales_lakehouse (fact_sales, dim_customer, dim_date only)
+      Instructions: "Revenue" means net_revenue_gbp, after returns. Quarters are calendar quarters.
+      Example queries: 12 question and SQL pairs, all passing schema validation
+      Testing: 40 ground-truth questions, rerun after every change, accuracy recorded
+    annotations:
+      - find: "Sources: sales_lakehouse (fact_sales, dim_customer, dim_date only)"
+        note: "Fewer tables, fewer wrong choices."
+      - find: 'Instructions: "Revenue" means net_revenue_gbp, after returns. Quarters are calendar quarters.'
+        note: "Business terms defined once, for every question."
+      - find: "Testing: 40 ground-truth questions, rerun after every change, accuracy recorded"
+        note: "A number you track, not a feeling."
+  takeaway: |
+    Narrow the schema, define your terms, add validated examples, and measure accuracy against known answers.
+
+exercises:
+  - id: C8-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A user asks a data agent to "delete the test orders". What happens?
+    options:
+      - {id: a, text: "The agent writes and runs a DELETE statement"}
+      - {id: b, text: "The agent generates only read queries, so it does not delete data"}
+      - {id: c, text: "The agent deletes them if the user is a workspace Admin"}
+      - {id: d, text: "The agent asks the data owner for approval"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Microsoft Learn states the data agent generates only read queries and keeps read-only connections."}
+      - {id: r2, text: "The agent has no permissions of its own."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The agent never generates create, update or delete queries."
+      - answer: c
+        feedback: "Read-only applies to every user, whatever their role."
+      - answer: d
+        feedback: "There is no approval flow. The agent does not write."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The agent uses the user's permissions. It is read-only by design, whatever those permissions allow."
+    hints:
+      - "Which query types does the agent generate?"
+      - "Only read queries."
+      - "Read-only holds for Admins too."
+    explanation: |
+      Data agents are read-only by design.
+
+  - id: C8-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Ana has access to the UK sales table but not the EU one. Both are sources of the same data agent. Ana asks for total EU sales. What does the agent do?
+    options:
+      - {id: a, text: "Returns EU sales, because the agent's owner has access"}
+      - {id: b, text: "Answers only from data Ana has permission to read"}
+      - {id: c, text: "Returns EU sales with the numbers masked"}
+      - {id: d, text: "Returns a random estimate"}
+    answer: b
+    reasons:
+      - {id: r1, text: "The agent uses the requesting user's credentials and permissions."}
+      - {id: r2, text: "The agent filters rows by country automatically."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The agent runs as the person asking, not as its owner."
+      - answer: c
+        feedback: "The agent applies the user's permissions. It does not add its own masking."
+      - answer: d
+        feedback: "The agent queries data. It does not invent estimates for data it cannot read."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. There is no automatic country filter. Ana's own permissions decide what she reaches."
+    hints:
+      - "Whose credentials does the agent use?"
+      - "The person asking."
+      - "Ana cannot read EU sales."
+    explanation: |
+      The agent never widens access. Grant permissions on the data, not on the agent.
+
+  - id: C8-L2-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the steps to build a data agent over a sales lakehouse.
+    items:
+      - {id: tables, text: "Select only the tables and columns the questions need"}
+      - {id: instr, text: "Write instructions that define business terms"}
+      - {id: examples, text: "Add example question and SQL pairs"}
+      - {id: eval, text: "Run the ground-truth question set and record accuracy"}
+      - {id: publish, text: "Publish and share the agent"}
+    answer: [tables, instr, examples, eval, publish]
+    wrong_answers:
+      - answer: [tables, instr, examples, publish, eval]
+        feedback: "Measure accuracy before users rely on the agent."
+      - answer: [examples, tables, instr, eval, publish]
+        feedback: "Example queries are validated against the selected schema. Select the tables first."
+    hints:
+      - "What do examples get validated against?"
+      - "Context before testing."
+      - "Test before publishing."
+    explanation: |
+      Schema, instructions, examples, evaluation, then publish.
+
+  - id: C8-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `evaluate(expected: dict[str, float], actual: dict[str, float | None], rel_tol: float = 0.001) -> tuple[float, list[str]]`. `expected` maps question ids to ground-truth answers. `actual` maps them to the agent's answers, where `None` means the agent gave no number. Return the share of questions answered correctly (within `rel_tol`, and exactly for an expected 0.0) and a sorted list of the failed ids. A question missing from `actual` fails. Raise `ValueError` if `expected` is empty.
+    starter: |
+      def evaluate(expected, actual, rel_tol=0.001):
+          failed = [q for q in expected if not actual.get(q)]
+          return 1 - len(failed) / len(actual), failed
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: evaluate
+          typed: true
+          docstring: true
+          message: "Give `evaluate` type hints and a docstring."
+      tests:
+        - id: basic
+          code: |
+            assert evaluate({"q1": 100.0, "q2": 50.0}, {"q1": 100.0, "q2": 55.0}) == (0.5, ["q2"])
+          message: "q2 is 10% off, so it fails. One of two correct gives 0.5."
+        - id: zero_answer
+          code: |
+            assert evaluate({"q1": 0.0, "q2": 10.0}, {"q1": 0.0, "q2": 10.0}) == (1.0, [])
+          message: "An answer of 0.0 is a real answer. Test for None with `is None`, not truthiness."
+        - id: missing_and_none
+          code: |
+            assert evaluate({"q1": 1.0, "q2": 2.0, "q3": 3.0}, {"q1": 1.0, "q2": None}) == (1 / 3, ["q2", "q3"])
+          message: "None and missing answers fail, and accuracy divides by the number of expected questions."
+        - id: empty
+          code: |
+            try:
+                evaluate({}, {})
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no error")
+          message: "An empty ground-truth set has no accuracy. Raise ValueError."
+    solution: |
+      import math
+
+
+      def evaluate(
+          expected: dict[str, float], actual: dict[str, float | None], rel_tol: float = 0.001
+      ) -> tuple[float, list[str]]:
+          """Accuracy of a data agent against a ground-truth set.
+
+          Args:
+              expected: Question id to ground-truth answer.
+              actual: Question id to the agent's answer, None if it gave no number.
+              rel_tol: Relative tolerance for a match.
+
+          Returns:
+              Share of expected questions answered correctly, and sorted failed ids.
+
+          Raises:
+              ValueError: If expected is empty.
+          """
+          if not expected:
+              raise ValueError("ground-truth set is empty")
+          failed = []
+          for question, truth in expected.items():
+              answer = actual.get(question)
+              if answer is None or not math.isclose(answer, truth, rel_tol=rel_tol):
+                  failed.append(question)
+          return (len(expected) - len(failed)) / len(expected), sorted(failed)
+    seeded_bugs:
+      - |
+        import math
+
+
+        def evaluate(
+            expected: dict[str, float], actual: dict[str, float | None], rel_tol: float = 0.001
+        ) -> tuple[float, list[str]]:
+            """Treats 0.0 as no answer."""
+            if not expected:
+                raise ValueError("empty")
+            failed = []
+            for question, truth in expected.items():
+                answer = actual.get(question)
+                if not answer or not math.isclose(answer, truth, rel_tol=rel_tol):
+                    failed.append(question)
+            return (len(expected) - len(failed)) / len(expected), sorted(failed)
+      - |
+        import math
+
+
+        def evaluate(
+            expected: dict[str, float], actual: dict[str, float | None], rel_tol: float = 0.001
+        ) -> tuple[float, list[str]]:
+            """Divides by the number of answers, not questions."""
+            if not expected:
+                raise ValueError("empty")
+            failed = []
+            for question, truth in expected.items():
+                answer = actual.get(question)
+                if answer is None or not math.isclose(answer, truth, rel_tol=rel_tol):
+                    failed.append(question)
+            return (len(expected) - len(failed)) / len(actual), sorted(failed)
+    wrong_answers:
+      - answer: |
+          import math
+
+
+          def evaluate(
+              expected: dict[str, float], actual: dict[str, float | None], rel_tol: float = 0.001
+          ) -> tuple[float, list[str]]:
+              """Treats 0.0 as no answer."""
+              if not expected:
+                  raise ValueError("empty")
+              failed = []
+              for question, truth in expected.items():
+                  answer = actual.get(question)
+                  if not answer or not math.isclose(answer, truth, rel_tol=rel_tol):
+                      failed.append(question)
+              return (len(expected) - len(failed)) / len(expected), sorted(failed)
+        triggers: zero_answer
+    hints:
+      - "Use `answer is None` to detect a missing number."
+      - "`math.isclose` handles the tolerance."
+      - "Divide by `len(expected)`."
+    explanation: |
+      The denominator is the ground-truth set. A zero is an answer. Both mistakes inflate or deflate accuracy without an error.
+
+  - id: C8-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Configure a data agent for finance analysts. Sources: a finance warehouse and a Power BI semantic model of the same numbers. Contracts in PDF live in a lakehouse Files folder.
+    slots:
+      - id: pdfs
+        label: "The PDF contracts"
+        options:
+          - {id: exclude, text: "Leave them out: unstructured files are not supported"}
+          - {id: include, text: "Add the Files folder as a source"}
+        answer: exclude
+      - id: examples
+        label: "Where to add example queries"
+        options:
+          - {id: warehouse, text: "On the warehouse source"}
+          - {id: model, text: "On the semantic model source"}
+        answer: warehouse
+      - id: routing
+        label: "Instruction to add"
+        options:
+          - {id: route, text: "Use the semantic model for KPI questions, the warehouse for transaction-level questions"}
+          - {id: no_instr, text: "No instructions, the agent will work it out"}
+        answer: route
+    model_answer: |
+      - Data agents do not support PDF, Word or text files.
+      - Example queries work on lakehouse, warehouse and KQL sources, not semantic models.
+      - Two sources hold the same numbers, so tell the agent which to use for which question.
+    wrong_answers:
+      - answer: {pdfs: include}
+        feedback: "Unstructured files such as PDFs are not supported data agent sources."
+      - answer: {examples: model}
+        feedback: "Semantic model sources do not support example queries."
+      - answer: {routing: no_instr}
+        feedback: "With two sources of the same numbers, the agent needs an instruction to route questions."
+    hints:
+      - "Which file types are supported?"
+      - "Which source types accept example queries?"
+      - "Two sources, same numbers: how does the agent choose?"
+    explanation: |
+      Supported sources only, examples where they work, and routing instructions where sources overlap.
+
+recap:
+  - front: "Data agent query languages"
+    back: "SQL for lakehouse and warehouse, DAX for semantic models, KQL for KQL databases. Up to five sources."
+  - front: "Data agent security"
+    back: "Read-only queries only. Runs with the asking user's permissions."
+  - front: "Example queries"
+    back: "Question and query pairs, validated against the schema. Not supported for semantic models."
+  - front: "Measure a data agent"
+    back: "Ground-truth questions with known answers, rerun after every change, accuracy recorded."
+
+claims:
+  - claim: "Data agent is preview; supports up to five sources (lakehouse, warehouse, semantic model, KQL database, and others); generates SQL, DAX, KQL; read-only; uses the requesting user's credentials; no unstructured data such as PDF, docx, txt."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-science/concept-data-agent (updated 2026-05-11); copilot-ai-feature-state (updated 2026-06-19)"
+  - claim: "Select only needed tables and columns; use descriptive names; instructions and descriptions supply business meaning."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-science/data-agent-configuration-best-practices (updated 2026-08-27)"
+  - claim: "Example queries are validated against the schema and supported for lakehouse, warehouse and KQL databases, not semantic models or ontology."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-science/data-agent-example-queries (updated 2025-09-11)"
+  - claim: "fabric-data-agent-sdk provides evaluation against ground-truth question sets."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-science/evaluate-data-agent (updated 2026-09-01)"
+  - claim: "Instructions, example queries and conversation history add to token usage and CU consumption."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/data-agent-consumption (updated 2025-03-20)"
