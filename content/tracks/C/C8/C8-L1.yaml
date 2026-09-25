@@ -11,7 +11,7 @@ concept: |
   | Experience | Status |
   | --- | --- |
   | Copilot in notebooks (Data Engineering, Data Science) | Preview |
-  | Data agents | Preview |
+  | Data agents | GA |
   | Copilot in Data Factory (Dataflow Gen2, pipelines) | GA |
   | Copilot for SQL queries in a Warehouse | Preview |
   | Copilot for semantic models and reports in Power BI | GA |
@@ -305,7 +305,7 @@ recap:
   - front: "Copilot in Fabric capacity requirement"
     back: "Paid F2+ or P1+ in a supported region, with tenant settings enabled. Not after a trial expires."
   - front: "Copilot release status"
-    back: "Per experience. Notebooks and data agents preview, Data Factory and Power BI GA (September 2026)."
+    back: "Per experience. Notebooks and Warehouse SQL preview. Data agents, Data Factory and Power BI GA (September 2026)."
   - front: "Copilot token rates per 1,000 tokens"
     back: "Input 100, cached input 10, output 400 CU seconds. Background job, smoothed over 24 hours."
   - front: "Copilot output"
@@ -315,9 +315,9 @@ claims:
   - claim: "Copilot requires a paid F2+ or P1+ capacity in a supported region; tenant settings scoped to security groups; cross-geo processing settings; stops after trial expiry."
     status: verified
     source: "https://learn.microsoft.com/en-us/fabric/fundamentals/copilot-enable-fabric (updated 2026-08-10); troubleshoot-copilot-unavailable-after-trial (updated 2026-07-10)"
-  - claim: "Release status: notebooks preview, data agent preview, Data Factory GA, Warehouse SQL Copilot preview, Power BI semantic models and reports GA."
+  - claim: "Release status: notebooks preview, Data Factory GA, Warehouse SQL Copilot preview, Power BI semantic models and reports GA. Data agent GA per its concept page; the release-status page lists it in a Data Science row marked preview alongside AI functions."
     status: verified
-    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/copilot-ai-feature-state (updated 2026-06-19)"
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/copilot-ai-feature-state (updated 2026-06-19); data-science/concept-data-agent (updated 2026-05-11)"
   - claim: "Copilot consumption: 100 CU seconds per 1,000 input tokens, 10 cached input, 400 output; about 1,000 tokens = 750 words; background operation smoothed over 24 hours; worked example 400 CU seconds."
     status: verified
     source: "https://learn.microsoft.com/en-us/fabric/fundamentals/copilot-fabric-consumption (updated 2026-05-22)"

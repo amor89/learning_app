@@ -1,0 +1,324 @@
+id: C9-L3
+title: Sensitivity labels, Purview and lineage
+
+concept: |
+  Access control decides who opens an item. **Sensitivity labels** say how sensitive its content is, and travel with it. Fabric uses labels from **Microsoft Purview Information Protection**. You need a Purview licence, and labelling Power BI items also needs a Pro or Premium Per User licence (Microsoft Learn, checked September 2026).
+
+  How labels spread:
+
+  - **Downstream inheritance.** A label on a semantic model flows to the reports and dashboards built on it. It never overwrites a label someone applied manually, and never replaces a label with a less restrictive one.
+  - **Default and mandatory labelling.** Admins can apply a default label to new items, or require users to pick one before they save.
+  - **Export.** Labels, and the protection a Purview policy attaches, stay with data exported to Excel, PDF and PowerPoint.
+
+  **Protection policies** link a label to access. When an item carries the label, users and groups named in the policy keep the permissions they already have. Everyone else is blocked. The user who last applied the label is not blocked.
+
+  Purview also gives you:
+
+  - **Unified Catalog**: metadata about Fabric items, visible in Purview.
+  - **Data loss prevention (DLP)**: detects sensitive data uploaded to OneLake and raises policy tips and alerts. It also restricts access to sensitive assets in KQL databases, SQL databases and warehouses.
+  - **Audit**: compliance admins track label activity.
+
+  **Lineage** shows how items connect. Every workspace has a lineage view that any user with a workspace role can open. It covers all items in the workspace, plus external sources one step upstream. **Impact analysis** starts from one item and lists the downstream items and workspaces a change might affect, and lets you notify their contacts.
+
+  Run impact analysis before a schema change. A label names the risk. A protection policy acts on it.
+
+why_it_matters: |
+  An engineer renamed a column in a lakehouse table on a Friday. Monday morning, 14 reports in three other workspaces showed errors, and a finance close was delayed. Impact analysis on the table would have listed all 14 reports and their workspaces, and notified their owners before the change.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Change: rename cust_id to customer_id in fact_sales
+      Checks: none, tested in the dev lakehouse notebook
+      Label on hr_salaries model: none, "the workspace is private"
+    annotations:
+      - find: "Checks: none, tested in the dev lakehouse notebook"
+        note: "Your notebook works. The 14 downstream reports break."
+      - find: 'Label on hr_salaries model: none, "the workspace is private"'
+        note: "Exports to Excel leave the workspace. A label and policy would travel with them."
+  strong:
+    code: |
+      Change: rename cust_id to customer_id in fact_sales
+      Checks: impact analysis lists 14 reports in 3 workspaces. Contacts notified. Views keep cust_id for one release
+      Label on hr_salaries model: Highly Confidential, with a protection policy for the HR group
+      Downstream: reports inherit Highly Confidential. Excel exports keep the label
+    annotations:
+      - find: "Checks: impact analysis lists 14 reports in 3 workspaces. Contacts notified. Views keep cust_id for one release"
+        note: "Know who breaks, tell them, and give them time."
+      - find: "Label on hr_salaries model: Highly Confidential, with a protection policy for the HR group"
+        note: "The policy blocks anyone outside the HR group, even if someone shares the item by mistake."
+      - find: "Downstream: reports inherit Highly Confidential. Excel exports keep the label"
+        note: "Protection follows the data out of Fabric."
+  takeaway: |
+    Run impact analysis before changes. Label sensitive items, attach protection policies, and let inheritance carry the label downstream.
+
+exercises:
+  - id: C9-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A report built on a **Confidential** semantic model has a **Highly Confidential** label that someone applied by hand. The model's label changes to **General**. What happens to the report's label?
+    options:
+      - {id: a, text: "It becomes General"}
+      - {id: b, text: "It stays Highly Confidential"}
+      - {id: c, text: "It becomes Confidential"}
+      - {id: d, text: "It is removed"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Downstream inheritance never overwrites a manually applied label, and never downgrades a label."}
+      - {id: r2, text: "Reports never inherit labels."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Inheritance never replaces a label with a less restrictive one, and never touches a manual label."
+      - answer: c
+        feedback: "The report's label was set by hand, so inheritance leaves it alone."
+      - answer: d
+        feedback: "Inheritance does not remove labels."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Reports do inherit labels from their semantic model. This one was set manually."
+    hints:
+      - "Was the report's label set by hand?"
+      - "Can inheritance downgrade?"
+      - "No to both."
+    explanation: |
+      Inheritance only raises or fills in labels. It never lowers them or overrides a person.
+
+  - id: C9-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      You plan to change a column type in a lakehouse table. Which tool lists every downstream item and workspace that the change might break?
+    options:
+      - {id: a, text: "Impact analysis"}
+      - {id: b, text: "The OneLake catalog domain filter"}
+      - {id: c, text: "Sensitivity labels"}
+      - {id: d, text: "The Capacity Metrics app"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Impact analysis shows affected downstream items and workspaces and can notify their contacts."}
+      - {id: r2, text: "Impact analysis blocks the change until owners approve."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Domains group items for discovery. They do not track dependencies."
+      - answer: c
+        feedback: "Labels classify sensitivity, not dependencies."
+      - answer: d
+        feedback: "The Metrics app shows capacity use (lesson C10-L3)."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Impact analysis informs and notifies. It does not block changes."
+    hints:
+      - "Which feature follows dependencies?"
+      - "It starts from lineage."
+      - "Impact analysis."
+    explanation: |
+      Lineage shows the graph. Impact analysis reads it from one item downwards.
+
+  - id: C9-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the protection policy behaviour.
+    template: |
+      Item labelled Highly Confidential, policy allows the HR group.
+      HR group member with Viewer access: [[g1]] their Viewer access.
+      Finance user with Viewer access: [[g2]].
+    gaps:
+      g1: {accepted: [keeps, retains]}
+      g2: {accepted: [blocked]}
+    wrong_answers:
+      - answer: {g2: keeps}
+        feedback: "Users not named in the policy are blocked, even with a workspace role."
+    hints:
+      - "Named users keep what they already have."
+      - "Everyone else?"
+      - "`keeps` and `blocked`."
+    explanation: |
+      A protection policy never adds permissions. It removes access from everyone it does not name.
+
+  - id: C9-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `inherit_label(current: str | None, manual: bool, upstream: str, order: list[str]) -> str | None`. It returns the downstream item's label after its upstream item's label becomes `upstream`. `order` lists labels from least to most restrictive. Rules: a manual label is kept. An unlabelled item takes `upstream`. Otherwise the item takes `upstream` only if it is more restrictive than `current`. Raise `ValueError` if a label is not in `order`.
+    starter: |
+      def inherit_label(current, manual, upstream, order):
+          return upstream
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: inherit_label
+          typed: true
+          docstring: true
+          message: "Give `inherit_label` type hints and a docstring."
+      tests:
+        - id: upgrade
+          code: |
+            order = ["General", "Confidential", "Highly Confidential"]
+            assert inherit_label("General", False, "Confidential", order) == "Confidential"
+            assert inherit_label(None, False, "General", order) == "General"
+          message: "Inheritance fills in and raises labels."
+        - id: no_downgrade
+          code: |
+            order = ["General", "Confidential", "Highly Confidential"]
+            assert inherit_label("Confidential", False, "General", order) == "Confidential"
+          message: "Inheritance never replaces a label with a less restrictive one."
+        - id: manual_kept
+          code: |
+            order = ["General", "Confidential", "Highly Confidential"]
+            assert inherit_label("General", True, "Highly Confidential", order) == "General"
+          message: "Inheritance never overwrites a manually applied label."
+        - id: unknown
+          code: |
+            try:
+                inherit_label("Secret", False, "General", ["General"])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no error")
+          message: "Unknown labels raise ValueError."
+    solution: |
+      def inherit_label(
+          current: str | None, manual: bool, upstream: str, order: list[str]
+      ) -> str | None:
+          """Downstream label after the upstream label changes.
+
+          Args:
+              current: The downstream item's label, or None.
+              manual: Whether a person applied the current label.
+              upstream: The upstream item's new label.
+              order: Labels from least to most restrictive.
+
+          Returns:
+              The downstream item's label after inheritance.
+
+          Raises:
+              ValueError: If a label is not in order.
+          """
+          for label in (current, upstream):
+              if label is not None and label not in order:
+                  raise ValueError(f"unknown label: {label}")
+          if current is None:
+              return upstream
+          if manual:
+              return current
+          if order.index(upstream) > order.index(current):
+              return upstream
+          return current
+    seeded_bugs:
+      - |
+        def inherit_label(
+            current: str | None, manual: bool, upstream: str, order: list[str]
+        ) -> str | None:
+            """Always follows upstream unless manual."""
+            for label in (current, upstream):
+                if label is not None and label not in order:
+                    raise ValueError(label)
+            if manual and current is not None:
+                return current
+            return upstream
+      - |
+        def inherit_label(
+            current: str | None, manual: bool, upstream: str, order: list[str]
+        ) -> str | None:
+            """Ignores the manual flag."""
+            for label in (current, upstream):
+                if label is not None and label not in order:
+                    raise ValueError(label)
+            if current is None or order.index(upstream) > order.index(current):
+                return upstream
+            return current
+    wrong_answers:
+      - answer: |
+          def inherit_label(
+              current: str | None, manual: bool, upstream: str, order: list[str]
+          ) -> str | None:
+              """Always follows upstream unless manual."""
+              for label in (current, upstream):
+                  if label is not None and label not in order:
+                      raise ValueError(label)
+              if manual and current is not None:
+                  return current
+              return upstream
+        triggers: no_downgrade
+    hints:
+      - "Validate both labels against order first."
+      - "Unlabelled takes upstream. Manual keeps current."
+      - "Compare `order.index` values."
+    explanation: |
+      Encoding the rule makes its asymmetry visible: labels move up by inheritance, never down.
+
+  - id: C9-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Protect a payroll semantic model and its reports. Analysts outside HR sometimes receive shared links by mistake, and HR exports summaries to Excel.
+    slots:
+      - id: label
+        label: "Label on the payroll model"
+        options:
+          - {id: hc, text: "Highly Confidential, with reports inheriting it downstream"}
+          - {id: unlabelled, text: "No label, the workspace is restricted"}
+        answer: hc
+      - id: policy
+        label: "Access control for mis-shared links"
+        options:
+          - {id: protection, text: "A protection policy on the label allowing only the HR group"}
+          - {id: trust, text: "Ask users not to forward links"}
+        answer: protection
+      - id: change
+        label: "Before renaming a payroll column"
+        options:
+          - {id: impact, text: "Run impact analysis and notify listed contacts"}
+          - {id: rename, text: "Rename and fix reports that break"}
+        answer: impact
+    model_answer: |
+      - A label on the model flows to its reports and stays on Excel exports.
+      - A protection policy blocks anyone outside the HR group, whatever they were sent.
+      - Impact analysis names what breaks before it breaks.
+    wrong_answers:
+      - answer: {label: unlabelled}
+        feedback: "Workspace restrictions stop at the workspace. Labels travel with exports."
+      - answer: {policy: trust}
+        feedback: "A protection policy blocks access even when a link reaches the wrong person."
+      - answer: {change: rename}
+        feedback: "Fixing after the break costs a morning of errors across workspaces. Check first."
+    hints:
+      - "What travels with an Excel export?"
+      - "What blocks a person with a link?"
+      - "What lists downstream items?"
+    explanation: |
+      Label, protect, and check impact before change.
+
+recap:
+  - front: "Downstream label inheritance rules"
+    back: "Flows to downstream items. Never overwrites a manual label. Never downgrades."
+  - front: "Protection policy"
+    back: "Tied to a label. Named users and groups keep existing permissions. Everyone else is blocked."
+  - front: "Lineage view"
+    back: "Every workspace has one. All items in the workspace plus external sources one step upstream."
+  - front: "Impact analysis"
+    back: "Downstream items and workspaces a change might affect, with a way to notify their contacts."
+
+claims:
+  - claim: "Labels come from Purview Information Protection; Purview licence plus Pro or PPU needed to label Power BI items; labels persist on export to Excel, PDF, PowerPoint; default and mandatory labelling exist."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/governance/information-protection (updated 2026-07-13)"
+  - claim: "Downstream inheritance never overwrites manual labels or downgrades to a less restrictive label."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/governance/service-security-sensitivity-label-downstream-inheritance (updated 2026-07-13)"
+  - claim: "Protection policies: users in the policy retain existing permissions, others blocked; label issuer exempt."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/governance/protection-policies-overview (updated 2025-12-03)"
+  - claim: "Purview Unified Catalog, DLP on OneLake uploads and access restriction for KQL, SQL database, warehouse; audit of label activity."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/governance/microsoft-purview-fabric (updated 2026-02-09)"
+  - claim: "Every workspace has a lineage view accessible to any workspace role; shows workspace items and external sources one step upstream; impact analysis lists downstream items and workspaces and notifies contacts."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/governance/lineage (updated 2023-11-06); impact-analysis (updated 2023-05-23)"

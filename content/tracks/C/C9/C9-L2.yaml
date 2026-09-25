@@ -1,0 +1,353 @@
+id: C9-L2
+title: OneLake security, roles down to rows and columns
+
+concept: |
+  **OneLake security** controls who reads which data in OneLake: tables, folders, schemas, rows and columns. Every supported engine enforces it (Microsoft Learn, checked September 2026).
+
+  **Roles.** Each role has a permission (Read or ReadWrite), the data it covers, and its members: Entra users or groups. The model is **deny by default** and supports only **grant** roles. There are no deny roles. A lakehouse starts with a **DefaultReader** role that gives users with the ReadAll permission access to its data. Remove or narrow it before your own roles mean anything.
+
+  **Who it restricts.** OneLake security governs **Viewers** and users with Read permission on the item. Workspace Admins, Members and Contributors already have data access through their workspace role. Make analysts Viewers.
+
+  **Row and column security.** A role can filter rows (RLS) and hide columns (CLS) on a table. Within one role, access is the **intersection** of its table, row and column rules. Across roles, access is the **union**: row filters combine with OR, so a user in roles for `city = 'Leeds'` and `city = 'York'` sees both cities. Two exceptions:
+
+  - In the **SQL analytics endpoint**, CLS uses deny semantics: if any of the user's roles hides a column, the endpoint blocks it.
+  - `SELECT *` on a table with hidden columns returns the allowed columns in Spark, but **fails** in the SQL analytics endpoint.
+
+  Keep row and column rules that belong together in **the same role**. OneLake rejects a combination where two roles allow different columns of a table and either role also filters its rows. Roles with ReadWrite cannot carry RLS or CLS.
+
+  **Engines.** RLS and CLS are GA in Spark notebooks, lakehouses, Direct Lake on OneLake semantic models, and the SQL analytics endpoint in **user's identity** access mode. Eventhouse supports RLS only, in preview.
+
+why_it_matters: |
+  A team added a OneLake security role limiting analysts to UK rows of `fact_sales`, then found the analysts still saw every country. Two causes. The analysts were Contributors on the workspace, so roles did not restrict them. And the DefaultReader role was still in place, granting full reads to every Viewer with ReadAll. Making analysts Viewers and removing DefaultReader fixed both.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Analysts' workspace role: Contributor
+      Roles: DefaultReader (unchanged), uk_sales (fact_sales where country = 'UK')
+      Salary hiding: role hr_cols hides salary, role hr_rows filters team = 'Ops'
+    annotations:
+      - find: "Analysts' workspace role: Contributor"
+        note: "Contributors already have data access. OneLake roles do not restrict them."
+      - find: "Roles: DefaultReader (unchanged), uk_sales (fact_sales where country = 'UK')"
+        note: "DefaultReader still grants full reads. The union of roles gives everything."
+      - find: "Salary hiding: role hr_cols hides salary, role hr_rows filters team = 'Ops'"
+        note: "Row and column rules split across roles. Keep them in one role."
+  strong:
+    code: |
+      Analysts' workspace role: Viewer
+      Roles: DefaultReader removed. uk_sales (fact_sales where country = 'UK')
+      Salary hiding: role hr_ops (dim_employee where team = 'Ops', columns without salary)
+      SQL analytics endpoint: user's identity access mode
+    annotations:
+      - find: "Analysts' workspace role: Viewer"
+        note: "Viewers are the users OneLake security governs."
+      - find: "Salary hiding: role hr_ops (dim_employee where team = 'Ops', columns without salary)"
+        note: "Rows and columns in one role: the intersection applies."
+      - find: "SQL analytics endpoint: user's identity access mode"
+        note: "The endpoint enforces OneLake security only in this mode."
+  takeaway: |
+    Readers are Viewers, defaults are removed, related row and column rules share a role, and every engine runs in a mode that enforces them.
+
+exercises:
+  - id: C9-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A user belongs to two OneLake security roles on `fact_sales`: one filters `region = 'North'`, the other `region = 'South'`. Which rows do they see?
+    options:
+      - {id: a, text: "North and South rows"}
+      - {id: b, text: "No rows: the filters contradict each other"}
+      - {id: c, text: "North rows only: the first role wins"}
+      - {id: d, text: "All rows"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Roles combine as a union. Row filters from different roles combine with OR."}
+      - {id: r2, text: "OneLake picks the most permissive single role."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Across roles, filters combine with OR, not AND."
+      - answer: c
+        feedback: "Role order does not matter. Access is the union."
+      - answer: d
+        feedback: "Only rows allowed by at least one role."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. OneLake unions the roles. It does not pick one."
+    hints:
+      - "Within a role: intersection. Across roles?"
+      - "Union."
+      - "Row filters combine with OR."
+    explanation: |
+      Across roles, access adds up. Plan roles so their union is what you intend.
+
+  - id: C9-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      An analyst is a **Contributor** on the workspace. A OneLake security role limits them to UK rows. What do they see in Spark?
+    options:
+      - {id: a, text: "UK rows only"}
+      - {id: b, text: "All rows: Contributors already have data access through their workspace role"}
+      - {id: c, text: "No rows"}
+      - {id: d, text: "An error"}
+    answer: b
+    reasons:
+      - {id: r1, text: "OneLake security governs Viewers and users with Read permission. Admins, Members and Contributors already have data access."}
+      - {id: r2, text: "Spark ignores OneLake security."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Contributors are not restricted by OneLake security roles."
+      - answer: c
+        feedback: "The workspace role gives them full data access."
+      - answer: d
+        feedback: "The read succeeds with all rows."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Spark enforces OneLake security (GA). The Contributor role is why it does not apply here."
+    hints:
+      - "Which users does OneLake security govern?"
+      - "Viewers and Read-permission users."
+      - "Contributors have write access already."
+    explanation: |
+      Restrict readers by making them Viewers first.
+
+  - id: C9-L2-E3
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A table hides the `salary` column from a user. They run `SELECT * FROM dim_employee` in Spark, then in the SQL analytics endpoint. What happens?
+    options:
+      - {id: a, text: "Spark returns the allowed columns. The endpoint returns an error"}
+      - {id: b, text: "Both return the allowed columns"}
+      - {id: c, text: "Both return an error"}
+      - {id: d, text: "Both return salary as null"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Microsoft Learn documents that CLS behaves differently: Spark shows only allowed columns, the endpoint blocks the query."}
+      - {id: r2, text: "Spark does not support column security."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The SQL analytics endpoint blocks queries that touch hidden columns."
+      - answer: c
+        feedback: "Spark succeeds and omits the hidden column."
+      - answer: d
+        feedback: "Hidden columns are removed or blocked, not nulled."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Spark enforces CLS by dropping the hidden column."
+    hints:
+      - "The engines behave differently."
+      - "Which one is stricter?"
+      - "The SQL endpoint."
+    explanation: |
+      List columns explicitly in SQL queries that users with CLS will run.
+
+  - id: C9-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `visible_columns(roles: list[dict[str, set[str]]], table: str, engine: Literal["spark", "sql_endpoint"]) -> set[str]`. Each role maps table names to the columns it allows. Consider only roles that include `table`. If none do, return an empty set (deny by default). For `"spark"`, return the union of the allowed columns. For `"sql_endpoint"`, return the intersection, because a column hidden by any role is blocked. Raise `ValueError` for any other engine.
+    starter: |
+      def visible_columns(roles, table, engine):
+          columns = set()
+          for role in roles:
+              columns |= role[table]
+          return columns
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: visible_columns
+          typed: true
+          docstring: true
+          message: "Give `visible_columns` type hints and a docstring."
+      tests:
+        - id: spark_union
+          code: |
+            roles = [{"t": {"a", "b"}}, {"t": {"b", "c"}}]
+            assert visible_columns(roles, "t", "spark") == {"a", "b", "c"}
+          message: "Spark combines column access across roles as a union."
+        - id: endpoint_intersect
+          code: |
+            roles = [{"t": {"a", "b"}}, {"t": {"b", "c"}}]
+            assert visible_columns(roles, "t", "sql_endpoint") == {"b"}
+          message: "The SQL analytics endpoint blocks a column hidden by any role: intersect."
+        - id: unrelated_roles
+          code: |
+            roles = [{"t": {"a", "b"}}, {"other": {"x"}}]
+            assert visible_columns(roles, "t", "sql_endpoint") == {"a", "b"}
+            assert visible_columns(roles, "missing", "spark") == set()
+          message: "Ignore roles that do not include the table. No role for the table means no access."
+        - id: bad_engine
+          code: |
+            try:
+                visible_columns([], "t", "kql")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no error")
+          message: "Unknown engines raise ValueError."
+    solution: |
+      from typing import Literal
+
+
+      def visible_columns(
+          roles: list[dict[str, set[str]]],
+          table: str,
+          engine: Literal["spark", "sql_endpoint"],
+      ) -> set[str]:
+          """Columns a user sees in one table across their OneLake security roles.
+
+          Args:
+              roles: Each role maps table names to the columns it allows.
+              table: Table being queried.
+              engine: "spark" (union across roles) or "sql_endpoint" (intersection).
+
+          Returns:
+              Visible column names. Empty if no role includes the table.
+
+          Raises:
+              ValueError: If the engine is not recognised.
+          """
+          if engine not in ("spark", "sql_endpoint"):
+              raise ValueError(f"unknown engine: {engine}")
+          grants = [role[table] for role in roles if table in role]
+          if not grants:
+              return set()
+          if engine == "spark":
+              return set().union(*grants)
+          return set.intersection(*grants)
+    seeded_bugs:
+      - |
+        from typing import Literal
+
+
+        def visible_columns(
+            roles: list[dict[str, set[str]]],
+            table: str,
+            engine: Literal["spark", "sql_endpoint"],
+        ) -> set[str]:
+            """Union for every engine."""
+            if engine not in ("spark", "sql_endpoint"):
+                raise ValueError(engine)
+            grants = [role[table] for role in roles if table in role]
+            return set().union(*grants)
+      - |
+        from typing import Literal
+
+
+        def visible_columns(
+            roles: list[dict[str, set[str]]],
+            table: str,
+            engine: Literal["spark", "sql_endpoint"],
+        ) -> set[str]:
+            """Treats a role without the table as hiding every column."""
+            if engine not in ("spark", "sql_endpoint"):
+                raise ValueError(engine)
+            grants = [role.get(table, set()) for role in roles]
+            if not grants:
+                return set()
+            if engine == "spark":
+                return set().union(*grants)
+            return set.intersection(*grants)
+    wrong_answers:
+      - answer: |
+          from typing import Literal
+
+
+          def visible_columns(
+              roles: list[dict[str, set[str]]],
+              table: str,
+              engine: Literal["spark", "sql_endpoint"],
+          ) -> set[str]:
+              """Union for every engine."""
+              if engine not in ("spark", "sql_endpoint"):
+                  raise ValueError(engine)
+              grants = [role[table] for role in roles if table in role]
+              return set().union(*grants)
+        triggers: endpoint_intersect
+    hints:
+      - "Collect the column sets from roles that include the table."
+      - "No grants: return an empty set."
+      - "`set().union(*grants)` for Spark, `set.intersection(*grants)` for the endpoint."
+    explanation: |
+      The same roles give different column sets in different engines. Test the engine your users query.
+
+  - id: C9-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      HR analysts must see employee rows for their own region, without the `salary` column, in Spark and through a Direct Lake report.
+    slots:
+      - id: ws_role
+        label: "Analysts' workspace role"
+        options:
+          - {id: viewer, text: "Viewer"}
+          - {id: contributor, text: "Contributor"}
+        answer: viewer
+      - id: roles
+        label: "Role design"
+        options:
+          - {id: one_role, text: "One role per region: region filter and columns without salary together"}
+          - {id: split, text: "One role hides salary for all HR analysts, separate roles filter each region"}
+        answer: one_role
+      - id: model
+        label: "Semantic model mode"
+        options:
+          - {id: dl_onelake, text: "Direct Lake on OneLake"}
+          - {id: import, text: "Import with a scheduled refresh"}
+        answer: dl_onelake
+      - id: default
+        label: "DefaultReader role"
+        options:
+          - {id: remove, text: "Remove it, or narrow it to non-sensitive tables"}
+          - {id: keep, text: "Keep it unchanged"}
+        answer: remove
+    model_answer: |
+      - Viewers are governed by OneLake security. Contributors are not.
+      - Row and column rules for the same table belong in one role. Split roles with different columns and a row filter are rejected.
+      - Direct Lake on OneLake enforces OneLake security (GA).
+      - DefaultReader grants full reads, and roles combine by union, so it overrides your restrictions.
+    wrong_answers:
+      - answer: {ws_role: contributor}
+        feedback: "Contributors already have data access. OneLake roles do not restrict them."
+      - answer: {roles: split}
+        feedback: "Two roles with different columns where one filters rows is a combination OneLake does not support. Keep them in one role."
+      - answer: {model: import}
+        feedback: "Direct Lake on OneLake is on the list of engines that enforce OneLake security. An import model holds its own copy and needs its own security rules."
+      - answer: {default: keep}
+        feedback: "Roles combine as a union. DefaultReader's full access wins over your filters."
+    hints:
+      - "Who does OneLake security govern?"
+      - "Where do related row and column rules go?"
+      - "Which Direct Lake mode enforces OneLake security?"
+    explanation: |
+      Viewers, one role per audience, a supported engine mode, and no leftover default grants.
+
+recap:
+  - front: "OneLake security combines roles how?"
+    back: "Within a role: intersection of table, row and column rules. Across roles: union. Row filters OR together."
+  - front: "Whom does OneLake security restrict?"
+    back: "Viewers and Read-permission users. Admins, Members and Contributors already have data access."
+  - front: "SELECT * with a hidden column"
+    back: "Spark returns allowed columns. SQL analytics endpoint returns an error."
+  - front: "Engines enforcing OneLake RLS and CLS (GA)"
+    back: "Spark, lakehouse, Direct Lake on OneLake, SQL analytics endpoint in user's identity mode. Eventhouse: RLS only, preview."
+
+claims:
+  - claim: "Role components (Read/ReadWrite, data, members); deny by default; grant roles only; DefaultReader role; default roles and ReadWrite matter only for Viewers since Admin/Member/Contributor have write access; ReadWrite roles cannot contain RLS/CLS."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/onelake/security/data-access-control-model (updated 2026-08-28); get-started-security (updated 2026-09-01)"
+  - claim: "Within a role OLS∩RLS∩CLS; across roles union; RLS combines with OR; SQL analytics endpoint intersects CLS; roles with different columns plus RLS on the same table unsupported."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/onelake/security/data-access-control-model (updated 2026-08-28)"
+  - claim: "SELECT * with hidden columns: Spark shows allowed columns, SQL analytics endpoint returns an error."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/onelake/security/table-column-row-security (updated 2026-08-19)"
+  - claim: "RLS/CLS GA in lakehouse, Direct Lake on OneLake, Spark notebooks, SQL analytics endpoint in user's identity mode; Eventhouse RLS only in public preview; third-party engines preview."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/onelake/security/read-secured-data (updated 2026-08-28)"

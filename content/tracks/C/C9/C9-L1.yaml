@@ -1,0 +1,286 @@
+id: C9-L1
+title: Domains and endorsement, finding the right data
+
+concept: |
+  A tenant with 400 workspaces needs two things before anyone trusts its data: a way to find data by business area, and a way to tell the authoritative copy from the rest. Fabric gives you **domains** and **endorsement**. Microsoft Learn shows neither with a preview label (checked September 2026).
+
+  **Domains** group workspaces by business area, such as Finance or Marketing. You can split a domain into **subdomains**.
+
+  - You associate **workspaces** with a domain. Every item in the workspace inherits the domain.
+  - Users filter the **OneLake catalog** by domain to find relevant data.
+  - Some tenant settings can be **delegated** to domain level, so each area sets its own rules.
+  - **Domain assignment does not grant or restrict access.** Workspace roles and item permissions decide who sees what.
+
+  Three roles manage domains. **Fabric admins** create domains and name domain admins. **Domain admins**, ideally the business owners, edit their domain and associate workspaces. **Domain contributors** are workspace admins allowed to assign their own workspaces to the domain.
+
+  **Endorsement** labels an item with one of three badges:
+
+  | Badge | Meaning | Who applies it |
+  | --- | --- | --- |
+  | Promoted | The creators think it is ready to share | Anyone with write access to the item |
+  | Certified | An authorised reviewer confirms it meets the organisation's standards | Only users a Fabric admin names |
+  | Master data | The authoritative source for core data such as customer lists | Only users a Fabric admin names |
+
+  Any item except a Power BI dashboard can be promoted or certified. Master data applies only to items that hold data, such as lakehouses and semantic models. Certification and master data work only after a Fabric admin enables them.
+
+  Endorsed items get a badge and appear first in some lists. That helps people pick the right copy. It does not stop anyone using an uncertified one.
+
+why_it_matters: |
+  A company had five semantic models called "Sales" across four workspaces. Two finance directors presented different quarterly revenue to the board. Both had used a model called "Sales". Certifying one model, retiring the others, and filing the finance workspaces under a Finance domain made the right model the first result anyone found.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Workspaces: 400, no domains
+      Semantic models named "Sales": 5, none endorsed
+      Access plan: put finance workspaces in the Finance domain to restrict them
+    annotations:
+      - find: 'Semantic models named "Sales": 5, none endorsed'
+        note: "Nothing tells users which copy is authoritative."
+      - find: "Access plan: put finance workspaces in the Finance domain to restrict them"
+        note: "Domains do not control access. Workspace roles do."
+  strong:
+    code: |
+      Domains: Finance, Marketing, Operations (subdomain Finance > Tax)
+      Domain admins: business owners. Domain contributors: finance workspace admins
+      Certified: finance_sales_model (by a Fabric-admin-approved certifier)
+      Master data: crm_lakehouse, the single home of dim_customer
+      Access: workspace roles and OneLake security (lesson C9-L2)
+    annotations:
+      - find: "Certified: finance_sales_model (by a Fabric-admin-approved certifier)"
+        note: "One authoritative model, labelled by an authorised reviewer."
+      - find: "Access: workspace roles and OneLake security (lesson C9-L2)"
+        note: "Discovery and access are separate controls."
+  takeaway: |
+    Domains help people find data. Endorsement tells them which copy to trust. Neither controls access.
+
+exercises:
+  - id: C9-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You associate a workspace with the Finance domain. What changes for users outside finance?
+    options:
+      - {id: a, text: "They lose access to the workspace"}
+      - {id: b, text: "Nothing about access. The workspace's items show under Finance in the OneLake catalog"}
+      - {id: c, text: "They gain read access to the items"}
+      - {id: d, text: "They must request access from the domain admin"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Domain assignment does not affect item visibility or access. Workspace roles and item permissions do."}
+      - {id: r2, text: "Domains only apply to Power BI items."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Domains do not restrict access."
+      - answer: c
+        feedback: "Domains do not grant access either."
+      - answer: d
+        feedback: "Access requests go through workspace roles and item permissions, not domains."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Every item in the workspace inherits the domain, not only Power BI items."
+    hints:
+      - "What are domains for?"
+      - "Finding data."
+      - "Access stays with roles and permissions."
+    explanation: |
+      Domains organise discovery. Roles and permissions control access.
+
+  - id: C9-L1-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A data engineer with Contributor access to a lakehouse wants to mark it as **Certified**. What happens?
+    options:
+      - {id: a, text: "It works: Contributors can certify their items"}
+      - {id: b, text: "They can request certification. Only users a Fabric admin specifies can certify"}
+      - {id: c, text: "Certification is automatic once a data quality test passes"}
+      - {id: d, text: "Lakehouses cannot be certified"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Any user can request certification, but only users specified by a Fabric administrator can certify."}
+      - {id: r2, text: "Only workspace Admins can certify."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Contributors can promote. Certifying needs a name on the Fabric admin's list."
+      - answer: c
+        feedback: "Certification is a human review. No test applies it."
+      - answer: d
+        feedback: "Any item except a Power BI dashboard can be certified."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The workspace Admin role does not grant certification rights. The Fabric admin's list does."
+    hints:
+      - "Promoted and Certified differ in who applies them."
+      - "Who names the certifiers?"
+      - "A Fabric admin."
+    explanation: |
+      Promotion is self-service. Certification is an authorised review.
+
+  - id: C9-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the domain roles.
+    template: |
+      Creates domains and names domain admins: Fabric [[g1]]
+      Assigns their own workspace to a domain: domain [[g2]], who must be a workspace admin
+    gaps:
+      g1: {accepted: [admin]}
+      g2: {accepted: [contributor]}
+    wrong_answers:
+      - answer: {g2: admin}
+        feedback: "Domain admins associate workspaces too, but the role for workspace admins assigning their own workspaces is domain contributor."
+    hints:
+      - "Tenant-level role first."
+      - "The domain role for workspace admins."
+      - "`admin` and `contributor`."
+    explanation: |
+      Fabric admins create domains. Domain contributors, who are workspace admins, assign their own workspaces.
+
+  - id: C9-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `allowed_badges(item_type: str) -> set[str]` for the endorsement rules. Use the badge names `"promoted"`, `"certified"` and `"master_data"`. A `"dashboard"` gets no badges. Data items (`"lakehouse"`, `"warehouse"`, `"semantic_model"`, `"kql_database"`) get all three. Every other item type gets promoted and certified. Keep the data item types in a module constant.
+    starter: |
+      def allowed_badges(item_type):
+          return {"promoted", "certified", "master_data"}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: allowed_badges
+          typed: true
+          docstring: true
+          message: "Give `allowed_badges` type hints and a docstring."
+      tests:
+        - id: dashboard
+          code: |
+            assert allowed_badges("dashboard") == set()
+          message: "Power BI dashboards cannot be promoted or certified."
+        - id: data_item
+          code: |
+            assert allowed_badges("lakehouse") == {"promoted", "certified", "master_data"}
+            assert allowed_badges("semantic_model") == {"promoted", "certified", "master_data"}
+          message: "Items that hold data take all three badges."
+        - id: other_item
+          code: |
+            assert allowed_badges("notebook") == {"promoted", "certified"}
+            assert allowed_badges("report") == {"promoted", "certified"}
+          message: "Master data applies only to items that hold data."
+    solution: |
+      DATA_ITEM_TYPES = frozenset({"lakehouse", "warehouse", "semantic_model", "kql_database"})
+      NO_BADGE_TYPES = frozenset({"dashboard"})
+
+
+      def allowed_badges(item_type: str) -> set[str]:
+          """Endorsement badges an item type can receive.
+
+          Args:
+              item_type: Fabric item type, such as "lakehouse" or "report".
+
+          Returns:
+              Allowed badge names.
+          """
+          if item_type in NO_BADGE_TYPES:
+              return set()
+          badges = {"promoted", "certified"}
+          if item_type in DATA_ITEM_TYPES:
+              badges.add("master_data")
+          return badges
+    seeded_bugs:
+      - |
+        def allowed_badges(item_type: str) -> set[str]:
+            """Master data for everything but dashboards."""
+            if item_type == "dashboard":
+                return set()
+            return {"promoted", "certified", "master_data"}
+      - |
+        DATA_ITEM_TYPES = frozenset({"lakehouse", "warehouse", "semantic_model", "kql_database"})
+
+
+        def allowed_badges(item_type: str) -> set[str]:
+            """Forgets the dashboard exception."""
+            badges = {"promoted", "certified"}
+            if item_type in DATA_ITEM_TYPES:
+                badges.add("master_data")
+            return badges
+    wrong_answers:
+      - answer: |
+          def allowed_badges(item_type: str) -> set[str]:
+              """Master data for everything but dashboards."""
+              if item_type == "dashboard":
+                  return set()
+              return {"promoted", "certified", "master_data"}
+        triggers: other_item
+    hints:
+      - "Handle the dashboard first."
+      - "Start from promoted and certified."
+      - "Add master_data only for data item types."
+    explanation: |
+      Encode the rules as constants and small branches, so a rule change touches one line.
+
+  - id: C9-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Organise a tenant where finance has 30 workspaces, three copies of the customer table, and complaints that nobody finds the right sales model.
+    slots:
+      - id: domain
+        label: "Grouping"
+        options:
+          - {id: domain, text: "A Finance domain with finance workspaces associated, finance leads as domain admins"}
+          - {id: naming, text: "A naming convention only: prefix finance workspaces with fin_"}
+        answer: domain
+      - id: customer
+        label: "The customer table"
+        options:
+          - {id: master, text: "Keep one copy, label it Master data, and replace the others with shortcuts"}
+          - {id: promote_all, text: "Promote all three copies"}
+        answer: master
+      - id: restrict
+        label: "Keeping non-finance users out of finance data"
+        options:
+          - {id: roles, text: "Workspace roles and OneLake security roles"}
+          - {id: by_domain, text: "The Finance domain assignment"}
+        answer: roles
+    model_answer: |
+      - A domain gives filtering in the OneLake catalog and a home for delegated settings.
+      - One master data copy, with shortcuts for other uses (lesson C3-L1).
+      - Access comes from roles, never from domains.
+    wrong_answers:
+      - answer: {domain: naming}
+        feedback: "A prefix helps a little. A domain adds catalog filtering, delegated settings and named owners."
+      - answer: {customer: promote_all}
+        feedback: "Three promoted copies tell users nothing about which one to trust."
+      - answer: {restrict: by_domain}
+        feedback: "Domain assignment does not affect access."
+    hints:
+      - "Which feature gives catalog filtering?"
+      - "Which badge marks the single source of truth?"
+      - "What controls access?"
+    explanation: |
+      Domains for discovery, master data for the authoritative copy, roles for access.
+
+recap:
+  - front: "What a domain does"
+    back: "Groups workspaces by business area for discovery and delegated settings. Does not control access."
+  - front: "Domain roles"
+    back: "Fabric admin creates domains. Domain admin edits one. Domain contributor, a workspace admin, assigns their workspaces."
+  - front: "Endorsement badges"
+    back: "Promoted (creators), Certified (named reviewers), Master data (named users, data items only). Dashboards get none."
+  - front: "Does endorsement block use of other copies?"
+    back: "No. It adds a badge and ranks the item first in some lists."
+
+claims:
+  - claim: "Workspaces associate with domains and items inherit; OneLake catalog filters by domain; tenant settings can be delegated; domain assignment doesn't affect visibility or access; roles Fabric admin, domain admin, domain contributor (must be workspace admin); subdomains."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/governance/domains (updated 2025-05-01)"
+  - claim: "Badges Promoted, Certified, Master data; any item except dashboards can be promoted (by users with write permission) or certified; only admin-specified users certify or label master data; master data only for data items; must be enabled by a Fabric admin."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/governance/endorsement-overview (updated 2024-07-11)"

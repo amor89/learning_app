@@ -2,7 +2,7 @@ id: C8-L2
 title: Data agents, questions in plain language
 
 concept: |
-  A **Fabric data agent** (preview, Microsoft Learn, checked September 2026) answers questions in plain language over your data. It picks a data source, writes a query and runs it:
+  A **Fabric data agent** (GA, Microsoft Learn, checked September 2026) answers questions in plain language over your data. It picks a data source, writes a query and runs it:
 
   - **SQL** for lakehouses and warehouses.
   - **DAX** for Power BI semantic models.
@@ -326,7 +326,7 @@ recap:
     back: "Ground-truth questions with known answers, rerun after every change, accuracy recorded."
 
 claims:
-  - claim: "Data agent is preview; supports up to five sources (lakehouse, warehouse, semantic model, KQL database, and others); generates SQL, DAX, KQL; read-only; uses the requesting user's credentials; no unstructured data such as PDF, docx, txt."
+  - claim: "Data agent is GA per its concept page; supports up to five sources (lakehouse, warehouse, semantic model, KQL database, and others); generates SQL, DAX, KQL; read-only; uses the requesting user's credentials; no unstructured data such as PDF, docx, txt."
     status: verified
     source: "https://learn.microsoft.com/en-us/fabric/data-science/concept-data-agent (updated 2026-05-11); copilot-ai-feature-state (updated 2026-06-19)"
   - claim: "Select only needed tables and columns; use descriptive names; instructions and descriptions supply business meaning."
