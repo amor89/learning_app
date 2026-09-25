@@ -23,7 +23,7 @@ concept: |
 
   Embeddings reflect the text the model was trained on, including its biases. Read samples of what the model calls "similar" before you trust any grouping built on it.
 
-  sentence-transformers needs PyTorch, which this app cannot run in the browser and this course's build could not install. The API details above are taken from the library's documentation and marked as not run here. The exercises use NumPy on vectors.
+  sentence-transformers needs PyTorch, which this app cannot run in the browser. This course's build did not run sentence-transformers, so the API details above come from the library's documentation and are marked as not run. The exercises use NumPy on vectors.
 
 why_it_matters: |
   An analyst embedded wave 1 answers with one model and, a year later, wave 2 answers with a newer model under the same short name. Similarity between the waves came out low across the board, and the report said themes had "shifted dramatically". The texts had not changed much. The two sets of vectors came from different spaces.
@@ -295,4 +295,4 @@ recap:
 claims:
   - claim: "SentenceTransformer(\"sentence-transformers/all-MiniLM-L6-v2\").encode(texts, batch_size=..., normalize_embeddings=True) returns 384-dimensional vectors."
     status: unverified
-    source: "sentence-transformers documentation and model card. Not run: PyTorch could not be installed in this environment."
+    source: "sentence-transformers documentation and model card. Not run in this course's build."
