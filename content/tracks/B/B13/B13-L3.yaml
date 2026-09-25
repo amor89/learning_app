@@ -1,0 +1,334 @@
+id: B13-L3
+title: Performance by subgroup, and the fairness trade-offs
+
+concept: |
+  A model can be accurate overall and fail one group. Before release, compute the key rates **per subgroup**: age band, region, sex, ethnicity where you hold it lawfully, and any group the decision affects differently.
+
+  Per group, report:
+
+  - **n** and **positives**, so readers can judge the evidence.
+  - **Selection rate**: the share flagged.
+  - **True positive rate** (recall): the share of real positives flagged.
+  - **False positive rate**: the share of real negatives flagged.
+  - **Precision**, and a calibration check (lesson B12-L2).
+
+  Then face a hard fact. When groups have **different base rates**, a calibrated score cannot also give equal false positive and true positive rates, except in trivial cases (Kleinberg, Mullainathan and Raghavan, 2016; Chouldechova, 2017).
+
+  A simulation in this course's build: a perfectly calibrated score for two groups with base rates of 30% and 10%, one threshold of 0.3. In both groups, cases scored 0.3 to 0.4 were positive about 34% of the time. Yet group A had a true positive rate of 0.65 and a false positive rate of 0.39. Group B had 0.15 and 0.03.
+
+  So choose, with the people accountable for the decision, which property matters most for this use:
+
+  - Equal **calibration**: a score means the same risk in every group.
+  - Equal **true positive rates**: each group's genuine cases are found at the same rate. Suits allocating help.
+  - Equal **false positive rates**: each group bears the same rate of wrong flags. Suits decisions with a cost to the flagged person.
+
+  Write the choice, the reasons and the measured gaps in the model card (lesson B18-L2).
+
+  Removing a protected attribute from the features does not remove its influence. Postcode, first name and shopping patterns act as **proxies**. Keep the attribute available for **measuring**, where lawful, even if the model never uses it.
+
+why_it_matters: |
+  A hardship-support model flagged customers for proactive help. Overall recall was 0.62. By age band, customers over 70 had recall 0.28: they used fewer digital channels, so the features the model relied on were sparse for them. The group most likely to need help was the least likely to be offered it. A per-group table at validation showed the gap in one line.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      features = [c for c in df.columns if c not in ("age_band", "sex")]
+      print("recall", recall_score(y_test, flagged))
+    annotations:
+      - find: 'features = [c for c in df.columns if c not in ("age_band", "sex")]'
+        note: "Dropping attributes does not remove proxies, and leaves nothing to measure gaps with."
+      - find: 'print("recall", recall_score(y_test, flagged))'
+        note: "One overall number hides a group at a fraction of it."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def group_rates(df: pd.DataFrame, group: str) -> pd.DataFrame:
+          """Selection rate, TPR and FPR per group, with counts. Columns y and flagged are 0/1."""
+          rows = []
+          for name, g in df.groupby(group, sort=True):
+              pos, neg = g["y"] == 1, g["y"] == 0
+              flag = g["flagged"] == 1
+              rows.append({
+                  group: name,
+                  "n": len(g),
+                  "positives": int(pos.sum()),
+                  "selection_rate": float(flag.mean()),
+                  "tpr": float((flag & pos).sum() / pos.sum()) if pos.sum() > 0 else None,
+                  "fpr": float((flag & neg).sum() / neg.sum()) if neg.sum() > 0 else None,
+              })
+          return pd.DataFrame(rows)
+    annotations:
+      - find: 'for name, g in df.groupby(group, sort=True):'
+        note: "The group attribute is used to measure, whether or not the model uses it."
+      - find: '"tpr": float((flag & pos).sum() / pos.sum()) if pos.sum() > 0 else None,'
+        note: "Guarded: a group with no positives has no TPR."
+  takeaway: |
+    Measure rates per group with counts, choose the fairness property that fits the decision, and document the gaps.
+
+exercises:
+  - id: B13-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You remove `sex` from a model's features. What happens to sex-related disparities?
+    options:
+      - {id: a, text: "They disappear."}
+      - {id: b, text: "They can persist through proxies, and you lose the ability to measure them if you discard the column."}
+      - {id: c, text: "They always get worse."}
+      - {id: d, text: "The model becomes calibrated."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Other features correlate with sex, and measurement needs the attribute."}
+      - {id: r2, text: "Removing features never changes a model."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Proxies such as occupation or purchase history can carry the same information."
+      - answer: c
+        feedback: "They may change either way. The point is you can no longer see them."
+      - answer: d
+        feedback: "Removing a feature says nothing about calibration."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Removing a feature does change the model, just not necessarily the disparity."
+    hints:
+      - "Which other features correlate with sex?"
+      - "How would you measure a gap without the column?"
+      - "Keep it for measurement where lawful."
+    explanation: |
+      Exclusion is not neutrality. Keep the attribute for measuring gaps, and decide separately whether the model uses it.
+
+  - id: B13-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      groups = {"A": {"tp": 65, "pos": 100, "fp": 150, "neg": 390}, "B": {"tp": 15, "pos": 100, "fp": 25, "neg": 900}}
+      for name, g in groups.items():
+          print(name, round(g["tp"] / g["pos"], 2), round(g["fp"] / g["neg"], 2))
+    answer: |
+      A 0.65 0.38
+      B 0.15 0.03
+    wrong_answers:
+      - answer: |
+          A 0.65 0.15
+          B 0.15 0.03
+        feedback: "FPR divides false positives by negatives: 150 / 390 = 0.38."
+    hints:
+      - "TPR = tp / positives."
+      - "FPR = fp / negatives."
+      - "150 / 390."
+    explanation: |
+      Same threshold, very different error rates, because the groups' base rates differ.
+
+  - id: B13-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Compute one group's true positive rate and false positive rate from boolean Series `flag`, `pos` and `neg`.
+    template: |
+      tpr = (flag & [[g1]]).sum() / pos.sum()
+      fpr = (flag & [[g2]]).sum() / neg.sum()
+    gaps:
+      g1: {accepted: [pos]}
+      g2: {accepted: [neg]}
+    wrong_answers:
+      - answer: {g2: pos}
+        feedback: "False positives are flagged negatives: flag & neg."
+    hints:
+      - "True positives are flagged positives."
+      - "False positives are flagged negatives."
+      - "`pos` and `neg`."
+    explanation: |
+      Both rates condition on the true class: TPR on positives, FPR on negatives.
+
+  - id: B13-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Write `group_rates(df, group) -> pd.DataFrame`. `df` has 0/1 columns `y` and `flagged`, and a group column. Return one row per group, sorted, with columns `<group>`, `n`, `positives`, `selection_rate`, `tpr` and `fpr`. Use `None` for `tpr` when a group has no positives, and for `fpr` when it has no negatives.
+    starter: |
+      import pandas as pd
+
+
+      def group_rates(df, group):
+          return df.groupby(group)["flagged"].mean().reset_index()
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+        DF = pd.DataFrame({
+            "age_band": ["18-34", "18-34", "18-34", "18-34", "70+", "70+", "70+"],
+            "y":        [1, 1, 0, 0, 1, 1, 1],
+            "flagged":  [1, 1, 1, 0, 1, 0, 0],
+        })
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: group_rates
+          typed: true
+          docstring: true
+          message: "Give `group_rates` type hints and a docstring."
+      tests:
+        - id: columns
+          code: |
+            out = group_rates(DF, "age_band")
+            assert list(out.columns) == ["age_band", "n", "positives", "selection_rate", "tpr", "fpr"]
+            assert out["age_band"].tolist() == ["18-34", "70+"]
+          message: "Return the columns in order, one row per group, sorted."
+        - id: rates
+          code: |
+            out = group_rates(DF, "age_band").set_index("age_band")
+            assert out.loc["18-34", "selection_rate"] == 0.75
+            assert out.loc["18-34", "tpr"] == 1.0 and out.loc["18-34", "fpr"] == 0.5
+            assert round(out.loc["70+", "tpr"], 4) == 0.3333
+          message: "selection_rate is the share flagged. TPR divides by positives, FPR by negatives."
+        - id: no_negatives
+          code: |
+            out = group_rates(DF, "age_band").set_index("age_band")
+            assert pd.isna(out.loc["70+", "fpr"])
+          message: "A group with no negatives has no FPR: return None."
+    solution: |
+      import pandas as pd
+
+
+      def group_rates(df: pd.DataFrame, group: str) -> pd.DataFrame:
+          """Selection rate, TPR and FPR per group, with counts.
+
+          Args:
+              df: Columns y and flagged (0/1) and the group column.
+              group: Name of the group column.
+
+          Returns:
+              One row per group, sorted by group.
+          """
+          rows = []
+          for name, g in df.groupby(group, sort=True):
+              pos, neg = g["y"] == 1, g["y"] == 0
+              flag = g["flagged"] == 1
+              rows.append(
+                  {
+                      group: name,
+                      "n": len(g),
+                      "positives": int(pos.sum()),
+                      "selection_rate": float(flag.mean()),
+                      "tpr": float((flag & pos).sum() / pos.sum()) if pos.sum() > 0 else None,
+                      "fpr": float((flag & neg).sum() / neg.sum()) if neg.sum() > 0 else None,
+                  }
+              )
+          return pd.DataFrame(rows)
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def group_rates(df: pd.DataFrame, group: str) -> pd.DataFrame:
+            """FPR over all rows."""
+            rows = []
+            for name, g in df.groupby(group, sort=True):
+                pos, neg = g["y"] == 1, g["y"] == 0
+                flag = g["flagged"] == 1
+                rows.append(
+                    {
+                        group: name,
+                        "n": len(g),
+                        "positives": int(pos.sum()),
+                        "selection_rate": float(flag.mean()),
+                        "tpr": float((flag & pos).sum() / pos.sum()) if pos.sum() > 0 else None,
+                        "fpr": float((flag & neg).sum() / len(g)),
+                    }
+                )
+            return pd.DataFrame(rows)
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def group_rates(df: pd.DataFrame, group: str) -> pd.DataFrame:
+              """FPR over all rows."""
+              rows = []
+              for name, g in df.groupby(group, sort=True):
+                  pos, neg = g["y"] == 1, g["y"] == 0
+                  flag = g["flagged"] == 1
+                  rows.append(
+                      {
+                          group: name,
+                          "n": len(g),
+                          "positives": int(pos.sum()),
+                          "selection_rate": float(flag.mean()),
+                          "tpr": float((flag & pos).sum() / pos.sum()) if pos.sum() > 0 else None,
+                          "fpr": float((flag & neg).sum() / len(g)),
+                      }
+                  )
+              return pd.DataFrame(rows)
+        triggers: rates
+    hints:
+      - "Loop over `df.groupby(group, sort=True)`."
+      - "Boolean masks: pos, neg and flag."
+      - "Guard each denominator."
+    explanation: |
+      Rates conditioned on the true class show who bears which errors. Counts beside them show how much evidence there is.
+
+  - id: B13-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Choose the fairness property to prioritise for each use.
+    slots:
+      - id: support
+        label: "Offer proactive hardship support"
+        options: &props
+          - {id: tpr, text: "Equal true positive rates"}
+          - {id: fpr, text: "Equal false positive rates"}
+          - {id: calibration, text: "Equal calibration"}
+        answer: tpr
+      - id: investigate
+        label: "Refer claims for a fraud investigation that delays payment"
+        options: *props
+        answer: fpr
+      - id: pricing
+        label: "Risk scores used directly as probabilities in pricing"
+        options: *props
+        answer: calibration
+    model_answer: |
+      - Help should reach genuine cases in every group at the same rate: TPR.
+      - Wrong referrals harm people, so wrong flags should not fall more on one group: FPR.
+      - Prices use the probability itself, which must mean the same in every group: calibration.
+    wrong_answers:
+      - answer: {support: fpr}
+        feedback: "An unneeded offer of help costs little. Missing people who need it is the harm."
+      - answer: {investigate: tpr}
+        feedback: "The harm is to people wrongly referred. Balance false positive rates."
+      - answer: {pricing: tpr}
+        feedback: "Pricing uses probabilities as numbers. They must be calibrated in each group."
+    hints:
+      - "Who is harmed, and by which error?"
+      - "Is the score used as a number?"
+      - "Match the property to the harm."
+    explanation: |
+      No single property fits all uses. Pick the one that protects against the harm this decision causes, and document why.
+
+recap:
+  - front: "Rates to report per group"
+    back: "n, positives, selection rate, TPR, FPR, precision, calibration."
+  - front: "Impossibility result"
+    back: "With different base rates, calibration and equal error rates cannot all hold (Kleinberg et al. 2016; Chouldechova 2017)."
+  - front: "Dropping a protected attribute"
+    back: "Proxies keep its influence. Keep it for measurement where lawful."
+  - front: "Choosing a fairness property"
+    back: "From the harm: missed help (TPR), wrong flags (FPR), numbers used directly (calibration)."
+
+claims:
+  - claim: "Calibrated scores with base rates of 30% and 10% at threshold 0.3 gave TPR 0.65 and FPR 0.39 in one group, 0.15 and 0.03 in the other."
+    status: verified
+    source: "Simulated with NumPy 2.4.6 in this repository (Beta(3,7) and Beta(1,9) risks, 200,000 rows each)."
+  - claim: "Calibration within groups and balance of error rates cannot all hold when base rates differ, except in trivial cases."
+    status: verified
+    source: "Kleinberg, Mullainathan and Raghavan (2016), Inherent Trade-Offs in the Fair Determination of Risk Scores; Chouldechova (2017), Big Data 5(2)."

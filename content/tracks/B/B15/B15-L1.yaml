@@ -1,0 +1,298 @@
+id: B15-L1
+title: Sentence embeddings for open-ended answers
+
+concept: |
+  Open-ended survey answers ("What could we improve?") arrive as thousands of short texts. A **sentence embedding model** turns each text into a fixed-length vector, so that texts with similar meaning get nearby vectors. With the sentence-transformers library:
+
+  ```python
+  from sentence_transformers import SentenceTransformer
+
+  model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+  vectors = model.encode(answers, batch_size=64, normalize_embeddings=True)
+  ```
+
+  `all-MiniLM-L6-v2` returns 384 numbers per text. With `normalize_embeddings=True` every vector has length 1, so the **cosine similarity** of two texts is their dot product: 1 for the same direction, 0 for unrelated.
+
+  Rules that keep embeddings usable:
+
+  - **One model per analysis.** Vectors from different models, or different versions of one model, live in different spaces. Never compare or mix them. Record the model name and version with the vectors.
+  - **Cache the vectors.** Encoding is the slow step. Store vectors with the text ID, the model name and a hash of the text, and re-encode only new or changed answers.
+  - **Clean lightly.** Strip whitespace and drop empty answers. Do not stem or remove stop words: the model was trained on natural text.
+  - **Check the language.** Many small models are English-only. Use a multilingual model for multi-country surveys, and test it on your own answers.
+  - **Handle zero vectors.** An empty string can produce a vector you should not compare. Filter before encoding, and guard any division by a vector's length.
+
+  Embeddings reflect the text the model was trained on, including its biases. Read samples of what the model calls "similar" before you trust any grouping built on it.
+
+  sentence-transformers needs PyTorch, which this app cannot run in the browser and this course's build could not install. The API details above are taken from the library's documentation and marked as not run here. The exercises use NumPy on vectors.
+
+why_it_matters: |
+  An analyst embedded wave 1 answers with one model and, a year later, wave 2 answers with a newer model under the same short name. Similarity between the waves came out low across the board, and the report said themes had "shifted dramatically". The texts had not changed much. The two sets of vectors came from different spaces.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def most_similar(query, matrix):
+          scores = matrix @ query
+          return int(scores.argmax())
+    annotations:
+      - find: "scores = matrix @ query"
+        note: "A dot product equals cosine similarity only when all vectors have length 1."
+  strong:
+    code: |
+      import numpy as np
+
+
+      def top_k_similar(query: np.ndarray, matrix: np.ndarray, k: int) -> list[int]:
+          """Row indices of the k rows most cosine-similar to query, most similar first."""
+          q_norm = np.linalg.norm(query)
+          if q_norm == 0:
+              raise ValueError("query vector has zero length")
+          norms = np.linalg.norm(matrix, axis=1)
+          sims = np.full(len(matrix), -np.inf)
+          ok = norms > 0
+          sims[ok] = (matrix[ok] @ query) / (norms[ok] * q_norm)
+          return [int(i) for i in np.argsort(-sims, kind="stable")[:k]]
+    annotations:
+      - find: "sims[ok] = (matrix[ok] @ query) / (norms[ok] * q_norm)"
+        note: "Cosine similarity that does not assume normalised input."
+      - find: "sims = np.full(len(matrix), -np.inf)"
+        note: "Zero-length rows rank last instead of causing a division by zero."
+  takeaway: |
+    One model, recorded and cached. Compare with cosine similarity, and guard against zero vectors.
+
+exercises:
+  - id: B15-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You have vectors for 2025 answers from model A, and for 2026 answers from model B. Can you compare them?
+    options:
+      - {id: a, text: "Yes, if both have 384 dimensions."}
+      - {id: b, text: "No. Re-encode both years with the same model."}
+      - {id: c, text: "Yes, after normalising both."}
+      - {id: d, text: "Yes, by averaging them."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Each model defines its own space. The same position means different things in each."}
+      - {id: r2, text: "Newer models are always better."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Matching dimensions do not make the spaces the same."
+      - answer: c
+        feedback: "Normalising fixes length, not the meaning of directions."
+      - answer: d
+        feedback: "Averaging vectors from different spaces produces meaningless numbers."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The issue is consistency, not quality."
+    hints:
+      - "What defines the meaning of a direction?"
+      - "The model that produced it."
+      - "Use one model for everything you compare."
+    explanation: |
+      Re-encode all texts with one model and record which one.
+
+  - id: B15-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (NumPy 2.4)
+    code: |
+      import numpy as np
+
+      a = np.array([3.0, 4.0])
+      b = np.array([1.0, 0.0])
+      print(float(a @ b), round(float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b))), 2))
+    answer: "3.0 0.6"
+    wrong_answers:
+      - answer: "0.6 0.6"
+        feedback: "The raw dot product is 3.0. Only after dividing by the lengths (5 and 1) do you get 0.6."
+    hints:
+      - "Dot product: 3×1 + 4×0."
+      - "Lengths: 5 and 1."
+      - "3 / 5."
+    explanation: |
+      A dot product equals cosine similarity only for unit-length vectors. Normalise or divide by the lengths.
+
+  - id: B15-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Normalise each row of a matrix to length 1.
+    template: |
+      norms = np.linalg.norm(matrix, axis=[[g1]], keepdims=True)
+      unit = matrix / [[g2]]
+    gaps:
+      g1: {accepted: ["1"]}
+      g2: {accepted: [norms]}
+    wrong_answers:
+      - answer: {g1: "0"}
+        feedback: "axis=0 gives one norm per column. Each row needs its own length: axis=1."
+    hints:
+      - "One length per row."
+      - "keepdims makes the shape broadcast."
+      - "`1` and `norms`."
+    explanation: |
+      `axis=1` gives each row's length, and `keepdims=True` keeps a column shape that divides row-wise. Guard rows with zero length.
+
+  - id: B15-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `top_k_similar(query, matrix, k) -> list[int]`. Return the row indices of the `k` rows with the highest cosine similarity to `query`, highest first, as Python ints. Rows with zero length rank last. Raise `ValueError` if `query` has zero length. Do not assume the inputs are normalised.
+    starter: |
+      import numpy as np
+
+
+      def top_k_similar(query, matrix, k):
+          return list(np.argsort(matrix @ query)[:k])
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+        M = np.array([[10.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0]])
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: top_k_similar
+          typed: true
+          docstring: true
+          message: "Give `top_k_similar` type hints and a docstring."
+      tests:
+        - id: cosine
+          code: |
+            assert top_k_similar(np.array([0.1, 0.9]), M, 2) == [1, 2]
+          message: "Rank by cosine similarity, not raw dot product: row 0 is long but points the wrong way."
+        - id: zero_rows
+          code: |
+            out = top_k_similar(np.array([1.0, 0.0]), M, 4)
+            assert out[:3] == [0, 2, 1] and out[3] == 3
+            assert all(isinstance(i, int) for i in out)
+          message: "Zero-length rows rank last, and indices are Python ints."
+        - id: zero_query
+          code: |
+            try:
+                top_k_similar(np.array([0.0, 0.0]), M, 1)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "A zero-length query must raise ValueError."
+    solution: |
+      import numpy as np
+
+
+      def top_k_similar(query: np.ndarray, matrix: np.ndarray, k: int) -> list[int]:
+          """Row indices of the k rows most cosine-similar to query.
+
+          Args:
+              query: Vector of length d.
+              matrix: Array of shape (n, d).
+              k: Number of indices to return.
+
+          Returns:
+              Indices, most similar first. Zero-length rows rank last.
+
+          Raises:
+              ValueError: If query has zero length.
+          """
+          q_norm = np.linalg.norm(query)
+          if q_norm == 0:
+              raise ValueError("query vector has zero length")
+          norms = np.linalg.norm(matrix, axis=1)
+          sims = np.full(len(matrix), -np.inf)
+          ok = norms > 0
+          sims[ok] = (matrix[ok] @ query) / (norms[ok] * q_norm)
+          return [int(i) for i in np.argsort(-sims, kind="stable")[:k]]
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def top_k_similar(query: np.ndarray, matrix: np.ndarray, k: int) -> list[int]:
+            """Raw dot product."""
+            if np.linalg.norm(query) == 0:
+                raise ValueError("zero query")
+            return [int(i) for i in np.argsort(-(matrix @ query), kind="stable")[:k]]
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def top_k_similar(query: np.ndarray, matrix: np.ndarray, k: int) -> list[int]:
+              """Raw dot product."""
+              if np.linalg.norm(query) == 0:
+                  raise ValueError("zero query")
+              return [int(i) for i in np.argsort(-(matrix @ query), kind="stable")[:k]]
+        triggers: cosine
+    hints:
+      - "Divide dot products by both lengths."
+      - "Start similarities at -inf, fill only rows with non-zero length."
+      - "`np.argsort(-sims, kind=\"stable\")[:k]`, then convert to int."
+    explanation: |
+      Cosine similarity ignores length, so a long vector pointing elsewhere does not win. Zero rows are kept but ranked last.
+
+  - id: B15-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Plan embeddings for a quarterly tracker's open-ended question, in five languages.
+    slots:
+      - id: model
+        label: "Model"
+        options:
+          - {id: multi, text: "One multilingual model, tested on a sample from each language"}
+          - {id: english, text: "An English-only model for all languages"}
+          - {id: per_lang, text: "A different model per language"}
+        answer: multi
+      - id: store
+        label: "What is stored with each vector"
+        options:
+          - {id: full, text: "Answer ID, text hash, model name and version"}
+          - {id: vector_only, text: "The vector only"}
+        answer: full
+      - id: update
+        label: "Next quarter"
+        options:
+          - {id: incremental, text: "Encode only new or changed answers with the same model"}
+          - {id: newest, text: "Switch to the newest model for new answers only"}
+        answer: incremental
+    model_answer: |
+      - One multilingual model puts all languages in one space. Test it on your data.
+      - Store the identity of text and model, so vectors can be reused and audited.
+      - Reuse vectors and keep the model fixed. Changing model means re-encoding everything.
+    wrong_answers:
+      - answer: {model: per_lang}
+        feedback: "Different models give different spaces. Answers in different languages could not be compared."
+      - answer: {model: english}
+        feedback: "An English-only model maps other languages poorly. Test before you trust it."
+      - answer: {update: newest}
+        feedback: "New and old vectors would come from different spaces."
+      - answer: {store: vector_only}
+        feedback: "Without the model name and text hash, nobody knows which vectors can be reused."
+    hints:
+      - "One space for all comparisons."
+      - "What makes a cached vector reusable?"
+      - "Mixing models breaks comparisons."
+    explanation: |
+      Fix the model, record identities, and reuse vectors only within one model.
+
+recap:
+  - front: "Encode with sentence-transformers"
+    back: "SentenceTransformer(name).encode(texts, normalize_embeddings=True). Not run in this course's build."
+  - front: "Cosine similarity for unit vectors"
+    back: "The dot product. Otherwise divide by both lengths."
+  - front: "Mixing embedding models"
+    back: "Never. Each model defines its own space."
+  - front: "Cache key for a vector"
+    back: "Text ID, text hash, model name and version."
+
+claims:
+  - claim: "SentenceTransformer(\"sentence-transformers/all-MiniLM-L6-v2\").encode(texts, batch_size=..., normalize_embeddings=True) returns 384-dimensional vectors."
+    status: unverified
+    source: "sentence-transformers documentation and model card. Not run: PyTorch could not be installed in this environment."

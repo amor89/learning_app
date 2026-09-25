@@ -1,0 +1,303 @@
+id: B13-L1
+title: Permutation importance on held-out data
+
+concept: |
+  "Which features matter?" has a trustworthy answer and a misleading one.
+
+  The misleading one is **impurity importance**, `feature_importances_` on scikit-learn tree ensembles. It is computed on training data and favours features with many distinct values. In this course's build (scikit-learn 1.9, random forest, 3,000 rows), a meaningless column of random IDs with 3,000 distinct values got an impurity importance of **0.335**, half as much as the real signal (0.661).
+
+  The trustworthy one is **permutation importance** on **held-out** data: shuffle one column, breaking its link with the target, and measure how much the score drops. A feature the model relies on causes a large drop. The same random ID column dropped the test AUC by **0.004**: nothing.
+
+  ```python
+  from sklearn.inspection import permutation_importance
+  result = permutation_importance(model, X_test, y_test, scoring="roc_auc",
+                                  n_repeats=10, random_state=0)
+  result.importances_mean, result.importances_std
+  ```
+
+  Read it with three cautions:
+
+  - **It measures the model, not the world.** A large drop means this model uses the feature. It does not mean the feature causes the outcome.
+  - **Correlated features share credit.** If `age` and `years_since_birth_cohort` carry the same information, shuffling one leaves the other, and both look unimportant. Group correlated features and permute them together, or report them as a group.
+  - **Use the spread.** Report the mean drop with its standard deviation across repeats. A drop of 0.003 ± 0.004 is zero.
+
+  Use the metric you report for the model. An importance in accuracy on imbalanced data says little (lesson B12-L1).
+
+why_it_matters: |
+  A retention model's slide showed "customer ID" as the third most important driver, from `feature_importances_`. The product team asked what it meant. It meant nothing: the ID had thousands of distinct values, so trees split on it to memorise training rows. Permutation importance on the test set gave it zero. The slide had already been shown to the client.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      importances = dict(zip(X_train.columns, model.feature_importances_))
+      top = sorted(importances, key=importances.get, reverse=True)[:5]
+    annotations:
+      - find: "importances = dict(zip(X_train.columns, model.feature_importances_))"
+        note: "Impurity importance from training data: biased towards high-cardinality features."
+  strong:
+    code: |
+      import numpy as np
+      import pandas as pd
+      from sklearn.base import ClassifierMixin
+      from sklearn.metrics import roc_auc_score
+
+
+      def permutation_drop(model: ClassifierMixin, X: pd.DataFrame, y: pd.Series, col: str, rng: np.random.Generator, n_repeats: int) -> float:
+          """Mean fall in held-out ROC AUC when col is shuffled."""
+          base = roc_auc_score(y, model.predict_proba(X)[:, 1])
+          drops = []
+          for _ in range(n_repeats):
+              shuffled = X.assign(**{col: rng.permutation(X[col].to_numpy())})
+              drops.append(base - roc_auc_score(y, model.predict_proba(shuffled)[:, 1]))
+          return float(np.mean(drops))
+    annotations:
+      - find: 'base = roc_auc_score(y, model.predict_proba(X)[:, 1])'
+        note: "Score on held-out rows, with the reported metric."
+      - find: "shuffled = X.assign(**{col: rng.permutation(X[col].to_numpy())})"
+        note: "Breaks the link between one feature and the target, keeping its distribution."
+  takeaway: |
+    Measure importance by shuffling on held-out data, with the reported metric, and report the spread.
+
+exercises:
+  - id: B13-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A random ID column ranks high in a random forest's `feature_importances_`. What is the likely cause?
+    options:
+      - {id: a, text: "IDs predict the outcome."}
+      - {id: b, text: "Impurity importance favours features with many distinct values, measured on training data."}
+      - {id: c, text: "The forest has too few trees."}
+      - {id: d, text: "The ID was scaled incorrectly."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Many split points let trees memorise training rows, which impurity importance rewards."}
+      - {id: r2, text: "Random forests cannot handle integers."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Permutation importance on held-out data would show a drop if it did. In this lesson's example it was 0.004."
+      - answer: c
+        feedback: "More trees make the bias more stable, not smaller."
+      - answer: d
+        feedback: "Trees are not affected by scaling."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Forests handle integers. Cardinality causes the bias."
+    hints:
+      - "How many split points does a unique ID offer?"
+      - "Which data is impurity importance computed on?"
+      - "Training data."
+    explanation: |
+      Unique values give trees endless ways to split training rows. Impurity importance counts those splits. Permutation on held-out data does not.
+
+  - id: B13-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      `age` and `birth_year` hold the same information. A model uses both. You permute only `age` on held-out data. What happens to its importance?
+    code: |
+      drop_age_alone = 0.01        # measured
+      drop_both_together = 0.12    # measured when both are shuffled together
+      print(drop_age_alone < drop_both_together)
+    answer: "True"
+    wrong_answers:
+      - answer: "False"
+        feedback: "With birth_year intact, the model still has the information, so shuffling age alone costs little."
+    hints:
+      - "What does the model still have when only age is shuffled?"
+      - "The same information via birth_year."
+      - "So the single drop is small."
+    explanation: |
+      Correlated features share credit. Permute them as a group to see the importance of the information they carry.
+
+  - id: B13-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Compute permutation importance on the test set, scored by ROC AUC, with 10 repeats.
+    template: |
+      result = permutation_importance(model, [[g1]], y_test, scoring="roc_auc", n_repeats=10, random_state=0)
+      print(result.importances_mean, result.[[g2]])
+    gaps:
+      g1: {accepted: [X_test]}
+      g2: {accepted: [importances_std]}
+    wrong_answers:
+      - answer: {g1: X_train}
+        feedback: "On training data, memorised features look important. Use held-out rows."
+    hints:
+      - "Held-out rows."
+      - "The spread across repeats."
+      - "`X_test` and `importances_std`."
+    explanation: |
+      Held-out rows show what generalises. The standard deviation shows whether a drop is distinguishable from zero.
+
+  - id: B13-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy, pandas, scikit-learn]
+    prompt: |
+      Write `permutation_drop(model, X, y, col, rng, n_repeats) -> float`. Compute the ROC AUC of `model.predict_proba(X)[:, 1]`. Then, `n_repeats` times, replace `col` with `rng.permutation(X[col].to_numpy())` in a **copy** of `X`, recompute the AUC, and record the drop. Return the mean drop. Leave `X` unchanged.
+    starter: |
+      import numpy as np
+
+
+      def permutation_drop(model, X, y, col, rng, n_repeats):
+          return float(model.coef_[0][list(X.columns).index(col)])
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+        import pandas as pd
+        from sklearn.linear_model import LogisticRegression
+        _r = np.random.default_rng(0)
+        X = pd.DataFrame({"signal": _r.normal(size=400), "noise": _r.normal(size=400)})
+        y = (X["signal"] + _r.normal(scale=0.5, size=400) > 0).astype(int)
+        M = LogisticRegression().fit(X, y)
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: permutation_drop
+          typed: true
+          docstring: true
+          message: "Give `permutation_drop` type hints and a docstring."
+      tests:
+        - id: pure
+          code: |
+            before = X["signal"].tolist()
+            permutation_drop(M, X, y, "signal", np.random.default_rng(1), 2)
+            assert X["signal"].tolist() == before
+          message: "X changed. Shuffle a copy, for example with X.assign(...)."
+        - id: values
+          code: |
+            assert round(permutation_drop(M, X, y, "signal", np.random.default_rng(1), 5), 4) == 0.4409
+            assert round(permutation_drop(M, X, y, "noise", np.random.default_rng(1), 5), 4) == 0.0015
+          message: "Shuffle with rng.permutation each repeat, and average base AUC minus shuffled AUC."
+    solution: |
+      import numpy as np
+      import pandas as pd
+      from sklearn.base import ClassifierMixin
+      from sklearn.metrics import roc_auc_score
+
+
+      def permutation_drop(model: ClassifierMixin, X: pd.DataFrame, y: pd.Series, col: str, rng: np.random.Generator, n_repeats: int) -> float:
+          """Mean fall in ROC AUC when col is shuffled.
+
+          Args:
+              model: Fitted classifier with predict_proba.
+              X: Held-out features.
+              y: Held-out labels.
+              col: Column to shuffle.
+              rng: Seeded generator.
+              n_repeats: Number of shuffles.
+
+          Returns:
+              Mean of base AUC minus shuffled AUC.
+          """
+          base = roc_auc_score(y, model.predict_proba(X)[:, 1])
+          drops = []
+          for _ in range(n_repeats):
+              shuffled = X.assign(**{col: rng.permutation(X[col].to_numpy())})
+              drops.append(base - roc_auc_score(y, model.predict_proba(shuffled)[:, 1]))
+          return float(np.mean(drops))
+    seeded_bugs:
+      - |
+        import numpy as np
+        import pandas as pd
+        from sklearn.base import ClassifierMixin
+        from sklearn.metrics import roc_auc_score
+
+
+        def permutation_drop(model: ClassifierMixin, X: pd.DataFrame, y: pd.Series, col: str, rng: np.random.Generator, n_repeats: int) -> float:
+            """Shuffles in place."""
+            base = roc_auc_score(y, model.predict_proba(X)[:, 1])
+            drops = []
+            original = X[col].copy()
+            for _ in range(n_repeats):
+                X[col] = rng.permutation(original.to_numpy())
+                drops.append(base - roc_auc_score(y, model.predict_proba(X)[:, 1]))
+            return float(np.mean(drops))
+    wrong_answers:
+      - answer: |
+          import numpy as np
+          import pandas as pd
+          from sklearn.base import ClassifierMixin
+          from sklearn.metrics import roc_auc_score
+
+
+          def permutation_drop(model: ClassifierMixin, X: pd.DataFrame, y: pd.Series, col: str, rng: np.random.Generator, n_repeats: int) -> float:
+              """Shuffles in place."""
+              base = roc_auc_score(y, model.predict_proba(X)[:, 1])
+              drops = []
+              original = X[col].copy()
+              for _ in range(n_repeats):
+                  X[col] = rng.permutation(original.to_numpy())
+                  drops.append(base - roc_auc_score(y, model.predict_proba(X)[:, 1]))
+              return float(np.mean(drops))
+        triggers: pure
+    hints:
+      - "Base AUC first, on the unshuffled data."
+      - "`X.assign(**{col: rng.permutation(X[col].to_numpy())})` shuffles a copy."
+      - "Average the drops with np.mean."
+    explanation: |
+      Shuffling keeps the column's distribution but breaks its link with the target. The fall in AUC is how much the model relied on it.
+
+  - id: B13-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A client asks for "the top drivers of churn" from your model. Choose what to deliver.
+    slots:
+      - id: method
+        label: "Importance method"
+        options:
+          - {id: permutation, text: "Permutation importance on the test set, with the reported metric"}
+          - {id: impurity, text: "feature_importances_ from training"}
+        answer: permutation
+      - id: correlated
+        label: "tenure_months and contract_start_year are 0.97 correlated"
+        options:
+          - {id: group, text: "Permute them together and report them as one driver"}
+          - {id: separate, text: "Report each separately"}
+        answer: group
+      - id: wording
+        label: "Wording on the slide"
+        options:
+          - {id: model, text: "Features the model relies on most, with spread across repeats"}
+          - {id: cause, text: "What causes customers to churn"}
+        answer: model
+    model_answer: |
+      - Permutation importance on held-out data, with the metric the model is judged on.
+      - Correlated features grouped, so shared information is not split into two small numbers.
+      - Words that describe the model, not causes in the world.
+    wrong_answers:
+      - answer: {method: impurity}
+        feedback: "Impurity importance favours high-cardinality features and reflects training data."
+      - answer: {correlated: separate}
+        feedback: "Each would look small, because the other carries the same information."
+      - answer: {wording: cause}
+        feedback: "Importance shows what the model uses. Causes need a different design, such as an experiment."
+    hints:
+      - "Which method uses held-out data?"
+      - "What happens when one of two twins is shuffled?"
+      - "Does reliance imply cause?"
+    explanation: |
+      Deliver reliance, measured honestly and worded honestly.
+
+recap:
+  - front: "Impurity importance bias"
+    back: "Favours high-cardinality features, from training data. A random ID scored 0.335 in this lesson's example."
+  - front: "Permutation importance"
+    back: "Shuffle a column on held-out data and measure the score drop, with its spread."
+  - front: "Correlated features"
+    back: "Share credit. Permute and report them as a group."
+  - front: "What importance means"
+    back: "What the model relies on. Not what causes the outcome."
+
+claims:
+  - claim: "A random ID with 3,000 values got impurity importance 0.335 and permutation importance (ROC AUC, test) 0.004 in a 200-tree random forest."
+    status: verified
+    source: "Run with scikit-learn 1.9.1 in this repository (random_state=0)."

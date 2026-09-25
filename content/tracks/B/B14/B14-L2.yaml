@@ -1,0 +1,333 @@
+id: B14-L2
+title: Registry versions and aliases, not stages
+
+concept: |
+  The **model registry** turns logged models into named, numbered versions. Each `log_model(..., registered_model_name="churn_model")` or `mlflow.register_model(...)` call creates a new **version**: 1, 2, 3. A version never changes. It points at one run, one set of parameters and one model file.
+
+  **Aliases** are movable labels on versions. MLflow 3.16:
+
+  ```python
+  from mlflow import MlflowClient
+
+  client = MlflowClient()
+  client.set_registered_model_alias("churn_model", "champion", "3")
+  model = mlflow.pyfunc.load_model("models:/churn_model@champion")
+  ```
+
+  The scoring job always loads `@champion`. Promotion moves the alias to a new version. Rollback moves it back. The job's code never changes, and every prediction can be traced to a version and its run.
+
+  **Stages** (`Staging`, `Production`, `Archived`) are the older mechanism. `transition_model_version_stage` has been deprecated since MLflow 2.9, and MLflow 3.16 warns that stages will be removed. Models in Unity Catalog on Databricks use aliases only, with three-level names such as `ml.churn.churn_model` after `mlflow.set_registry_uri("databricks-uc")`.
+
+  Promote on evidence, not by hand:
+
+  1. Train and register a candidate version.
+  2. Evaluate it on the same held-out data and metric as the current champion.
+  3. Move `champion` only if the candidate beats it by a margin agreed in advance.
+  4. Keep the old version reachable, for example with a `previous_champion` alias, so rollback is one call.
+
+  Record the decision: which versions were compared, the scores and who approved. On Databricks, Unity Catalog grants (lesson A4-L2) control who can move an alias.
+
+why_it_matters: |
+  A team kept production models as files named `model_prod.pkl`, overwritten on each release. A new version cut conversion forecasts by 12% overnight. Rolling back meant finding last month's file on someone's laptop. It took a day. With versions and an alias, rollback is `set_registered_model_alias("churn_model", "champion", "4")`, and the scoring job picks it up on its next run.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      client.transition_model_version_stage("churn_model", new_version, "Production")
+      model = mlflow.pyfunc.load_model("models:/churn_model/Production")
+    annotations:
+      - find: 'client.transition_model_version_stage("churn_model", new_version, "Production")'
+        note: "Deprecated since MLflow 2.9, not available in Unity Catalog, and promoted without a comparison."
+  strong:
+    code: |
+      from __future__ import annotations
+
+      from typing import TYPE_CHECKING
+
+      if TYPE_CHECKING:
+          from mlflow import MlflowClient
+
+
+      def promote_if_better(client: MlflowClient, name: str, candidate: str, metric: str, min_gain: float) -> bool:
+          """Move the champion alias to candidate if it beats the champion by min_gain."""
+          champ = client.get_model_version_by_alias(name, "champion")
+          champ_score = client.get_run(champ.run_id).data.metrics[metric]
+          cand_score = client.get_run(client.get_model_version(name, candidate).run_id).data.metrics[metric]
+          if cand_score < champ_score + min_gain:
+              return False
+          client.set_registered_model_alias(name, "previous_champion", champ.version)
+          client.set_registered_model_alias(name, "champion", candidate)
+          return True
+    annotations:
+      - find: 'champ = client.get_model_version_by_alias(name, "champion")'
+        note: "The current champion, resolved through its alias."
+      - find: "if cand_score < champ_score + min_gain:"
+        note: "An agreed margin, so noise alone does not trigger a release."
+      - find: 'client.set_registered_model_alias(name, "previous_champion", champ.version)'
+        note: "Rollback stays one alias move away."
+  takeaway: |
+    Versions are fixed. Aliases move. Promote by comparison on the same data and metric, and keep the previous champion addressable.
+
+exercises:
+  - id: B14-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      What does the scoring job load in an alias-based setup?
+    options:
+      - {id: a, text: "`models:/churn_model/7`"}
+      - {id: b, text: "`models:/churn_model@champion`"}
+      - {id: c, text: "`models:/churn_model/Production`"}
+      - {id: d, text: "The latest file in a shared folder"}
+    answer: b
+    reasons:
+      - {id: r1, text: "The alias moves on promotion and rollback, so the job's code never changes."}
+      - {id: r2, text: "Aliases load faster than versions."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "A fixed version number means editing the job for every release."
+      - answer: c
+        feedback: "Stages are deprecated since MLflow 2.9 and not supported in Unity Catalog."
+      - answer: d
+        feedback: "Files have no version history, run link or access control."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Speed is the same. Indirection is the benefit."
+    hints:
+      - "Which reference changes without editing the job?"
+      - "What replaced stages?"
+      - "Aliases."
+    explanation: |
+      `@champion` resolves to whichever version currently holds the alias.
+
+  - id: B14-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      A stub registry in plain Python behaves like MLflow's aliases. What does this print?
+    code: |
+      aliases = {"champion": "3"}
+      aliases["previous_champion"] = aliases["champion"]
+      aliases["champion"] = "5"
+      aliases["champion"] = aliases["previous_champion"]
+      print(aliases)
+    answer: "{'champion': '3', 'previous_champion': '3'}"
+    wrong_answers:
+      - answer: "{'champion': '5', 'previous_champion': '3'}"
+        feedback: "The last line rolls back: champion takes previous_champion's version, 3."
+    hints:
+      - "Follow each assignment in order."
+      - "The last line is a rollback."
+      - "Both point at 3."
+    explanation: |
+      Promotion saved the old champion, and rollback restored it in one assignment. Versions 3 and 5 are both unchanged.
+
+  - id: B14-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Point the champion alias at version 4, then load whatever it points to.
+    template: |
+      client.[[g1]]("churn_model", "champion", "4")
+      model = mlflow.pyfunc.load_model("models:/churn_model[[g2]]champion")
+    gaps:
+      g1: {accepted: [set_registered_model_alias]}
+      g2: {accepted: ["@"]}
+    wrong_answers:
+      - answer: {g2: "/"}
+        feedback: "models:/name/X reads X as a version or a stage. Aliases use @."
+    hints:
+      - "The MlflowClient method that sets an alias."
+      - "The URI separator for aliases."
+      - "`set_registered_model_alias` and `@`."
+    explanation: |
+      `set_registered_model_alias(name, alias, version)` moves the label. `models:/name@alias` loads through it.
+
+  - id: B14-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `promote_if_better(client, name, candidate, metric, min_gain) -> bool`. The model already has a `champion` alias.
+
+      - Read the champion with `client.get_model_version_by_alias(name, "champion")`, and its score from `client.get_run(champ.run_id).data.metrics[metric]`.
+      - Read the candidate's score through `client.get_model_version(name, candidate)`.
+      - If the candidate's score is at least the champion's plus `min_gain`, set `previous_champion` to the champion's version, then `champion` to `candidate`, and return `True`. Otherwise change nothing and return `False`.
+
+      The checker passes a stub client with the same methods as `MlflowClient`.
+    starter: |
+      def promote_if_better(client, name, candidate, metric, min_gain):
+          client.set_registered_model_alias(name, "champion", candidate)
+          return True
+    checker:
+      kind: python
+      setup: |
+        from types import SimpleNamespace
+
+        class StubClient:
+            def __init__(self):
+                self.aliases = {"champion": "3"}
+                self.runs = {"3": "run-a", "4": "run-b", "5": "run-c"}
+                self.scores = {"run-a": 0.80, "run-b": 0.805, "run-c": 0.83}
+            def get_model_version_by_alias(self, name, alias):
+                v = self.aliases[alias]
+                return SimpleNamespace(version=v, run_id=self.runs[v])
+            def get_model_version(self, name, version):
+                return SimpleNamespace(version=version, run_id=self.runs[version])
+            def get_run(self, run_id):
+                return SimpleNamespace(data=SimpleNamespace(metrics={"auc": self.scores[run_id]}))
+            def set_registered_model_alias(self, name, alias, version):
+                self.aliases[alias] = version
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: promote_if_better
+          docstring: true
+          message: "Give `promote_if_better` a docstring."
+      tests:
+        - id: promotes
+          code: |
+            c = StubClient()
+            assert promote_if_better(c, "churn_model", "5", "auc", 0.01) is True
+            assert c.aliases == {"champion": "5", "previous_champion": "3"}
+          message: "A candidate that beats the champion by min_gain becomes champion, and the old champion becomes previous_champion."
+        - id: margin
+          code: |
+            c = StubClient()
+            assert promote_if_better(c, "churn_model", "4", "auc", 0.01) is False
+            assert c.aliases == {"champion": "3"}
+          message: "A gain below min_gain (0.005 < 0.01) must change nothing and return False."
+    solution: |
+      from __future__ import annotations
+
+      from typing import TYPE_CHECKING
+
+      if TYPE_CHECKING:
+          from mlflow import MlflowClient
+
+
+      def promote_if_better(client: MlflowClient, name: str, candidate: str, metric: str, min_gain: float) -> bool:
+          """Move the champion alias to candidate if it beats the champion by min_gain.
+
+          Args:
+              client: MLflow client, or any object with the same methods.
+              name: Registered model name.
+              candidate: Candidate version number, as a string.
+              metric: Run metric to compare, higher is better.
+              min_gain: Smallest improvement that justifies promotion.
+
+          Returns:
+              True if the alias moved.
+          """
+          champ = client.get_model_version_by_alias(name, "champion")
+          champ_score = client.get_run(champ.run_id).data.metrics[metric]
+          cand_score = client.get_run(client.get_model_version(name, candidate).run_id).data.metrics[metric]
+          if cand_score < champ_score + min_gain:
+              return False
+          client.set_registered_model_alias(name, "previous_champion", champ.version)
+          client.set_registered_model_alias(name, "champion", candidate)
+          return True
+    seeded_bugs:
+      - |
+        def promote_if_better(client, name: str, candidate: str, metric: str, min_gain: float) -> bool:
+            """Promotes any improvement, however small."""
+            champ = client.get_model_version_by_alias(name, "champion")
+            champ_score = client.get_run(champ.run_id).data.metrics[metric]
+            cand_score = client.get_run(client.get_model_version(name, candidate).run_id).data.metrics[metric]
+            if cand_score <= champ_score:
+                return False
+            client.set_registered_model_alias(name, "previous_champion", champ.version)
+            client.set_registered_model_alias(name, "champion", candidate)
+            return True
+      - |
+        def promote_if_better(client, name: str, candidate: str, metric: str, min_gain: float) -> bool:
+            """Loses the old champion."""
+            champ = client.get_model_version_by_alias(name, "champion")
+            champ_score = client.get_run(champ.run_id).data.metrics[metric]
+            cand_score = client.get_run(client.get_model_version(name, candidate).run_id).data.metrics[metric]
+            if cand_score < champ_score + min_gain:
+                return False
+            client.set_registered_model_alias(name, "champion", candidate)
+            return True
+    wrong_answers:
+      - answer: |
+          def promote_if_better(client, name: str, candidate: str, metric: str, min_gain: float) -> bool:
+              """Promotes any improvement, however small."""
+              champ = client.get_model_version_by_alias(name, "champion")
+              champ_score = client.get_run(champ.run_id).data.metrics[metric]
+              cand_score = client.get_run(client.get_model_version(name, candidate).run_id).data.metrics[metric]
+              if cand_score <= champ_score:
+                  return False
+              client.set_registered_model_alias(name, "previous_champion", champ.version)
+              client.set_registered_model_alias(name, "champion", candidate)
+              return True
+        triggers: margin
+    hints:
+      - "Resolve the champion through its alias, then read both scores from their runs."
+      - "Return False early when cand_score < champ_score + min_gain."
+      - "Set previous_champion before moving champion."
+    explanation: |
+      Promotion is a comparison plus two alias moves. The margin guards against noise, and the saved alias makes rollback trivial.
+
+  - id: B14-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Set up model releases on Databricks with Unity Catalog.
+    slots:
+      - id: name
+        label: "Model name"
+        options:
+          - {id: three_level, text: "ml_prod.churn.churn_model"}
+          - {id: plain, text: "churn_model_final"}
+        answer: three_level
+      - id: pointer
+        label: "What the scoring job loads"
+        options:
+          - {id: alias, text: "models:/ml_prod.churn.churn_model@champion"}
+          - {id: stage, text: "models:/ml_prod.churn.churn_model/Production"}
+        answer: alias
+      - id: who
+        label: "Who can move the champion alias"
+        options:
+          - {id: group, text: "A release group with the needed privilege, granted in Unity Catalog"}
+          - {id: anyone, text: "Anyone who can train models"}
+        answer: group
+    model_answer: |
+      - Three-level names place the model in a catalog and schema, governed like tables.
+      - Jobs load by alias. Unity Catalog models do not support stages.
+      - Grant the right to move aliases to a release group, not to every trainer.
+    wrong_answers:
+      - answer: {pointer: stage}
+        feedback: "Stages are deprecated and not supported for models in Unity Catalog."
+      - answer: {who: anyone}
+        feedback: "Moving the alias changes production. Limit it to a group, as with any production change."
+      - answer: {name: plain}
+        feedback: "Unity Catalog models use catalog.schema.model names."
+    hints:
+      - "How are Unity Catalog objects named?"
+      - "What replaced stages?"
+      - "Grant to groups (lesson A4-L2)."
+    explanation: |
+      Govern models like tables: three-level names, aliases for releases, group grants for who can release.
+
+recap:
+  - front: "Version vs alias"
+    back: "A version is fixed. An alias is a movable label on a version."
+  - front: "Load the current production model"
+    back: "mlflow.pyfunc.load_model(\"models:/name@champion\")."
+  - front: "Model stages"
+    back: "Deprecated since MLflow 2.9, not supported in Unity Catalog. Use aliases."
+  - front: "Safe promotion"
+    back: "Compare on the same data and metric, require a margin, keep previous_champion for rollback."
+
+claims:
+  - claim: "set_registered_model_alias, get_model_version_by_alias and models:/name@alias work as described; transition_model_version_stage warns it is deprecated since 2.9.0."
+    status: verified
+    source: "Run with MLflow 3.16.1 in a scratch environment for this repository."
+  - claim: "Models in Unity Catalog use three-level names with mlflow.set_registry_uri(\"databricks-uc\") and do not support stages."
+    status: search-only
+    source: "Databricks documentation, Manage model lifecycle in Unity Catalog (docs site not reachable from this environment)."

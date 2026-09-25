@@ -1,0 +1,286 @@
+id: B14-L3
+title: Reproduce a run from its record
+
+concept: |
+  A tracked run is only useful if you can rebuild its result from the record. Test that before you need it, not during an incident.
+
+  From a run ID, MLflow 3.16 gives you everything the run logged:
+
+  ```python
+  run = mlflow.get_run(run_id)
+  run.data.params            # {'C': '1.0', 'seed': '7', 'features': 'v3'}  strings
+  run.data.tags["git_commit"], run.data.tags["input_sha256"]
+  run.data.metrics["cv_auc"]
+  reqs = mlflow.pyfunc.get_model_dependencies(f"runs:/{run_id}/model")   # path to requirements.txt
+  ```
+
+  The procedure:
+
+  1. **Code.** Check out the logged commit: `git switch --detach <commit>`.
+  2. **Environment.** Create a fresh environment from the lock file at that commit (lesson B6-L3), or from the model's `requirements.txt`.
+  3. **Data.** Load the input and compare its SHA-256 with `input_sha256`. If it differs, stop: you are reproducing on different data.
+  4. **Settings.** Convert the parameters back to their types. `'1.0'` must become `1.0` and `'7'` must become `7`. Passing `'7'` as a seed fails, or worse, works differently.
+  5. **Rerun and compare.** Recompute the metric and compare with the logged value within a small tolerance. Identical code, data, settings and versions on the same hardware usually reproduce exactly. Different CPUs or thread counts can change the last digits of floating-point results.
+
+  If the numbers differ by more than the tolerance, the record is incomplete. Something that changes the result was not logged: a feature list read from a file, a default that changed between library versions, an unseeded shuffle. Add it to the run's parameters and try again.
+
+  Schedule a reproduction check: once a quarter, pick the champion model's run and rebuild it from scratch in CI.
+
+why_it_matters: |
+  An auditor asked a lender to show how a credit model's reported AUC of 0.78 had been produced. The run existed in MLflow with parameters and a metric. The input table had since been overwritten, and no data hash had been logged. The team could not show the model had been validated on the data they claimed. The model was suspended for four weeks while it was rebuilt with full records.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      params = mlflow.get_run(run_id).data.params
+      model = LogisticRegression(C=params["C"], random_state=params["seed"])
+    annotations:
+      - find: 'model = LogisticRegression(C=params["C"], random_state=params["seed"])'
+        note: "Parameters are strings. '1.0' and '7' are passed through unconverted."
+  strong:
+    code: |
+      PARAM_TYPES: dict[str, type] = {"C": float, "seed": int, "features": str}
+
+
+      def parse_params(params: dict[str, str], types: dict[str, type]) -> dict[str, object]:
+          """Convert logged string parameters back to their types. Fails on missing or bad values."""
+          missing = sorted(set(types) - set(params))
+          if missing:
+              raise KeyError(f"run is missing parameters: {missing}")
+          return {key: cast(params[key]) for key, cast in types.items()}
+
+
+      def reproduced(logged: float, rerun: float, tol: float = 1e-9) -> bool:
+          """True when the rerun metric matches the logged one within tol."""
+          return abs(logged - rerun) <= tol
+    annotations:
+      - find: 'PARAM_TYPES: dict[str, type] = {"C": float, "seed": int, "features": str}'
+        note: "The expected parameters and their types, in one place."
+      - find: 'raise KeyError(f"run is missing parameters: {missing}")'
+        note: "A run without a needed parameter cannot be reproduced. Say so."
+      - find: "return abs(logged - rerun) <= tol"
+        note: "An explicit tolerance, recorded with the check."
+  takeaway: |
+    Code from the commit, environment from the lock, data checked by hash, settings converted back to types, metric compared within a tolerance.
+
+exercises:
+  - id: B14-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You are reproducing a run. The input file's SHA-256 differs from the logged `input_sha256`. What next?
+    options:
+      - {id: a, text: "Continue. The file name is the same."}
+      - {id: b, text: "Stop. You would be reproducing on different data. Find the original input."}
+      - {id: c, text: "Update the logged tag to the new hash."}
+      - {id: d, text: "Rerun twice and average."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Any changed byte changes the hash, so the data is not the data the run used."}
+      - {id: r2, text: "Hashes are unreliable."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Same name, different content. The hash exists for exactly this check."
+      - answer: c
+        feedback: "Rewriting the record destroys the evidence of what the run used."
+      - answer: d
+        feedback: "Averaging runs on the wrong data does not recover the right result."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The hash is reliable. That is why the mismatch matters."
+    hints:
+      - "What does a different hash mean?"
+      - "Can you reproduce on different data?"
+      - "Find the original."
+    explanation: |
+      A hash mismatch means different data. Reproduction needs the original input, which is why raw inputs are kept immutable (lesson B6-L2).
+
+  - id: B14-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      Logged parameters come back as strings. What does this print?
+    code: |
+      params = {"C": "1.0", "seed": "7"}
+      print(params["seed"] + "1", int(params["seed"]) + 1)
+    answer: "71 8"
+    wrong_answers:
+      - answer: "8 8"
+        feedback: "'7' + '1' joins strings: '71'. Convert with int() first."
+    hints:
+      - "What does + do with two strings?"
+      - "And with two ints?"
+      - "Concatenation, then addition."
+    explanation: |
+      Unconverted parameters behave like text. Convert them back to their types before use.
+
+  - id: B14-L3-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the steps to reproduce a logged run.
+    items:
+      - {id: commit, text: "Check out the logged git commit"}
+      - {id: env, text: "Build a fresh environment from the lock file at that commit"}
+      - {id: data, text: "Load the input and verify its SHA-256 against input_sha256"}
+      - {id: params, text: "Convert the logged parameters back to their types"}
+      - {id: rerun, text: "Rerun and compare the metric within a tolerance"}
+    answer: [commit, env, data, params, rerun]
+    wrong_answers:
+      - answer: [env, commit, data, params, rerun]
+        feedback: "The lock file that defines the environment lives at the commit. Check it out first."
+      - answer: [commit, env, params, rerun, data]
+        feedback: "Verify the data before rerunning, or a mismatch wastes the run and confuses the comparison."
+    hints:
+      - "Which step provides the lock file?"
+      - "Which check should stop you early?"
+      - "Compare last."
+    explanation: |
+      Code, then environment, then data, then settings, then the comparison.
+
+  - id: B14-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `parse_params(params: dict[str, str], types: dict[str, type]) -> dict[str, object]`. For each key in `types`, convert `params[key]` with the type, for example `float("1.0")`. Raise `KeyError` naming the missing keys (sorted) when any key in `types` is absent from `params`. Ignore extra keys in `params`. Let a bad value raise the type's own `ValueError`.
+    starter: |
+      def parse_params(params, types):
+          return dict(params)
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: parse_params
+          typed: true
+          docstring: true
+          message: "Give `parse_params` type hints and a docstring."
+      tests:
+        - id: converts
+          code: |
+            out = parse_params({"C": "1.0", "seed": "7", "features": "v3"}, {"C": float, "seed": int, "features": str})
+            assert out == {"C": 1.0, "seed": 7, "features": "v3"}
+            assert isinstance(out["seed"], int) and isinstance(out["C"], float)
+          message: "Convert each logged string with its type."
+        - id: missing
+          code: |
+            try:
+                parse_params({"C": "1.0"}, {"C": float, "seed": int, "alpha": float})
+            except KeyError as err:
+                assert "alpha" in str(err) and "seed" in str(err)
+            else:
+                raise AssertionError("no KeyError")
+          message: "Missing parameters must raise KeyError naming all of them."
+        - id: extra_and_bad
+          code: |
+            assert parse_params({"C": "2", "note": "x"}, {"C": float}) == {"C": 2.0}
+            try:
+                parse_params({"seed": "seven"}, {"seed": int})
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("bad value accepted")
+          message: "Ignore extra keys, and let a bad value raise ValueError."
+    solution: |
+      def parse_params(params: dict[str, str], types: dict[str, type]) -> dict[str, object]:
+          """Convert logged string parameters back to their types.
+
+          Args:
+              params: Parameters as MLflow returns them.
+              types: Expected keys and the type to convert each to.
+
+          Returns:
+              Typed parameters for the expected keys.
+
+          Raises:
+              KeyError: If an expected key is missing.
+              ValueError: If a value cannot be converted.
+          """
+          missing = sorted(set(types) - set(params))
+          if missing:
+              raise KeyError(f"run is missing parameters: {missing}")
+          return {key: cast(params[key]) for key, cast in types.items()}
+    seeded_bugs:
+      - |
+        def parse_params(params: dict[str, str], types: dict[str, type]) -> dict[str, object]:
+            """Defaults missing values silently."""
+            return {key: cast(params.get(key, "0")) for key, cast in types.items()}
+      - |
+        def parse_params(params: dict[str, str], types: dict[str, type]) -> dict[str, object]:
+            """No conversion."""
+            missing = sorted(set(types) - set(params))
+            if missing:
+                raise KeyError(f"missing: {missing}")
+            return {key: params[key] for key in types}
+    wrong_answers:
+      - answer: |
+          def parse_params(params: dict[str, str], types: dict[str, type]) -> dict[str, object]:
+              """Defaults missing values silently."""
+              return {key: cast(params.get(key, "0")) for key, cast in types.items()}
+        triggers: missing
+    hints:
+      - "Find missing keys with a set difference."
+      - "Raise KeyError with the sorted list."
+      - "`{key: cast(params[key]) for key, cast in types.items()}`."
+    explanation: |
+      Explicit types turn the run record back into the exact settings. Failing on a missing key beats silently rerunning with a default.
+
+  - id: B14-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A quarterly check rebuilds the champion model's run in CI. The rerun AUC is 0.7812 against a logged 0.7851. Choose the response.
+    slots:
+      - id: verdict
+        label: "Verdict"
+        options:
+          - {id: not_reproduced, text: "Not reproduced: the gap is far above the tolerance of 1e-6"}
+          - {id: fine, text: "Close enough"}
+        answer: not_reproduced
+      - id: next
+        label: "Next step"
+        options:
+          - {id: diff, text: "Find what changed: data hash, commit, lock file, unlogged settings"}
+          - {id: relog, text: "Log the new AUC on the old run"}
+        answer: diff
+      - id: fix
+        label: "Lasting fix"
+        options:
+          - {id: log_more, text: "Log the missing setting as a parameter and keep the quarterly check"}
+          - {id: widen, text: "Widen the tolerance to 0.01"}
+        answer: log_more
+    model_answer: |
+      - A gap of 0.004 is a real difference, not rounding.
+      - Compare every recorded identity, then look for settings that were never logged.
+      - Log what was missing, so the next check passes for the right reason.
+    wrong_answers:
+      - answer: {verdict: fine}
+        feedback: "0.004 AUC is larger than many model improvements you would ship. Something differs."
+      - answer: {next: relog}
+        feedback: "Editing the old run erases the evidence of what it produced."
+      - answer: {fix: widen}
+        feedback: "A wide tolerance hides incomplete records instead of fixing them."
+    hints:
+      - "Is 0.004 rounding?"
+      - "What does the record not contain?"
+      - "Fix the record, not the check."
+    explanation: |
+      A failed reproduction points at a gap in the record. Close the gap, keep the check.
+
+recap:
+  - front: "Reproduce a run"
+    back: "Commit, environment from lock, data verified by hash, typed params, rerun, compare within tolerance."
+  - front: "Parameters from mlflow.get_run"
+    back: "Strings. Convert with the expected types before use."
+  - front: "Model dependencies"
+    back: "mlflow.pyfunc.get_model_dependencies(model_uri) returns the path to requirements.txt."
+  - front: "Rerun differs beyond tolerance"
+    back: "Something that changes results was not logged. Find it and log it."
+
+claims:
+  - claim: "mlflow.pyfunc.get_model_dependencies returns a path to requirements.txt; get_run(...).data.params values are strings."
+    status: verified
+    source: "Run with MLflow 3.16.1 in a scratch environment for this repository."

@@ -1,0 +1,291 @@
+id: B13-L2
+title: SHAP values, and what they do not tell you
+
+concept: |
+  Permutation importance (lesson B13-L1) ranks features for the whole model. **SHAP values** explain **one prediction**: how much each feature pushed this customer's score up or down from a baseline.
+
+  For one row, SHAP values are **additive**:
+
+  ```text
+  prediction = base_value + sum of the row's SHAP values
+  ```
+
+  The base value is the model's average output over the background data. In shap 0.51:
+
+  ```python
+  import shap
+  explainer = shap.TreeExplainer(model)
+  explanation = explainer(X_test)          # shap.Explanation
+  explanation.values, explanation.base_values
+  ```
+
+  Know which **output space** the values live in. For a scikit-learn `GradientBoostingClassifier`, TreeExplainer explains the log-odds (`decision_function`), not the probability. For a `RandomForestClassifier` it explains probabilities, with one set of values per class, so `.values` has shape `(rows, features, classes)`. This course's build checked both additivity identities on shap 0.51 with scikit-learn 1.9. Say which space you report.
+
+  Aggregate carefully. The mean **absolute** SHAP value per feature gives a global ranking. A beeswarm plot shows the direction and spread.
+
+  What SHAP does **not** tell you:
+
+  - **Causes.** A feature with a large SHAP value is one the model uses. Changing it in the real world may do nothing.
+  - **Robust truths about correlated features.** When two features carry the same information, the credit split between them depends on the model and the explainer's assumptions.
+  - **Anything about data the model never saw.** Explanations for out-of-range inputs describe extrapolation.
+
+  For customer-facing reasons ("your application was declined because..."), SHAP values are a starting point for wording. They are not a legal explanation on their own.
+
+  shap is not available in this app's browser runtime. The exercises use plain Python on SHAP outputs. Run shap itself locally.
+
+why_it_matters: |
+  A pricing team read a SHAP summary showing that `number_of_support_calls` pushed renewal probability **up**. They proposed encouraging customers to call support more. The model had learned that customers who called support were the engaged ones who had already decided to stay. More calls would not create engagement. An experiment on proactive calls later showed no effect on renewals.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      explanation = shap.TreeExplainer(rf_classifier)(X_test)
+      top = X_test.columns[np.argsort(explanation.values.mean(axis=0))[-3:]]
+      print("Top causes of churn:", list(top))
+    annotations:
+      - find: "top = X_test.columns[np.argsort(explanation.values.mean(axis=0))[-3:]]"
+        note: "Signed means cancel out, and a random forest's values have a class axis that is ignored here."
+      - find: 'print("Top causes of churn:", list(top))'
+        note: "Model reliance reported as causes."
+  strong:
+    code: |
+      def top_contributions(names: list[str], values: list[float], k: int) -> list[tuple[str, float]]:
+          """The k largest contributions to one prediction, by absolute size, with their sign."""
+          if len(names) != len(values):
+              raise ValueError("one SHAP value per feature is required")
+          ranked = sorted(zip(names, values, strict=True), key=lambda pair: abs(pair[1]), reverse=True)
+          return ranked[:k]
+
+
+      def check_additivity(base_value: float, values: list[float], prediction: float, tol: float = 1e-6) -> bool:
+          """True when base value plus contributions reproduces the model output."""
+          return abs(base_value + sum(values) - prediction) <= tol
+    annotations:
+      - find: "ranked = sorted(zip(names, values, strict=True), key=lambda pair: abs(pair[1]), reverse=True)"
+        note: "Rank by size, keep the sign for the wording."
+      - find: "return abs(base_value + sum(values) - prediction) <= tol"
+        note: "A cheap test that you are reading the right output space."
+  takeaway: |
+    SHAP explains one prediction additively in a stated output space. It describes the model, not the world.
+
+exercises:
+  - id: B13-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A feature has a large positive SHAP value for most churners. What can you conclude?
+    options:
+      - {id: a, text: "Increasing the feature causes churn."}
+      - {id: b, text: "The model uses the feature to push churn scores up."}
+      - {id: c, text: "The feature is measured wrongly."}
+      - {id: d, text: "The model is overfitting."}
+    answer: b
+    reasons:
+      - {id: r1, text: "SHAP values attribute the model's output. They say nothing about intervening in the world."}
+      - {id: r2, text: "Positive SHAP values are always spurious."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Causal claims need causal evidence, such as an experiment."
+      - answer: c
+        feedback: "Nothing in a SHAP value indicates measurement error."
+      - answer: d
+        feedback: "Large contributions are normal for useful features."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The values are real attributions of the model's output."
+    hints:
+      - "What does SHAP attribute?"
+      - "The model's output."
+      - "Not the outcome in the world."
+    explanation: |
+      SHAP describes the model's reliance. Test interventions separately.
+
+  - id: B13-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      A GradientBoostingClassifier row has base value -1.2 (log-odds) and SHAP values 0.8, 0.5 and -0.3. What does this print?
+    code: |
+      import math
+
+      log_odds = -1.2 + 0.8 + 0.5 - 0.3
+      print(round(log_odds, 2), round(1 / (1 + math.exp(-log_odds)), 2))
+    answer: "-0.2 0.45"
+    wrong_answers:
+      - answer: "-0.2 -0.2"
+        feedback: "The contributions sum to log-odds. Convert with the logistic function to get a probability."
+      - answer: "0.8 0.69"
+        feedback: "Include the base value: -1.2 + 0.8 + 0.5 - 0.3 = -0.2."
+    hints:
+      - "Add the base value and all contributions."
+      - "That is in log-odds."
+      - "p = 1 / (1 + exp(-log_odds))."
+    explanation: |
+      Additivity holds in log-odds for this model. The probability is 0.45 after the logistic transform, and the contributions do not add up in probability space.
+
+  - id: B13-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Compute SHAP values for a tree model with shap 0.51.
+    template: |
+      explainer = shap.[[g1]](model)
+      explanation = explainer(X_test)
+      contributions = explanation.[[g2]]
+    gaps:
+      g1: {accepted: [TreeExplainer]}
+      g2: {accepted: [values]}
+    wrong_answers:
+      - answer: {g2: base_values}
+        feedback: "base_values is the starting point. The per-feature contributions are .values."
+    hints:
+      - "The explainer for tree ensembles."
+      - "The attribute with one number per feature per row."
+      - "`TreeExplainer` and `values`."
+    explanation: |
+      Calling the explainer returns a `shap.Explanation`. `.values` holds contributions, `.base_values` the baseline.
+
+  - id: B13-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `top_contributions(names, values, k) -> list[tuple[str, float]]`. Return the `k` pairs `(name, value)` with the largest **absolute** values, largest first, keeping the sign. Raise `ValueError` if `names` and `values` differ in length.
+    starter: |
+      def top_contributions(names, values, k):
+          return sorted(zip(names, values), key=lambda p: p[1], reverse=True)[:k]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: top_contributions
+          typed: true
+          docstring: true
+          message: "Give `top_contributions` type hints and a docstring."
+      tests:
+        - id: by_abs
+          code: |
+            out = top_contributions(["tenure", "calls", "plan", "age"], [0.3, -0.9, 0.05, 0.4], 2)
+            assert out == [("calls", -0.9), ("age", 0.4)]
+          message: "Rank by absolute size, and keep the sign of each value."
+        - id: length
+          code: |
+            try:
+                top_contributions(["a", "b"], [0.1], 1)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "Mismatched lengths must raise ValueError."
+        - id: k_large
+          code: |
+            assert top_contributions(["a"], [0.2], 5) == [("a", 0.2)]
+          message: "k larger than the number of features returns all of them."
+    solution: |
+      def top_contributions(names: list[str], values: list[float], k: int) -> list[tuple[str, float]]:
+          """The k largest contributions to one prediction, by absolute size.
+
+          Args:
+              names: Feature names.
+              values: SHAP values for one row, same order as names.
+              k: Number of pairs to return.
+
+          Returns:
+              (name, value) pairs, largest absolute value first, sign kept.
+
+          Raises:
+              ValueError: If names and values differ in length.
+          """
+          if len(names) != len(values):
+              raise ValueError("one SHAP value per feature is required")
+          ranked = sorted(zip(names, values, strict=True), key=lambda pair: abs(pair[1]), reverse=True)
+          return ranked[:k]
+    seeded_bugs:
+      - |
+        def top_contributions(names: list[str], values: list[float], k: int) -> list[tuple[str, float]]:
+            """Signed ranking."""
+            if len(names) != len(values):
+                raise ValueError("lengths differ")
+            return sorted(zip(names, values, strict=True), key=lambda pair: pair[1], reverse=True)[:k]
+      - |
+        def top_contributions(names: list[str], values: list[float], k: int) -> list[tuple[str, float]]:
+            """Drops the sign."""
+            if len(names) != len(values):
+                raise ValueError("lengths differ")
+            ranked = sorted(zip(names, values, strict=True), key=lambda pair: abs(pair[1]), reverse=True)
+            return [(n, abs(v)) for n, v in ranked[:k]]
+    wrong_answers:
+      - answer: |
+          def top_contributions(names: list[str], values: list[float], k: int) -> list[tuple[str, float]]:
+              """Signed ranking."""
+              if len(names) != len(values):
+                  raise ValueError("lengths differ")
+              return sorted(zip(names, values, strict=True), key=lambda pair: pair[1], reverse=True)[:k]
+        triggers: by_abs
+    hints:
+      - "Check the lengths first."
+      - "`sorted(..., key=lambda pair: abs(pair[1]), reverse=True)`."
+      - "Slice the first k."
+    explanation: |
+      A large negative contribution matters as much as a large positive one. Rank by size, report with sign.
+
+  - id: B13-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Explain a declined loan application to the customer service team. Choose each part.
+    slots:
+      - id: space
+        label: "Output space shown"
+        options:
+          - {id: stated, text: "State the space (log-odds) and translate the final score to a probability"}
+          - {id: mixed, text: "Show log-odds contributions labelled as percentage points"}
+        answer: stated
+      - id: content
+        label: "What the explanation lists"
+        options:
+          - {id: top3, text: "The three largest contributions for this application, with direction"}
+          - {id: global, text: "The model's global feature ranking"}
+        answer: top3
+      - id: wording
+        label: "Wording"
+        options:
+          - {id: model, text: "The factors that lowered the model's score for this application"}
+          - {id: cause, text: "The reasons the customer is a credit risk"}
+        answer: model
+    model_answer: |
+      - Name the output space and convert only the final score.
+      - Give the local top contributions for this case, not the global ranking.
+      - Describe the model's reasoning, not a claim about the person.
+    wrong_answers:
+      - answer: {space: mixed}
+        feedback: "Log-odds contributions do not add up in probability points. Labelling them so is wrong."
+      - answer: {content: global}
+        feedback: "The global ranking says what the model uses in general, not why this case was declined."
+      - answer: {wording: cause}
+        feedback: "SHAP shows what moved the model's score. It is not evidence about the person."
+    hints:
+      - "Do log-odds add as percentages?"
+      - "Local or global?"
+      - "Model or world?"
+    explanation: |
+      Local, space-aware and modest wording keeps explanations accurate.
+
+recap:
+  - front: "SHAP additivity"
+    back: "prediction = base_value + sum of the row's SHAP values, in the explainer's output space."
+  - front: "Output space for GradientBoostingClassifier in TreeExplainer"
+    back: "Log-odds (decision_function), not probability."
+  - front: "Global ranking from SHAP"
+    back: "Mean absolute SHAP value per feature."
+  - front: "What SHAP cannot show"
+    back: "Causes, a stable split between correlated features, behaviour outside the training range."
+
+claims:
+  - claim: "shap 0.51 TreeExplainer: additivity holds in decision_function space for GradientBoostingClassifier and in probability space, per class, for RandomForestClassifier."
+    status: verified
+    source: "Checked with np.allclose on shap 0.51.0 and scikit-learn 1.9.1 in this repository."

@@ -1,0 +1,291 @@
+id: B15-L3
+title: Validate clusters before you name them
+
+concept: |
+  Any clustering algorithm returns clusters, even on random data. Before a cluster becomes a "theme" in a report, check three things.
+
+  **1. Separation.** The **silhouette score** compares each point's distance to its own cluster with its distance to the nearest other cluster. It runs from -1 to 1, higher is better. scikit-learn 1.8: `silhouette_score(X, labels)`. Compute it **without noise points**. The function treats `-1` as a cluster like any other. In this course's build, four blobs with HDBSCAN noise scored 0.70 with noise removed and 0.555 with noise counted as a cluster.
+
+  **2. Stability.** Rerun the whole pipeline on resampled data, or with different seeds, and compare the labels on the points both runs share. The **adjusted Rand index** (`adjusted_rand_score`) is 1 for identical groupings, around 0 for chance, and ignores label names: `[0, 0, 1, 1]` against `[1, 1, 0, 0]` scores 1.0. Themes that appear in only some runs are artefacts of the settings.
+
+  **3. Meaning.** Read 10 to 20 answers per cluster. Have two people name the clusters independently, then compare. A cluster nobody can name consistently is not a theme yet.
+
+  Report with each theme:
+
+  - its size and share, with noise reported separately,
+  - the silhouette and stability figures for the clustering as a whole,
+  - three verbatim example answers, chosen at random, not the most typical ones.
+
+  No single number proves clusters are real. Together, separation, stability and human reading make a defensible case. Keep the validation results in the run record with the settings (lesson B6-L2).
+
+why_it_matters: |
+  An insight team presented seven "customer mindsets" from a clustering of attitude statements. A year later a new team reran the same method on a fresh sample. Three of the seven mindsets reappeared. The other four had been unstable from the start: a stability check, rerunning on bootstrap samples, would have shown them splitting and merging from run to run. Two product launches had been planned around mindsets that did not exist.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      score = silhouette_score(vectors, labels)
+      print("7 clear segments, silhouette", round(score, 2))
+    annotations:
+      - find: "score = silhouette_score(vectors, labels)"
+        note: "Noise (-1) counted as a cluster, and one run taken as the truth."
+      - find: 'print("7 clear segments, silhouette", round(score, 2))'
+        note: "A single number presented as proof."
+  strong:
+    code: |
+      import numpy as np
+      from sklearn.metrics import adjusted_rand_score, silhouette_score
+
+
+      def silhouette_without_noise(X: np.ndarray, labels: np.ndarray) -> float | None:
+          """Silhouette over clustered points only. None if fewer than two clusters remain."""
+          keep = labels != -1
+          kept = labels[keep]
+          n_clusters = len(np.unique(kept))
+          if n_clusters < 2 or n_clusters >= len(kept):
+              return None
+          return float(silhouette_score(X[keep], kept))
+
+
+      def stability(labels_a: np.ndarray, labels_b: np.ndarray) -> float:
+          """Agreement of two labelings of the same points, ignoring label names."""
+          return float(adjusted_rand_score(labels_a, labels_b))
+    annotations:
+      - find: "keep = labels != -1"
+        note: "Noise is not a cluster and does not enter the silhouette."
+      - find: "if n_clusters < 2 or n_clusters >= len(kept):"
+        note: "silhouette_score needs between 2 and n - 1 clusters. Return None instead of raising."
+      - find: "return float(adjusted_rand_score(labels_a, labels_b))"
+        note: "Compare runs on shared points. Label names do not matter."
+  takeaway: |
+    Check separation without noise, stability across reruns, and meaning by reading, before any cluster gets a name.
+
+exercises:
+  - id: B15-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A clustering has silhouette 0.62. Is that enough to report its clusters as themes?
+    options:
+      - {id: a, text: "Yes. Above 0.5 is proof."}
+      - {id: b, text: "No. Also check stability across reruns and read samples from each cluster."}
+      - {id: c, text: "No. Silhouette must be exactly 1."}
+      - {id: d, text: "Yes, if the number of clusters matches the dashboard."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Separation in one run says nothing about whether clusters recur or mean anything."}
+      - {id: r2, text: "Silhouette is never informative."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "No threshold turns one number into proof. Check stability and meaning too."
+      - answer: c
+        feedback: "1 is almost never reached on real data. Good separation is not the only test."
+      - answer: d
+        feedback: "A dashboard layout is not evidence about the data."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Silhouette is useful. It is not sufficient."
+    hints:
+      - "Would the same clusters appear on a new sample?"
+      - "Can people name them?"
+      - "Three checks, not one."
+    explanation: |
+      Separation, stability and meaning together. One number is a start, not a conclusion.
+
+  - id: B15-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (scikit-learn 1.8)
+    code: |
+      from sklearn.metrics import adjusted_rand_score
+
+      print(adjusted_rand_score([0, 0, 1, 1], [1, 1, 0, 0]), adjusted_rand_score([0, 0, 1, 1], [0, 1, 0, 1]))
+    answer: "1.0 -0.5"
+    wrong_answers:
+      - answer: "0.0 -0.5"
+        feedback: "ARI ignores label names. Swapping 0 and 1 gives the same grouping: 1.0."
+      - answer: "1.0 0.0"
+        feedback: "The second grouping splits every pair the first one keeps together, which scores below chance: -0.5."
+    hints:
+      - "Does ARI care what the labels are called?"
+      - "Are the groupings the same in the first case?"
+      - "The second is worse than chance."
+    explanation: |
+      ARI compares groupings, not names. It can go below 0 when agreement is worse than chance.
+
+  - id: B15-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Compute the silhouette over clustered points only.
+    template: |
+      keep = labels [[g1]] -1
+      score = silhouette_score(X[keep], labels[[[g2]]])
+    gaps:
+      g1: {accepted: ["!="]}
+      g2: {accepted: [keep]}
+    wrong_answers:
+      - answer: {g1: "=="}
+        feedback: "That keeps only the noise. Keep points whose label is not -1."
+    hints:
+      - "Exclude the noise label."
+      - "Use the same mask for labels."
+      - "`!=` and `keep`."
+    explanation: |
+      One mask for both arrays keeps points and labels aligned.
+
+  - id: B15-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy, scikit-learn]
+    prompt: |
+      Write `silhouette_without_noise(X, labels) -> float | None`. Drop points labelled -1. If fewer than 2 clusters remain, or as many clusters as remaining points, return `None`. Otherwise return `silhouette_score` on the remaining points as a float.
+    starter: |
+      from sklearn.metrics import silhouette_score
+
+
+      def silhouette_without_noise(X, labels):
+          return silhouette_score(X, labels)
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+        X = np.array([[0.0, 0.0], [0.1, 0.0], [5.0, 5.0], [5.1, 5.0], [9.0, -9.0]])
+        L = np.array([0, 0, 1, 1, -1])
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: silhouette_without_noise
+          typed: true
+          docstring: true
+          message: "Give `silhouette_without_noise` type hints and a docstring."
+      tests:
+        - id: excludes_noise
+          code: |
+            from sklearn.metrics import silhouette_score
+            expected = float(silhouette_score(X[:4], L[:4]))
+            assert silhouette_without_noise(X, L) == expected
+          message: "Compute the silhouette on non-noise points only."
+        - id: too_few
+          code: |
+            assert silhouette_without_noise(X, np.array([0, 0, 0, 0, -1])) is None
+            assert silhouette_without_noise(X, np.array([-1, -1, -1, -1, -1])) is None
+          message: "Fewer than two clusters must return None, not raise."
+        - id: too_many
+          code: |
+            assert silhouette_without_noise(X[:3], np.array([0, 1, 2])) is None
+          message: "As many clusters as points must return None."
+    solution: |
+      import numpy as np
+      from sklearn.metrics import silhouette_score
+
+
+      def silhouette_without_noise(X: np.ndarray, labels: np.ndarray) -> float | None:
+          """Silhouette over clustered points only.
+
+          Args:
+              X: Feature matrix.
+              labels: Cluster labels, -1 for noise.
+
+          Returns:
+              The silhouette score, or None when it is undefined.
+          """
+          keep = labels != -1
+          kept = labels[keep]
+          n_clusters = len(np.unique(kept))
+          if n_clusters < 2 or n_clusters >= len(kept):
+              return None
+          return float(silhouette_score(X[keep], kept))
+    seeded_bugs:
+      - |
+        import numpy as np
+        from sklearn.metrics import silhouette_score
+
+
+        def silhouette_without_noise(X: np.ndarray, labels: np.ndarray) -> float | None:
+            """Keeps noise as a cluster."""
+            n_clusters = len(np.unique(labels))
+            if n_clusters < 2 or n_clusters >= len(labels):
+                return None
+            return float(silhouette_score(X, labels))
+    wrong_answers:
+      - answer: |
+          import numpy as np
+          from sklearn.metrics import silhouette_score
+
+
+          def silhouette_without_noise(X: np.ndarray, labels: np.ndarray) -> float | None:
+              """Keeps noise as a cluster."""
+              n_clusters = len(np.unique(labels))
+              if n_clusters < 2 or n_clusters >= len(labels):
+                  return None
+              return float(silhouette_score(X, labels))
+        triggers: excludes_noise
+    hints:
+      - "Mask out -1 first."
+      - "Count clusters among the remaining labels."
+      - "silhouette_score needs 2 <= clusters <= n - 1."
+    explanation: |
+      Noise is not a cluster, so it stays out. Guarding the cluster count turns an exception into a clear "undefined".
+
+  - id: B15-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      You will present six themes from open-ended answers. Choose what goes on the methods slide.
+    slots:
+      - id: separation
+        label: "Separation"
+        options:
+          - {id: sil_no_noise, text: "Silhouette without noise, with the noise share stated"}
+          - {id: sil_all, text: "Silhouette with noise counted as a cluster"}
+        answer: sil_no_noise
+      - id: stability
+        label: "Stability"
+        options:
+          - {id: ari, text: "Mean ARI across 20 bootstrap reruns, and which themes recur"}
+          - {id: skip, text: "Not needed if silhouette is high"}
+        answer: ari
+      - id: examples
+        label: "Examples per theme"
+        options:
+          - {id: random, text: "Three randomly drawn verbatims"}
+          - {id: best, text: "The three most typical verbatims"}
+        answer: random
+    model_answer: |
+      - Silhouette on clustered points, with noise reported beside it.
+      - Stability across reruns, naming the themes that do not recur.
+      - Random verbatims, so readers see what a theme typically contains.
+    wrong_answers:
+      - answer: {separation: sil_all}
+        feedback: "Noise is scattered by definition. Counting it as a cluster drags the score down and mixes two messages."
+      - answer: {stability: skip}
+        feedback: "A clustering can be well separated in one run and different in the next."
+      - answer: {examples: best}
+        feedback: "Hand-picked examples make every theme look cleaner than it is."
+    hints:
+      - "What does noise do to silhouette?"
+      - "Would the themes come back on new data?"
+      - "Which examples are honest?"
+    explanation: |
+      Honest methods show separation, stability and representative evidence.
+
+recap:
+  - front: "Three checks before naming clusters"
+    back: "Separation (silhouette), stability (ARI across reruns), meaning (read and name independently)."
+  - front: "Silhouette and HDBSCAN noise"
+    back: "Exclude -1 first. silhouette_score treats it as a cluster (0.70 vs 0.555 in this lesson's example)."
+  - front: "Adjusted Rand index"
+    back: "1 for identical groupings, about 0 for chance, can be negative, ignores label names."
+  - front: "Examples on a theme slide"
+    back: "Random verbatims, not hand-picked ones."
+
+claims:
+  - claim: "Silhouette 0.70 excluding noise and 0.555 including it for HDBSCAN on four blobs plus uniform noise; adjusted_rand_score([0,0,1,1],[1,1,0,0]) = 1.0 and ([0,0,1,1],[0,1,0,1]) = -0.5."
+    status: verified
+    source: "Run with scikit-learn 1.8.0 and 1.9.1 in this repository."

@@ -1,0 +1,338 @@
+id: B14-L1
+title: Track every run with MLflow
+
+concept: |
+  After twenty experiments nobody remembers which settings produced the good score. **MLflow tracking** records each run: parameters, metrics, tags and files. Examples use MLflow 3.16. On Databricks the tracking server is built in. Locally, MLflow 3 stores runs in a SQLite file, `mlflow.db`, in the working directory by default.
+
+  ```python
+  import mlflow
+
+  mlflow.set_experiment("churn")
+  with mlflow.start_run(run_name="lr-c1"):
+      mlflow.log_params({"C": 1.0, "seed": 7, "features": "v3"})
+      mlflow.set_tags({"git_commit": commit, "input_sha256": data_hash})
+      model = train(X_train, y_train, C=1.0, seed=7)
+      mlflow.log_metric("cv_auc", cv_auc)
+      mlflow.sklearn.log_model(model, name="model", input_example=X_train[:5])
+  ```
+
+  What to record, every time:
+
+  - **Parameters**: every setting that changes the result, including the seed and the feature set version. MLflow stores them as **strings**: `1.0` comes back as `'1.0'`. A parameter cannot be changed once logged in a run. Logging `C` twice with different values raises `MlflowException`.
+  - **Tags**: the Git commit and the input data hash from the run manifest (lesson B6-L2). They link the run to exact code and data.
+  - **Metrics**: the honest estimate (lesson B11-L3) and its spread, named consistently across runs: `cv_auc_mean`, `cv_auc_std`.
+  - **The model**: `log_model` saves the fitted object with a `requirements.txt`, `conda.yaml` and `python_env.yaml` pinned to the versions used. For scikit-learn models MLflow 3.16 saves in the skops format.
+
+  Use the `with mlflow.start_run():` block. If training raises, the run ends with status FAILED instead of staying open and collecting the next run's metrics.
+
+  Compare runs with `mlflow.search_runs(experiment_names=["churn"])`, which returns a pandas DataFrame with `params.*`, `metrics.*` and `tags.*` columns.
+
+  mlflow does not run in this app's browser runtime. The exercises check your code's structure.
+
+why_it_matters: |
+  A model with AUC 0.83 went to production from a notebook. Three months later it needed retraining. Nobody could reproduce 0.83: the notebook had been edited since, the seed had not been recorded, and the training extract had been refreshed. The team spent two weeks rebuilding a model they had already built once. One tracked run with parameters, commit and data hash would have made the retrain a single command.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      model = LogisticRegression(C=c).fit(X_train, y_train)
+      print(c, roc_auc_score(y_val, model.predict_proba(X_val)[:, 1]))
+      pickle.dump(model, open("model_final_v2.pkl", "wb"))
+    annotations:
+      - find: 'print(c, roc_auc_score(y_val, model.predict_proba(X_val)[:, 1]))'
+        note: "Results live in cell output, lost on the next run."
+      - find: 'pickle.dump(model, open("model_final_v2.pkl", "wb"))'
+        note: "A file name as version control, with no code, data or environment attached."
+  strong:
+    code: |
+      import mlflow
+      import numpy as np
+      from sklearn.linear_model import LogisticRegression
+
+
+      def tracked_fit(X_train: np.ndarray, y_train: np.ndarray, c: float, seed: int, commit: str, data_hash: str, cv_auc: float) -> str:
+          """Fit and log one run. Returns the run ID."""
+          with mlflow.start_run(run_name=f"lr-c{c}") as run:
+              mlflow.log_params({"C": c, "seed": seed})
+              mlflow.set_tags({"git_commit": commit, "input_sha256": data_hash})
+              model = LogisticRegression(C=c, random_state=seed, max_iter=1000).fit(X_train, y_train)
+              mlflow.log_metric("cv_auc", cv_auc)
+              mlflow.sklearn.log_model(model, name="model", input_example=X_train[:5])
+              return run.info.run_id
+    annotations:
+      - find: "with mlflow.start_run(run_name=f\"lr-c{c}\") as run:"
+        note: "The run ends cleanly even if fitting raises."
+      - find: 'mlflow.set_tags({"git_commit": commit, "input_sha256": data_hash})'
+        note: "Code and data identity, attached to the run."
+      - find: 'mlflow.sklearn.log_model(model, name="model", input_example=X_train[:5])'
+        note: "The model with pinned requirements and an input example."
+  takeaway: |
+    One run per fit, inside a with block, with parameters, commit, data hash, metrics and the model.
+
+exercises:
+  - id: B14-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You log `mlflow.log_param("C", 1.0)` and later read the run back. What type is the value?
+    options:
+      - {id: a, text: "float"}
+      - {id: b, text: "str"}
+      - {id: c, text: "int"}
+      - {id: d, text: "Decimal"}
+    answer: b
+    reasons:
+      - {id: r1, text: "MLflow stores parameters as strings, so compare and convert carefully."}
+      - {id: r2, text: "Python cannot store floats in a database."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Metrics are floats. Parameters come back as strings: '1.0'."
+      - answer: c
+        feedback: "1.0 is a float in Python, and MLflow stores it as the string '1.0'."
+      - answer: d
+        feedback: "MLflow does not use Decimal for parameters."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Databases store floats. MLflow chooses strings for parameters."
+    hints:
+      - "Params and metrics are stored differently."
+      - "Which one is numeric?"
+      - "Metrics."
+    explanation: |
+      Parameters are strings. `run.data.params["C"]` is `'1.0'`. Convert before comparing numerically.
+
+  - id: B14-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What happens? (MLflow 3.16)
+    code: |
+      import mlflow
+
+      with mlflow.start_run():
+          mlflow.log_param("C", 1.0)
+          mlflow.log_param("C", 2.0)
+    answer: "MlflowException"
+    wrong_answers:
+      - answer: "C is 2.0"
+        feedback: "Parameters are immutable within a run. Changing a logged value raises MlflowException."
+      - answer: "C is 1.0"
+        feedback: "The second call does not pass silently. It raises."
+    hints:
+      - "Can a run's parameter change after logging?"
+      - "What would that do to reproducibility?"
+      - "MLflow refuses."
+    explanation: |
+      "Changing param values is not allowed." Start a new run for new settings.
+
+  - id: B14-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Log the Git commit as a tag and the model under the name `model`.
+    template: |
+      mlflow.[[g1]]("git_commit", commit)
+      mlflow.sklearn.log_model(model, [[g2]]="model")
+    gaps:
+      g1: {accepted: [set_tag]}
+      g2: {accepted: [name]}
+    wrong_answers:
+      - answer: {g1: log_param}
+        feedback: "A commit is metadata about the run, not a setting of the model. Use a tag."
+    hints:
+      - "The function for one tag."
+      - "MLflow 3 names logged models with a keyword."
+      - "`set_tag` and `name`."
+    explanation: |
+      Tags hold run metadata such as commits. In MLflow 3, `log_model` takes `name=` for the model's name in the run.
+
+  - id: B14-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `tracked_fit(X_train, y_train, c, seed, commit, data_hash, cv_auc) -> str`. Inside `with mlflow.start_run(...) as run:` log params `C` and `seed`, set tags `git_commit` and `input_sha256`, fit `LogisticRegression(C=c, random_state=seed, max_iter=1000)`, log the metric `cv_auc`, log the model with `mlflow.sklearn.log_model(model, name="model")`, and return `run.info.run_id`.
+
+      mlflow does not run in the browser. The checker reads your code.
+    starter: |
+      import mlflow
+      import numpy as np
+      from sklearn.linear_model import LogisticRegression
+
+
+      def tracked_fit(X_train, y_train, c, seed, commit, data_hash, cv_auc):
+          mlflow.start_run()
+          model = LogisticRegression(C=c).fit(X_train, y_train)
+          print(cv_auc)
+          return model
+    checker:
+      kind: python
+      ast_rules:
+        - id: documented
+          kind: requires_function
+          name: tracked_fit
+          docstring: true
+          message: "Give `tracked_fit` a docstring."
+        - id: with_block
+          kind: requires_pattern
+          pattern: "with\\s+mlflow\\.start_run\\("
+          message: "Use `with mlflow.start_run(...) as run:` so the run always ends."
+        - id: params
+          kind: requires_pattern
+          pattern: "log_params?\\([\\s\\S]*[\"']C[\"'][\\s\\S]*[\"']seed[\"']"
+          message: "Log both C and seed as parameters."
+        - id: tags
+          kind: requires_pattern
+          pattern: "git_commit[\\s\\S]*input_sha256|input_sha256[\\s\\S]*git_commit"
+          message: "Tag the run with git_commit and input_sha256."
+        - id: metric
+          kind: requires_pattern
+          pattern: "log_metric\\(\\s*[\"']cv_auc[\"']"
+          message: "Log the cv_auc metric."
+        - id: model
+          kind: requires_pattern
+          pattern: "mlflow\\.sklearn\\.log_model\\([^)]*name\\s*=\\s*[\"']model[\"']"
+          message: "Log the model with mlflow.sklearn.log_model(model, name=\"model\")."
+        - id: returns_id
+          kind: requires_pattern
+          pattern: "run\\.info\\.run_id"
+          message: "Return run.info.run_id."
+        - id: seeded
+          kind: requires_pattern
+          pattern: "random_state\\s*=\\s*seed"
+          message: "Pass random_state=seed to the model."
+    solution: |
+      import mlflow
+      import numpy as np
+      from sklearn.linear_model import LogisticRegression
+
+
+      def tracked_fit(X_train: np.ndarray, y_train: np.ndarray, c: float, seed: int, commit: str, data_hash: str, cv_auc: float) -> str:
+          """Fit a logistic regression and record the run in MLflow.
+
+          Returns:
+              The MLflow run ID.
+          """
+          with mlflow.start_run(run_name=f"lr-c{c}") as run:
+              mlflow.log_params({"C": c, "seed": seed})
+              mlflow.set_tags({"git_commit": commit, "input_sha256": data_hash})
+              model = LogisticRegression(C=c, random_state=seed, max_iter=1000).fit(X_train, y_train)
+              mlflow.log_metric("cv_auc", cv_auc)
+              mlflow.sklearn.log_model(model, name="model")
+              return run.info.run_id
+    seeded_bugs:
+      - |
+        import mlflow
+        import numpy as np
+        from sklearn.linear_model import LogisticRegression
+
+
+        def tracked_fit(X_train: np.ndarray, y_train: np.ndarray, c: float, seed: int, commit: str, data_hash: str, cv_auc: float) -> str:
+            """Run never ends on error."""
+            run = mlflow.start_run()
+            mlflow.log_params({"C": c, "seed": seed})
+            mlflow.set_tags({"git_commit": commit, "input_sha256": data_hash})
+            model = LogisticRegression(C=c, random_state=seed, max_iter=1000).fit(X_train, y_train)
+            mlflow.log_metric("cv_auc", cv_auc)
+            mlflow.sklearn.log_model(model, name="model")
+            mlflow.end_run()
+            return run.info.run_id
+      - |
+        import mlflow
+        import numpy as np
+        from sklearn.linear_model import LogisticRegression
+
+
+        def tracked_fit(X_train: np.ndarray, y_train: np.ndarray, c: float, seed: int, commit: str, data_hash: str, cv_auc: float) -> str:
+            """No data or code identity."""
+            with mlflow.start_run() as run:
+                mlflow.log_params({"C": c, "seed": seed})
+                model = LogisticRegression(C=c, random_state=seed, max_iter=1000).fit(X_train, y_train)
+                mlflow.log_metric("cv_auc", cv_auc)
+                mlflow.sklearn.log_model(model, name="model")
+                return run.info.run_id
+    wrong_answers:
+      - answer: |
+          import mlflow
+          import numpy as np
+          from sklearn.linear_model import LogisticRegression
+
+
+          def tracked_fit(X_train: np.ndarray, y_train: np.ndarray, c: float, seed: int, commit: str, data_hash: str, cv_auc: float) -> str:
+              """No data or code identity."""
+              with mlflow.start_run() as run:
+                  mlflow.log_params({"C": c, "seed": seed})
+                  model = LogisticRegression(C=c, random_state=seed, max_iter=1000).fit(X_train, y_train)
+                  mlflow.log_metric("cv_auc", cv_auc)
+                  mlflow.sklearn.log_model(model, name="model")
+                  return run.info.run_id
+        triggers: tags
+    hints:
+      - "Open the run with a with block."
+      - "log_params for settings, set_tags for commit and data hash, log_metric for the score."
+      - "log_model with name=\"model\", then return run.info.run_id."
+    explanation: |
+      A run that records settings, code, data, score and model can be found, compared and reproduced.
+
+  - id: B14-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Decide how each item is recorded in MLflow.
+    slots:
+      - id: seed
+        label: "Random seed"
+        options: &kinds
+          - {id: param, text: "Parameter"}
+          - {id: tag, text: "Tag"}
+          - {id: metric, text: "Metric"}
+          - {id: artifact, text: "Artifact"}
+        answer: param
+      - id: commit
+        label: "Git commit"
+        options: *kinds
+        answer: tag
+      - id: auc
+        label: "Cross-validated AUC"
+        options: *kinds
+        answer: metric
+      - id: plot
+        label: "Calibration plot"
+        options: *kinds
+        answer: artifact
+    model_answer: |
+      - Seed: a parameter, because it changes the result.
+      - Commit: a tag, metadata that links the run to code.
+      - AUC: a metric, numeric and comparable across runs.
+      - Plot: an artifact file.
+    wrong_answers:
+      - answer: {seed: tag}
+        feedback: "The seed is a setting that changes the output. Log it as a parameter so searches can filter on it."
+      - answer: {auc: param}
+        feedback: "Parameters are strings. Metrics are numeric and sortable."
+      - answer: {commit: metric}
+        feedback: "A commit hash is not a number to compare. Tag it."
+    hints:
+      - "Does it change the result?"
+      - "Is it a number to compare?"
+      - "Is it a file?"
+    explanation: |
+      Parameters for settings, tags for identity, metrics for numbers, artifacts for files.
+
+recap:
+  - front: "What to log per run"
+    back: "Params (incl. seed), tags (git_commit, input_sha256), metrics, the model."
+  - front: "MLflow parameters"
+    back: "Stored as strings and immutable within a run."
+  - front: "Why with mlflow.start_run()"
+    back: "The run ends with FAILED status if training raises, instead of staying open."
+  - front: "log_model in MLflow 3"
+    back: "mlflow.sklearn.log_model(model, name=\"model\"), with pinned requirements saved alongside."
+
+claims:
+  - claim: "MLflow 3.16: default local tracking URI is sqlite:///<cwd>/mlflow.db; params come back as strings; re-logging a param with a new value raises MlflowException; log_model accepts name=; sklearn models are saved as model.skops with requirements.txt, conda.yaml and python_env.yaml."
+    status: verified
+    source: "Run with MLflow 3.16.1 in a scratch environment for this repository."
