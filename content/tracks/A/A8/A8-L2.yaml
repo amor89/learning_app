@@ -1,0 +1,295 @@
+id: A8-L2
+title: Auto Loader for file ingestion into bronze
+
+concept: |
+  Suppliers drop files into a landing folder. You want each file loaded into bronze exactly once, whenever it arrives, without keeping your own list of processed files. **Auto Loader** does this on Databricks. It is a Structured Streaming source called `cloudFiles`.
+
+  ```python
+  (
+      spark.readStream.format("cloudFiles")
+      .option("cloudFiles.format", "csv")
+      .option("cloudFiles.schemaLocation", schema_path)
+      .option("header", "true")
+      .load(landing_path)
+      .select("*", F.col("_metadata.file_path").alias("source_file"))
+      .writeStream
+      .option("checkpointLocation", checkpoint_path)
+      .trigger(availableNow=True)
+      .toTable("research_prod.research_bronze.nat_raw")
+  )
+  ```
+
+  What each piece does:
+
+  - **Checkpoint location.** Auto Loader records every discovered file in a key-value store (RocksDB) under the checkpoint. After a failure it resumes where it stopped, and each file path is processed once. One checkpoint per stream, never shared, never deleted casually: deleting it reloads every file.
+  - **Schema location.** Auto Loader infers the schema once, stores it there, and tracks changes. Without a schema you provide, the default mode is `addNewColumns`: when a new column appears, the stream stops with `UnknownFieldException` after recording the new schema, and the next start includes the column. Run it from a job that retries, so the restart is automatic.
+  - **Rescued data.** When Auto Loader infers the schema, it adds a `_rescued_data` column that captures values that do not fit, such as a type mismatch. Count non-null `_rescued_data` in your contract checks.
+  - **`trigger(availableNow=True)`** processes every file that has arrived, then stops. Schedule it as a batch job: incremental logic, batch cost.
+  - **`_metadata.file_path`** gives each row its source file, for the bronze audit columns.
+
+  Keep checkpoints and schemas in a Unity Catalog volume, such as `/Volumes/research_prod/research_bronze/checkpoints/nat_raw`.
+
+why_it_matters: |
+  A bronze notebook lists the landing folder, compares file names with a hand-maintained "processed.txt", and loads the rest. A timeout kills the notebook after it has loaded a file but before it has updated the list. The next run loads the same file again. Bronze now holds the delivery twice with two ingestion IDs, and silver's newest-version logic cannot tell them apart, because both carry the same `delivery_version`.
+
+  Auto Loader's checkpoint records files and commits the Delta write together, so a restart after a failure neither skips nor repeats a file.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      import os
+
+      done = set(open("/dbfs/tmp/processed.txt").read().split())
+      for name in os.listdir("/dbfs/landing/nat"):
+          if name not in done:
+              df = spark.read.option("header", True).csv(f"/landing/nat/{name}")
+              df.write.mode("append").saveAsTable("research_bronze.nat_raw")
+              open("/dbfs/tmp/processed.txt", "a").write(name + "\n")
+    annotations:
+      - find: 'done = set(open("/dbfs/tmp/processed.txt").read().split())'
+        note: "Hand-built state in a temp file: easy to lose, and not linked to the table."
+      - find: 'df.write.mode("append").saveAsTable("research_bronze.nat_raw")'
+        note: "The write and the list update are separate steps. A crash between them duplicates a file."
+      - find: 'open("/dbfs/tmp/processed.txt", "a").write(name + "\n")'
+        note: "State recorded after the write, with no transaction."
+  strong:
+    code: |
+      def start_bronze_ingest(spark: SparkSession, landing: str, table: str, checkpoint: str, schema_path: str) -> StreamingQuery:
+          """Load every new file in landing into bronze once, then stop."""
+          raw = (
+              spark.readStream.format("cloudFiles")
+              .option("cloudFiles.format", "csv")
+              .option("cloudFiles.schemaLocation", schema_path)
+              .option("header", "true")
+              .load(landing)
+          )
+          audited = raw.select(
+              "*",
+              F.col("_metadata.file_path").alias("source_file"),
+              F.current_timestamp().alias("ingestion_timestamp"),
+          )
+          return (
+              audited.writeStream.option("checkpointLocation", checkpoint)
+              .trigger(availableNow=True)
+              .toTable(table)
+          )
+    annotations:
+      - find: 'spark.readStream.format("cloudFiles")'
+        note: "Auto Loader discovers new files and tracks them in the checkpoint."
+      - find: '.option("cloudFiles.schemaLocation", schema_path)'
+        note: "Where the inferred schema and its changes are stored."
+      - find: 'F.col("_metadata.file_path").alias("source_file"),'
+        note: "Source file for every row, for the bronze audit columns."
+      - find: ".trigger(availableNow=True)"
+        note: "Process everything available, then stop: scheduled like a batch job."
+  takeaway: |
+    Auto Loader replaces a fragile processed-files list with a checkpoint that commits together with the Delta write.
+
+exercises:
+  - id: A8-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      What lets Auto Loader process each landing file exactly once across restarts?
+    options:
+      - {id: a, text: "The schema location"}
+      - {id: b, text: "The checkpoint location"}
+      - {id: c, text: "The `_rescued_data` column"}
+      - {id: d, text: "The file names in the target table"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Auto Loader records discovered files in a key-value store in the checkpoint and resumes from it."}
+      - {id: r2, text: "The checkpoint deletes files after loading them."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The schema location stores the inferred schema, not the list of processed files."
+      - answer: c
+        feedback: "_rescued_data holds values that did not fit the schema. It says nothing about which files were loaded."
+      - answer: d
+        feedback: "Auto Loader never reads the target table to decide what to load. The checkpoint does that."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Auto Loader leaves source files in place. It records them in the checkpoint."
+    hints:
+      - "Where does a stream keep its progress?"
+      - "It is a separate path, given in the writeStream options."
+      - "checkpointLocation."
+    explanation: |
+      The checkpoint holds a RocksDB store of discovered files and the stream's progress. On restart, Auto Loader continues from it, so files are neither skipped nor repeated.
+
+  - id: A8-L2-E2
+    type: fill_gap
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Complete the Auto Loader read and a write that processes all available files, then stops.
+    template: |
+      raw = (
+          spark.readStream.format("[[g1]]")
+          .option("cloudFiles.format", "csv")
+          .option("cloudFiles.[[g2]]", schema_path)
+          .load(landing)
+      )
+      raw.writeStream.option("checkpointLocation", checkpoint).trigger([[g3]]=True).toTable(table)
+    gaps:
+      g1: {accepted: [cloudFiles]}
+      g2: {accepted: [schemaLocation]}
+      g3: {accepted: [availableNow]}
+    wrong_answers:
+      - answer: {g1: autoloader}
+        feedback: "The source format is named `cloudFiles`."
+      - answer: {g3: once}
+        feedback: "`once=True` processes everything in a single micro-batch. `availableNow=True` also stops when done, but can split a large backlog into several batches, which Databricks recommends for Auto Loader."
+      - answer: {g2: checkpointLocation}
+        feedback: "The checkpoint goes on the writer. The reader option for the schema store is `cloudFiles.schemaLocation`."
+    hints:
+      - "The source format has the same prefix as its options."
+      - "Where the inferred schema is stored."
+      - "The trigger that processes everything available, then stops."
+    explanation: |
+      `format("cloudFiles")` selects Auto Loader. `cloudFiles.schemaLocation` stores the schema. `trigger(availableNow=True)` runs the stream as a batch.
+
+  - id: A8-L2-E3
+    type: mcq
+    difficulty: 3
+    prompt: |
+      An Auto Loader stream runs without a user-supplied schema. A new delivery adds a column `region`. What happens?
+    options:
+      - {id: a, text: "The column is silently dropped."}
+      - {id: b, text: "The stream stops with UnknownFieldException after recording the new schema. The next start includes region."}
+      - {id: c, text: "The stream continues and region lands in _rescued_data, forever."}
+      - {id: d, text: "The whole bronze table is rebuilt."}
+    answer: b
+    reasons:
+      - {id: r1, text: "The default mode without a schema is addNewColumns, which evolves by failing once and restarting."}
+      - {id: r2, text: "Auto Loader never changes a schema automatically."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Nothing is dropped silently. In addNewColumns mode the stream stops so the new column is picked up."
+      - answer: c
+        feedback: "That describes the `rescue` mode. The default without a schema is `addNewColumns`."
+      - answer: d
+        feedback: "Auto Loader never rebuilds the target. It evolves the schema for new files."
+      - answer: b|r2
+        feedback: "Right outcome, wrong reason. It does change the schema: it records the evolved schema, then needs a restart."
+    hints:
+      - "Which mode applies when you do not provide a schema?"
+      - "How does that mode pick up a new column?"
+      - "Fail once, restart with the new schema."
+    explanation: |
+      Without a schema, the default is `addNewColumns`: the stream stops with `UnknownFieldException`, the schema location gains the column, and a restart continues. Jobs with retries make that restart automatic.
+
+  - id: A8-L2-E4
+    type: spot_bug
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Two Auto Loader streams load different landing folders into two bronze tables. After a week, each table is missing files the other received. Tap the line, then fix the function.
+    code: |
+      CHECKPOINT = "/Volumes/research_prod/research_bronze/checkpoints/bronze"
+
+
+      def start_ingest(spark: SparkSession, landing: str, table: str, schema_path: str) -> StreamingQuery:
+          """Load new files from landing into table."""
+          raw = spark.readStream.format("cloudFiles").option("cloudFiles.format", "csv").option("cloudFiles.schemaLocation", schema_path).load(landing)
+          return raw.writeStream.option("checkpointLocation", CHECKPOINT).trigger(availableNow=True).toTable(table)
+    bug_lines: [1]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: per_stream_checkpoint
+          kind: requires_pattern
+          pattern: "option\\(\\s*[\"']checkpointLocation[\"']\\s*,\\s*checkpoint\\s*\\)"
+          message: "Pass a checkpoint path per stream as a parameter, and use it: .option(\"checkpointLocation\", checkpoint)."
+        - id: no_shared_constant
+          kind: forbids_pattern
+          pattern: "CHECKPOINT\\s*="
+          message: "Remove the shared checkpoint constant. Each stream needs its own checkpoint."
+        - id: typed
+          kind: requires_function
+          name: start_ingest
+          typed: true
+          docstring: true
+          message: "Keep `start_ingest` typed and documented, with a checkpoint parameter."
+    fix_solution: |
+      def start_ingest(spark: SparkSession, landing: str, table: str, schema_path: str, checkpoint: str) -> StreamingQuery:
+          """Load new files from landing into table. checkpoint must be unique to this stream."""
+          raw = spark.readStream.format("cloudFiles").option("cloudFiles.format", "csv").option("cloudFiles.schemaLocation", schema_path).load(landing)
+          return raw.writeStream.option("checkpointLocation", checkpoint).trigger(availableNow=True).toTable(table)
+    wrong_answers:
+      - lines: [6]
+        feedback: "The read is fine, with its own schema location. The problem is on the write side."
+    hints:
+      - "How many streams share the same checkpoint?"
+      - "A checkpoint records one stream's progress."
+      - "Give each stream its own checkpoint path."
+    explanation: |
+      Both streams write their progress to the same checkpoint, so each reads the other's state and skips files. One checkpoint per stream, passed in from config.
+
+  - id: A8-L2-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      Design the Auto Loader job for tracker nat. Choose each setting.
+    slots:
+      - id: trigger
+        label: "Files arrive a few times a day, and cost matters more than latency"
+        options:
+          - {id: available, text: "trigger(availableNow=True), scheduled"}
+          - {id: continuous, text: "A continuously running stream"}
+        answer: available
+      - id: checkpoint
+        label: "Checkpoint location"
+        options:
+          - {id: volume, text: "/Volumes/research_prod/research_bronze/checkpoints/nat_raw"}
+          - {id: tmp, text: "/tmp/checkpoint"}
+          - {id: shared, text: "One checkpoint shared by all trackers"}
+        answer: volume
+      - id: rescued
+        label: "What to do with _rescued_data"
+        options:
+          - {id: check, text: "Count non-null values in the contract check"}
+          - {id: drop, text: "Drop the column in bronze"}
+        answer: check
+    model_answer: |
+      - availableNow on a schedule: incremental processing at batch cost.
+      - A dedicated checkpoint per stream in a Unity Catalog volume, so it survives and is governed.
+      - Keep _rescued_data in bronze and count it in the contract checks: it is evidence of schema drift.
+    wrong_answers:
+      - answer: {trigger: continuous}
+        feedback: "A continuous stream keeps compute running all day for a few files. Scheduled availableNow costs far less."
+      - answer: {checkpoint: tmp}
+        feedback: "Temporary storage can be cleared. Losing the checkpoint reloads every file."
+      - answer: {checkpoint: shared}
+        feedback: "Streams must not share a checkpoint. They would skip each other's files."
+      - answer: {rescued: drop}
+        feedback: "Dropping _rescued_data in bronze destroys evidence. Bronze keeps everything."
+    hints:
+      - "Latency or cost?"
+      - "The checkpoint must be durable and private to the stream."
+      - "Bronze keeps evidence."
+    explanation: |
+      Scheduled availableNow, a durable per-stream checkpoint in a volume, and rescued data counted as a quality signal.
+
+recap:
+  - front: "What does Auto Loader's checkpoint store?"
+    back: "Discovered files (in RocksDB) and stream progress, so each file is processed exactly once across restarts."
+  - front: "Default schema evolution mode without a supplied schema"
+    back: "addNewColumns: stop with UnknownFieldException, record the new schema, restart."
+  - front: "Incremental at batch cost"
+    back: ".trigger(availableNow=True) on a scheduled job."
+  - front: "Checkpoint rule"
+    back: "One per stream, in durable storage such as a UC volume. Never shared, never deleted casually."
+
+claims:
+  - claim: "Auto Loader tracks files in RocksDB in the checkpoint for exactly-once processing; _metadata.file_path is available; checkpoints can live in Volumes paths."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/"
+  - claim: "addNewColumns is the default schema evolution mode when no schema is provided; the stream stops with UnknownFieldException and picks up new columns on restart; _rescued_data is added when the schema is inferred."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/schema"
+  - claim: "DataStreamWriter.trigger accepts availableNow=True and toTable exists in PySpark 4.0."
+    status: verified
+    source: "Checked on PySpark 4.0.4 in this repository."

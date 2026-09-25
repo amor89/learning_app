@@ -1,0 +1,512 @@
+id: A1-L2
+title: Type hints and docstrings a reviewer can trust
+
+concept: |
+  A type hint states a contract. `keys: list[str]` tells the caller, the reviewer and mypy that `keys` is a list of column names. A bare `list` says "some list". No hint says nothing.
+
+  Use the modern forms, valid from Python 3.10:
+
+  - Built-in generics: `list[str]`, `dict[str, int]`, `tuple[str, ...]`.
+  - Optional values: `str | None = None`. Never `str = None`, which claims the value is always a string.
+  - Fixed sets of strings: `Literal["PASS", "WARN", "FAIL"]` from `typing`. mypy then rejects `"pass"` or `"FAILED"`.
+  - A return type on every function, including `-> None`.
+
+  Run `mypy --strict` in CI. Strict mode refuses functions without hints, so gaps cannot creep back.
+
+  A docstring explains what hints cannot: meaning, units, grain and failure modes. Use the Google style:
+
+  ```python
+  def weighted_share(df: DataFrame, flag_col: str) -> float | None:
+      """Weighted share of rows where flag_col is 1.
+
+      Args:
+          df: Respondents with final_weight.
+          flag_col: 0/1 column to share.
+
+      Returns:
+          Share between 0 and 1, or None when the total weight is 0.
+
+      Raises:
+          ValueError: If flag_col is missing from df.
+      """
+  ```
+
+  The first line fits on one line and says what the function returns or does. Args, Returns and Raises follow. A reviewer reads the docstring, then checks the body against it. A mismatch between the two is a bug in one of them.
+
+  PySpark is not fully typed, and mypy cannot see column names. Hints still catch the most common mistake: passing the wrong kind of object.
+
+why_it_matters: |
+  The reference `upsert_silver` takes `merge_keys: list`. A caller passes the string `"respondent_id"` instead of `["respondent_id"]`. Python iterates a string character by character, so the join builds `t.r = s.r AND t.e = s.e AND ...`. The MERGE fails with a column-not-found error at 02:00, and the on-call engineer spends an hour reading the wrong part of the stack trace.
+
+  With `merge_keys: list[str]`, mypy flags the call in CI: a `str` is not a `list[str]`. The bug never reaches the scheduler.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def log_pipeline_run(pipeline_name, layer, rows_processed, status, error_message: str = None):
+          """Append one record per pipeline run to the governance run log."""
+          record = {
+              "pipeline_name": pipeline_name,
+              "layer": layer,
+              "rows_processed": rows_processed,
+              "status": status,
+              "error_message": error_message,
+          }
+          return record
+    annotations:
+      - find: "def log_pipeline_run(pipeline_name, layer,"
+        note: "No hints on four parameters and no return type. mypy --strict rejects the function."
+      - find: "error_message: str = None"
+        note: "Claims a string, defaults to None. Reference defect 7."
+      - find: '"status": status,'
+        note: "`status` accepts any string, so `\"sucess\"` slips into the run log."
+      - find: '"""Append one record per pipeline run'
+        note: "The docstring says it appends, but the function returns a dict. One of them is wrong."
+  strong:
+    code: |
+      from typing import Literal
+
+      RunStatus = Literal["SUCCESS", "FAILED"]
+      Layer = Literal["bronze", "silver", "gold"]
+
+
+      def build_run_record(
+          pipeline_name: str,
+          layer: Layer,
+          rows_processed: int,
+          status: RunStatus,
+          error_message: str | None = None,
+      ) -> dict[str, str | int | None]:
+          """Build one run log record.
+
+          Args:
+              pipeline_name: Job name, for example nat_silver_pipeline.
+              layer: Medallion layer the run wrote to.
+              rows_processed: Rows written by the run.
+              status: Final status of the run.
+              error_message: Error text for a failed run, otherwise None.
+
+          Returns:
+              A record ready to append to the run log table.
+          """
+          return {
+              "pipeline_name": pipeline_name,
+              "layer": layer,
+              "rows_processed": rows_processed,
+              "status": status,
+              "error_message": error_message,
+          }
+    annotations:
+      - find: 'RunStatus = Literal["SUCCESS", "FAILED"]'
+        note: "A named Literal type. mypy rejects any other string at every call site."
+      - find: "error_message: str | None = None,"
+        note: "Optional, stated honestly."
+      - find: ") -> dict[str, str | int | None]:"
+        note: "The return type matches what the body returns."
+      - find: "def build_run_record("
+        note: "The name now matches the job: it builds a record. Writing it is a separate function."
+  takeaway: |
+    The strong version tells mypy, the reviewer and the caller the same story. The weak version tells three different ones.
+
+exercises:
+  - id: A1-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A function takes an optional error message that defaults to `None`. Which signature is correct for Python 3.11 with `mypy --strict`?
+    options:
+      - {id: a, text: "`def log_run(error_message: str = None) -> None:`"}
+      - {id: b, text: "`def log_run(error_message: str | None = None) -> None:`"}
+      - {id: c, text: "`def log_run(error_message=None) -> None:`"}
+      - {id: d, text: "`def log_run(error_message: None = str) -> None:`"}
+    answer: b
+    reasons:
+      - {id: r1, text: "The hint must include None, because None is a value the parameter takes."}
+      - {id: r2, text: "Type hints change how Python runs the function."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "`str = None` claims the value is always a string. mypy strict mode rejects the implicit Optional."
+      - answer: c
+        feedback: "No hint at all. mypy --strict rejects unannotated parameters."
+      - answer: d
+        feedback: "This makes the type `None` and the default the class `str`. It is backwards."
+      - answer: b|r2
+        feedback: "Right signature, wrong reason. Python ignores hints at run time. They exist for tools and readers."
+    hints:
+      - "The default is None. Does the hint allow None?"
+      - "Python 3.10 added the `X | Y` union syntax."
+      - "`str | None = None`."
+    explanation: |
+      `str | None = None` says the parameter is a string or None, and defaults to None. Python ignores hints at run time. mypy and readers rely on them.
+
+  - id: A1-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      The reference code builds a MERGE condition like this. A caller passes a string instead of a list. What does this print?
+    code: |
+      merge_keys = "id"
+      condition = " AND ".join(f"t.{k} = s.{k}" for k in merge_keys)
+      print(condition)
+    answer: "t.i = s.i AND t.d = s.d"
+    wrong_answers:
+      - answer: "t.id = s.id"
+        feedback: "That is what the caller intended. Iterating a string yields its characters, `i` then `d`."
+      - answer: "TypeError"
+        feedback: "Python raises no error. A string is iterable, which is why the bug is silent until Spark runs the MERGE."
+    hints:
+      - "What does `for k in \"id\"` loop over?"
+      - "A string is a sequence of characters."
+      - "Two characters, two conditions, joined by AND."
+    explanation: |
+      A string is iterable, so the loop yields `i` and `d`. The condition names two columns that do not exist. With `merge_keys: list[str]`, mypy flags the call before it runs.
+
+  - id: A1-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the signature. `status` accepts only `"PASS"`, `"WARN"` or `"FAIL"`, and the function returns nothing.
+    template: |
+      from typing import [[g1]]
+
+      def record_check(name: str, status: [[g1b]]["PASS", "WARN", "FAIL"]) -> [[g2]]:
+          ...
+    gaps:
+      g1: {accepted: [Literal]}
+      g1b: {accepted: [Literal]}
+      g2: {accepted: [None]}
+    wrong_answers:
+      - answer: {g1b: Enum}
+        feedback: "An Enum is a class you define. Inline string choices use `Literal[...]` from `typing`."
+      - answer: {g2: void}
+        feedback: "Python has no `void`. A function that returns nothing is annotated `-> None`."
+      - answer: {g1b: str}
+        feedback: "`str` accepts any string, so `\"pass\"` or `\"FAILED\"` would slip through. `Literal` lists the allowed values."
+    hints:
+      - "The type for a fixed set of values lives in `typing`."
+      - "Its name means the values are written out literally."
+      - "`Literal`, and `None` for the return type."
+    explanation: |
+      `Literal["PASS", "WARN", "FAIL"]` restricts the value to those three strings. `-> None` states the function returns nothing.
+
+  - id: A1-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `build_merge_condition(keys, target="t", source="s")`. It returns a condition such as `t.respondent_id = s.respondent_id AND t.wave_id = s.wave_id`.
+
+      - Raise `TypeError` when `keys` is a string, not a list.
+      - Raise `ValueError` when `keys` is empty.
+      - Add type hints and a Google-style docstring with Args, Returns and Raises.
+    starter: |
+      def build_merge_condition(keys, target="t", source="s"):
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: build_merge_condition
+          typed: true
+          docstring: true
+          message: "Add type hints on every parameter, a return type and a docstring."
+        - id: list_of_str
+          kind: requires_pattern
+          pattern: "keys:\\s*list\\[str\\]"
+          message: "Annotate `keys` as `list[str]`, so mypy catches a string passed by mistake."
+        - id: google_sections
+          kind: requires_pattern
+          pattern: "Args:[\\s\\S]*Returns:[\\s\\S]*Raises:"
+          message: "Give the docstring Args, Returns and Raises sections, in that order."
+      tests:
+        - id: two_keys
+          code: |
+            assert build_merge_condition(["respondent_id", "wave_id"]) == "t.respondent_id = s.respondent_id AND t.wave_id = s.wave_id"
+          message: "Join one `t.k = s.k` clause per key with ` AND `."
+        - id: aliases
+          code: |
+            assert build_merge_condition(["id"], "tgt", "src") == "tgt.id = src.id"
+          message: "Use the `target` and `source` aliases you receive."
+        - id: rejects_string
+          code: |
+            try:
+                build_merge_condition("id")
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("no TypeError")
+          message: "A string must raise TypeError. Otherwise it is split into characters."
+        - id: rejects_empty
+          code: |
+            try:
+                build_merge_condition([])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "An empty key list must raise ValueError. An empty condition matches nothing and inserts every row."
+    solution: |
+      def build_merge_condition(keys: list[str], target: str = "t", source: str = "s") -> str:
+          """Build a MERGE ON condition that matches every key column.
+
+          Args:
+              keys: Columns that identify one target row.
+              target: Alias of the target table.
+              source: Alias of the source DataFrame.
+
+          Returns:
+              The condition, for example "t.id = s.id AND t.wave = s.wave".
+
+          Raises:
+              TypeError: If keys is a string instead of a list.
+              ValueError: If keys is empty.
+          """
+          if isinstance(keys, str):
+              raise TypeError("keys must be a list of column names, not a string")
+          if not keys:
+              raise ValueError("keys must name at least one column")
+          return " AND ".join(f"{target}.{k} = {source}.{k}" for k in keys)
+    seeded_bugs:
+      - |
+        def build_merge_condition(keys: list[str], target: str = "t", source: str = "s") -> str:
+            """Build a condition.
+
+            Args:
+                keys: Key columns.
+                target: Target alias.
+                source: Source alias.
+
+            Returns:
+                The condition.
+
+            Raises:
+                ValueError: If keys is empty.
+            """
+            if not keys:
+                raise ValueError("empty")
+            return " AND ".join(f"{target}.{k} = {source}.{k}" for k in keys)
+      - |
+        def build_merge_condition(keys, target="t", source="s"):
+            if isinstance(keys, str):
+                raise TypeError("list please")
+            if not keys:
+                raise ValueError("empty")
+            return " AND ".join(f"{target}.{k} = {source}.{k}" for k in keys)
+      - |
+        def build_merge_condition(keys: list[str], target: str = "t", source: str = "s") -> str:
+            """Build a condition.
+
+            Args:
+                keys: Key columns.
+                target: Target alias.
+                source: Source alias.
+
+            Returns:
+                The condition.
+
+            Raises:
+                TypeError: If keys is a string.
+            """
+            if isinstance(keys, str):
+                raise TypeError("list please")
+            return " AND ".join(f"t.{k} = s.{k}" for k in keys)
+    wrong_answers:
+      - answer: |
+          def build_merge_condition(keys: list[str], target: str = "t", source: str = "s") -> str:
+              """Build a condition.
+
+              Args:
+                  keys: Key columns.
+                  target: Target alias.
+                  source: Source alias.
+
+              Returns:
+                  The condition.
+
+              Raises:
+                  ValueError: If keys is empty.
+              """
+              if not keys:
+                  raise ValueError("empty")
+              return " AND ".join(f"{target}.{k} = {source}.{k}" for k in keys)
+        triggers: rejects_string
+      - answer: |
+          def build_merge_condition(keys: list[str], target: str = "t", source: str = "s") -> str:
+              """Build a condition.
+
+              Args:
+                  keys: Key columns.
+                  target: Target alias.
+                  source: Source alias.
+
+              Returns:
+                  The condition.
+
+              Raises:
+                  TypeError: If keys is a string.
+              """
+              if isinstance(keys, str):
+                  raise TypeError("list please")
+              return " AND ".join(f"t.{k} = s.{k}" for k in keys)
+        triggers: aliases
+    hints:
+      - "Check the type first with `isinstance(keys, str)`, then check for an empty list."
+      - "Build each clause with an f-string that uses `target` and `source`."
+      - "`\" AND \".join(f\"{target}.{k} = {source}.{k}\" for k in keys)`."
+    explanation: |
+      The hint `list[str]` lets mypy catch a string at the call site. The run-time `TypeError` catches callers that skip mypy, such as a notebook. The `ValueError` stops an empty condition, which would match nothing and insert every row.
+
+  - id: A1-L2-E5
+    type: refactor
+    difficulty: 4
+    language: python
+    prompt: |
+      Type this function. Return one of `"SKIP"`, `"WARN"` or `"PASS"` as a `Literal`, accept a missing `change`, and add a Google-style docstring. Keep the behaviour.
+    starter: |
+      def classify_change(change, tolerance=0.10):
+          if change is None:
+              return "SKIP"
+          return "WARN" if change > tolerance else "PASS"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: classify_change
+          typed: true
+          docstring: true
+          message: "Add hints on `change`, `tolerance` and the return, plus a docstring."
+        - id: uses_literal
+          kind: requires_pattern
+          pattern: "Literal\\[\\s*[\"'](SKIP|WARN|PASS)[\"']"
+          message: "Annotate the return with `Literal[\"SKIP\", \"WARN\", \"PASS\"]`."
+        - id: optional_change
+          kind: requires_pattern
+          pattern: "change:\\s*float\\s*\\|\\s*None"
+          message: "`change` can be None, so annotate it `float | None`."
+        - id: sections
+          kind: requires_pattern
+          pattern: "Args:[\\s\\S]*Returns:"
+          message: "The docstring needs Args and Returns sections."
+      tests:
+        - id: behaviour
+          code: |
+            assert classify_change(None) == "SKIP"
+            assert classify_change(0.2) == "WARN"
+            assert classify_change(0.05) == "PASS"
+            assert classify_change(0.0) == "PASS"
+          message: "The behaviour changed. None gives SKIP, above tolerance gives WARN, otherwise PASS."
+    solution: |
+      from typing import Literal
+
+      ChangeStatus = Literal["SKIP", "WARN", "PASS"]
+
+
+      def classify_change(change: float | None, tolerance: float = 0.10) -> ChangeStatus:
+          """Classify a wave-over-wave change in a share.
+
+          Args:
+              change: Absolute change in the share, or None when a share is missing.
+              tolerance: Largest change that still passes.
+
+          Returns:
+              SKIP when change is None, WARN above tolerance, otherwise PASS.
+          """
+          if change is None:
+              return "SKIP"
+          return "WARN" if change > tolerance else "PASS"
+    seeded_bugs:
+      - |
+        def classify_change(change: float, tolerance: float = 0.10) -> str:
+            """Classify.
+
+            Args:
+                change: Change.
+                tolerance: Tolerance.
+
+            Returns:
+                Status.
+            """
+            if change is None:
+                return "SKIP"
+            return "WARN" if change > tolerance else "PASS"
+      - |
+        from typing import Literal
+
+
+        def classify_change(change: float | None, tolerance: float = 0.10) -> Literal["SKIP", "WARN", "PASS"]:
+            """Classify.
+
+            Args:
+                change: Change.
+                tolerance: Tolerance.
+
+            Returns:
+                Status.
+            """
+            if not change:
+                return "SKIP"
+            return "WARN" if change > tolerance else "PASS"
+    wrong_answers:
+      - answer: |
+          def classify_change(change: float, tolerance: float = 0.10) -> str:
+              """Classify.
+
+              Args:
+                  change: Change.
+                  tolerance: Tolerance.
+
+              Returns:
+                  Status.
+              """
+              if change is None:
+                  return "SKIP"
+              return "WARN" if change > tolerance else "PASS"
+        triggers: uses_literal
+      - answer: |
+          from typing import Literal
+
+
+          def classify_change(change: float | None, tolerance: float = 0.10) -> Literal["SKIP", "WARN", "PASS"]:
+              """Classify.
+
+              Args:
+                  change: Change.
+                  tolerance: Tolerance.
+
+              Returns:
+                  Status.
+              """
+              if not change:
+                  return "SKIP"
+              return "WARN" if change > tolerance else "PASS"
+        triggers: behaviour
+    hints:
+      - "Import `Literal` from `typing` and name the return type."
+      - "`change` is `float | None`. `tolerance` is `float`."
+      - "Keep `if change is None:`. Truthiness would turn a change of 0.0 into SKIP."
+    explanation: |
+      The Literal return type means mypy rejects a typo such as `\"PASSED\"` at every caller. `float | None` records that a change can be missing. The `is None` test keeps a real change of 0.0 as PASS.
+
+recap:
+  - front: "Optional parameter that defaults to None"
+    back: "param: str | None = None. Never param: str = None."
+  - front: "A fixed set of string values"
+    back: "Literal[\"PASS\", \"WARN\", \"FAIL\"] from typing."
+  - front: "Google docstring sections"
+    back: "One-line summary, then Args, Returns, Raises."
+  - front: "Why merge_keys: list[str] and not list?"
+    back: "mypy then rejects a string, which Python would split into characters."
+
+claims:
+  - claim: "Iterating a string in a join builds one clause per character."
+    status: verified
+    source: "Run in Python 3.11 in this repository."
+  - claim: "The X | Y union syntax works in annotations from Python 3.10."
+    status: verified
+    source: "Python 3.10 release notes (PEP 604); used throughout this repository on Python 3.11."

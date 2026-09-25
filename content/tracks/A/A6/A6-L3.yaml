@@ -1,0 +1,323 @@
+id: A6-L3
+title: Reconcile counts and totals between layers
+
+concept: |
+  Each layer transforms data, and each transformation can lose or duplicate rows. **Reconciliation** checks that what came out of one layer matches what went into the next, for every wave you load.
+
+  Compare quantities that must agree by design:
+
+  | From | To | Must match |
+  |---|---|---|
+  | Bronze, wave W | Silver, wave W | Distinct `(respondent_id, wave_id)` keys in bronze = silver rows |
+  | Silver, wave W, in scope | Gold, wave W | Sum of `final_weight` = sum of `weighted_base` over all subgroups |
+  | Silver, wave W, in scope | Gold, wave W | Row count = sum of `unweighted_n` |
+
+  Pick the right bronze figure. Bronze holds every delivery, redeliveries included, so its raw row count is larger than silver's by design. Compare **distinct keys**.
+
+  Compare totals with a **tolerance**. Floating-point sums depend on the order Spark adds values in, which varies with partitioning, so two correct totals can differ in the last digits. In Python, `0.1 + 0.2 == 0.3` is `False`. Use `math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-6)`. The `abs_tol` handles totals near zero, where a relative tolerance means nothing.
+
+  Compute each side with one aggregation, record the result as a structured check (expected, actual, status), and treat a failed reconciliation as **CRITICAL**. If gold does not add up to silver, every published figure for that wave is suspect.
+
+  Run reconciliation after each layer loads and before anything downstream reads it. Store the results with the run log, so you can show that every published wave reconciled.
+
+why_it_matters: |
+  A gold job joins silver to a region lookup with an inner join. A supplier introduces a new region code, `NI`, that the lookup does not have. 312 respondents drop out of gold without an error. Weighted reach for the wave looks plausible, because the base shrank along with the reach.
+
+  A reconciliation of silver's in-scope weight total against the sum of gold's `weighted_base` catches the 1.8% gap on the same run. The alert names the wave and the size of the difference, and the fix is a lookup update, not a client complaint.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      def reconcile(bronze, silver, wave):
+          b = bronze.filter(F.col("wave_id") == wave).count()
+          s = silver.filter(F.col("wave_id") == wave).count()
+          if b != s:
+              print(f"mismatch {b} vs {s}")
+    annotations:
+      - find: 'b = bronze.filter(F.col("wave_id") == wave).count()'
+        note: "Counts every delivery, redeliveries included. A redelivered wave always mismatches."
+      - find: "if b != s:"
+        note: "Exact equality: fine for counts, wrong for weight totals."
+      - find: 'print(f"mismatch {b} vs {s}")'
+        note: "A print that nobody reads, and the pipeline carries on."
+  strong:
+    code: |
+      import math
+
+
+      def silver_totals(silver: DataFrame, wave_id: str) -> tuple[int, float]:
+          """In-scope row count and weight total for one wave, in one pass."""
+          row = (
+              silver.filter((F.col("wave_id") == wave_id) & F.col("in_scope"))
+              .agg(F.count("*").alias("n"), F.coalesce(F.sum("final_weight"), F.lit(0.0)).alias("w"))
+              .collect()[0]
+          )
+          return int(row["n"]), float(row["w"])
+
+
+      def gold_totals(gold: DataFrame, wave_id: str) -> tuple[int, float]:
+          """Sum of unweighted_n and weighted_base over every subgroup of one wave."""
+          row = (
+              gold.filter(F.col("wave_id") == wave_id)
+              .agg(F.coalesce(F.sum("unweighted_n"), F.lit(0)).alias("n"), F.coalesce(F.sum("weighted_base"), F.lit(0.0)).alias("w"))
+              .collect()[0]
+          )
+          return int(row["n"]), float(row["w"])
+
+
+      def totals_match(expected: float, actual: float) -> bool:
+          """Equal within floating-point tolerance, including totals near zero."""
+          return math.isclose(expected, actual, rel_tol=1e-9, abs_tol=1e-6)
+    annotations:
+      - find: "silver.filter((F.col(\"wave_id\") == wave_id) & F.col(\"in_scope\"))"
+        note: "Same population as gold: one wave, in scope only."
+      - find: ".agg(F.count(\"*\").alias(\"n\"), F.coalesce(F.sum(\"final_weight\"), F.lit(0.0)).alias(\"w\"))"
+        note: "Count and total in one pass. Coalesce so an empty wave gives 0, not NULL."
+      - find: "return math.isclose(expected, actual, rel_tol=1e-9, abs_tol=1e-6)"
+        note: "Tolerant comparison for floating-point totals."
+  takeaway: |
+    Silver and gold totals are computed the same way and compared with tolerance. A mismatch becomes a CRITICAL result with numbers, not a print.
+
+exercises:
+  - id: A6-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Wave W14 was delivered twice to bronze. What should the silver row count for W14 equal?
+    options:
+      - {id: a, text: "The bronze row count for W14"}
+      - {id: b, text: "The number of distinct (respondent_id, wave_id) keys in bronze for W14"}
+      - {id: c, text: "Half the bronze row count for W14"}
+      - {id: d, text: "The row count of the latest delivery only"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Silver keeps one row per key, the newest version, so it matches the number of distinct keys across all deliveries."}
+      - {id: r2, text: "Bronze deletes old deliveries after silver loads."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Bronze holds both deliveries, so its row count is roughly double. Silver keeps one row per key."
+      - answer: c
+        feedback: "Only if both deliveries hold exactly the same keys. Distinct keys is correct in every case."
+      - answer: d
+        feedback: "A redelivery can add or drop respondents. Silver keeps every key ever delivered for the wave, at its newest version."
+      - answer: b|r2
+        feedback: "Right figure, wrong reason. Bronze is append-only and keeps every delivery."
+    hints:
+      - "What does silver keep when a key appears twice?"
+      - "What does bronze keep?"
+      - "Count distinct keys in bronze."
+    explanation: |
+      Silver holds one row per `(respondent_id, wave_id)`. The matching bronze figure is the number of distinct keys across all deliveries of the wave.
+
+  - id: A6-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      import math
+
+      print(0.1 + 0.2 == 0.3, math.isclose(0.1 + 0.2, 0.3))
+    answer: "False True"
+    wrong_answers:
+      - answer: "True True"
+        feedback: "0.1 and 0.2 have no exact binary representation, so their sum is 0.30000000000000004. Exact equality fails."
+      - answer: "False False"
+        feedback: "`math.isclose` compares with a relative tolerance of 1e-9 by default, so it treats the two values as equal."
+    hints:
+      - "Can 0.1 be stored exactly as a binary float?"
+      - "What is 0.1 + 0.2 printed in full?"
+      - "isclose allows a tiny relative difference."
+    explanation: |
+      `0.1 + 0.2` is `0.30000000000000004`, so `==` is False. `math.isclose` allows a relative difference of 1e-9, so it is True. Weight totals need the same treatment.
+
+  - id: A6-L3-E3
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `reconciliation_result(name, expected, actual)` that returns a dict with `check_name`, `status` (`"PASS"` or `"FAIL"`), `severity` (always `"CRITICAL"`), `expected` and `actual` (both formatted to 2 decimal places as strings), and `difference` (actual minus expected, a float). Compare with `math.isclose(expected, actual, rel_tol=1e-9, abs_tol=1e-6)`.
+    starter: |
+      import math
+
+
+      def reconciliation_result(name: str, expected: float, actual: float) -> dict[str, object]:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: reconciliation_result
+          typed: true
+          docstring: true
+          message: "Give `reconciliation_result` type hints and a docstring."
+        - id: uses_isclose
+          kind: requires_call
+          name: math.isclose
+          message: "Compare with `math.isclose`, not `==`."
+      tests:
+        - id: pass_close
+          code: |
+            r = reconciliation_result("weight_total", 0.3, 0.1 + 0.2)
+            assert r["status"] == "PASS" and r["severity"] == "CRITICAL"
+          message: "0.3 and 0.1 + 0.2 must PASS. Use math.isclose."
+        - id: fail_gap
+          code: |
+            r = reconciliation_result("weight_total", 50000000.0, 49100000.0)
+            assert r["status"] == "FAIL" and r["difference"] == -900000.0
+          message: "A 900,000 gap must FAIL, with difference = actual - expected."
+        - id: zero_totals
+          code: |
+            assert reconciliation_result("empty", 0.0, 1e-9)["status"] == "PASS"
+          message: "Totals near zero need abs_tol, or 0.0 against 1e-9 fails."
+        - id: formatted
+          code: |
+            r = reconciliation_result("w", 1234.5, 1234.5)
+            assert r["expected"] == "1234.50" and r["actual"] == "1234.50" and r["check_name"] == "w"
+          message: "Format expected and actual to two decimal places, and keep the check name."
+    solution: |
+      import math
+
+
+      def reconciliation_result(name: str, expected: float, actual: float) -> dict[str, object]:
+          """Compare two layer totals and return a CRITICAL check result.
+
+          Args:
+              name: Check name, for example weight_total_silver_gold.
+              expected: Total from the upstream layer.
+              actual: Total from the downstream layer.
+
+          Returns:
+              A check result with status PASS or FAIL and the difference.
+          """
+          ok = math.isclose(expected, actual, rel_tol=1e-9, abs_tol=1e-6)
+          return {
+              "check_name": name,
+              "status": "PASS" if ok else "FAIL",
+              "severity": "CRITICAL",
+              "expected": f"{expected:.2f}",
+              "actual": f"{actual:.2f}",
+              "difference": actual - expected,
+          }
+    seeded_bugs:
+      - |
+        import math
+
+
+        def reconciliation_result(name: str, expected: float, actual: float) -> dict[str, object]:
+            """Exact equality."""
+            ok = expected == actual
+            return {"check_name": name, "status": "PASS" if ok else "FAIL", "severity": "CRITICAL", "expected": f"{expected:.2f}", "actual": f"{actual:.2f}", "difference": actual - expected}
+      - |
+        import math
+
+
+        def reconciliation_result(name: str, expected: float, actual: float) -> dict[str, object]:
+            """No absolute tolerance."""
+            ok = math.isclose(expected, actual)
+            return {"check_name": name, "status": "PASS" if ok else "FAIL", "severity": "CRITICAL", "expected": f"{expected:.2f}", "actual": f"{actual:.2f}", "difference": actual - expected}
+    wrong_answers:
+      - answer: |
+          import math
+
+
+          def reconciliation_result(name: str, expected: float, actual: float) -> dict[str, object]:
+              """No absolute tolerance."""
+              ok = math.isclose(expected, actual)
+              return {"check_name": name, "status": "PASS" if ok else "FAIL", "severity": "CRITICAL", "expected": f"{expected:.2f}", "actual": f"{actual:.2f}", "difference": actual - expected}
+        triggers: zero_totals
+    hints:
+      - "`math.isclose(expected, actual, rel_tol=1e-9, abs_tol=1e-6)`."
+      - "Format numbers with an f-string: `f\"{x:.2f}\"`."
+      - "`difference` is `actual - expected`, as a float."
+    explanation: |
+      `rel_tol` absorbs rounding in large totals. `abs_tol` covers totals near zero, where any relative tolerance is meaningless.
+
+  - id: A6-L3-E4
+    type: spot_bug
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      This bronze-to-silver reconciliation fails every time a wave is redelivered, even when silver is correct. Tap the line, then fix the function.
+    code: |
+      def bronze_silver_keys(bronze: DataFrame, silver: DataFrame, wave_id: str) -> tuple[int, int]:
+          """Keys in bronze and rows in silver for one wave."""
+          b = bronze.filter(F.col("wave_id") == wave_id).count()
+          s = silver.filter(F.col("wave_id") == wave_id).count()
+          return b, s
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: distinct_keys
+          kind: requires_pattern
+          pattern: "count_distinct\\(\\s*[\"']respondent_id[\"']|select\\(\\s*[\"']respondent_id[\"']\\s*,\\s*[\"']wave_id[\"']\\s*\\)\\.distinct\\(\\)"
+          message: "Count distinct keys in bronze: F.count_distinct(\"respondent_id\") for the wave, or select both key columns and call distinct()."
+    fix_solution: |
+      def bronze_silver_keys(bronze: DataFrame, silver: DataFrame, wave_id: str) -> tuple[int, int]:
+          """Keys in bronze and rows in silver for one wave."""
+          b = bronze.filter(F.col("wave_id") == wave_id).agg(F.count_distinct("respondent_id")).collect()[0][0]
+          s = silver.filter(F.col("wave_id") == wave_id).count()
+          return b, s
+    spark_tests: |
+      bronze = spark.createDataFrame([("R1", "W1", 1), ("R1", "W1", 2), ("R2", "W1", 1)], "respondent_id STRING, wave_id STRING, delivery_version INT")
+      silver = spark.createDataFrame([("R1", "W1"), ("R2", "W1")], "respondent_id STRING, wave_id STRING")
+      assert bronze_silver_keys(bronze, silver, "W1") == (2, 2)
+    wrong_answers:
+      - lines: [4]
+        feedback: "Silver has one row per key, so its row count is the right figure. The bronze side is wrong."
+    hints:
+      - "What does bronze hold after a redelivery?"
+      - "Silver has one row per key. Which bronze figure matches that?"
+      - "Count distinct respondent IDs within the wave."
+    explanation: |
+      Bronze keeps every delivery, so its raw count grows with each redelivery. Count distinct keys for the wave. Within one wave, distinct `respondent_id` is the same as distinct `(respondent_id, wave_id)`.
+
+  - id: A6-L3-E5
+    type: order
+    difficulty: 5
+    prompt: |
+      Order the steps for one wave, from load to publication.
+    items:
+      - {id: silver, text: "MERGE the wave into silver"}
+      - {id: rec1, text: "Reconcile bronze distinct keys with silver rows"}
+      - {id: gold, text: "Build gold metrics for the wave"}
+      - {id: rec2, text: "Reconcile silver in-scope totals with gold totals"}
+      - {id: log, text: "Store reconciliation results with the run log"}
+      - {id: publish, text: "Refresh the Power BI semantic model"}
+    answer: [silver, rec1, gold, rec2, log, publish]
+    wrong_answers:
+      - answer: [silver, gold, rec1, rec2, log, publish]
+        feedback: "Reconcile silver before building gold, so a bad silver load never feeds gold."
+      - answer: [silver, rec1, gold, rec2, publish, log]
+        feedback: "Store the results before publishing, so the published wave has a record of passing."
+      - answer: [silver, rec1, gold, publish, rec2, log]
+        feedback: "Publishing before the silver-to-gold reconciliation lets unreconciled numbers reach clients."
+    hints:
+      - "Each layer is checked before the next reads it."
+      - "Nothing is published before every check passes."
+      - "Record the evidence, then publish."
+    explanation: |
+      Load, check, load, check, record, publish. A failed reconciliation stops the sequence before clients see anything.
+
+recap:
+  - front: "Bronze figure that must match silver's row count for a wave"
+    back: "Distinct (respondent_id, wave_id) keys, not raw bronze rows, because bronze keeps every delivery."
+  - front: "Silver-to-gold reconciliation"
+    back: "In-scope silver weight total = sum of gold weighted_base; in-scope silver rows = sum of unweighted_n."
+  - front: "How to compare floating-point totals"
+    back: "math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-6). Never ==."
+  - front: "Severity of a failed reconciliation"
+    back: "CRITICAL. Every figure for the wave is suspect until it passes."
+
+claims:
+  - claim: "0.1 + 0.2 == 0.3 is False and math.isclose(0.1 + 0.2, 0.3) is True in Python."
+    status: verified
+    source: "Run in Python 3.11 in this repository."
+  - claim: "F.count_distinct exists in PySpark 4.0."
+    status: verified
+    source: "Run on PySpark 4.0.4 in this repository."

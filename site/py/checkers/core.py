@@ -6,7 +6,9 @@ import ast
 import contextlib
 import io
 import json
+import sys
 import traceback
+import types
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -15,6 +17,7 @@ from checkers.ast_rules import evaluate_rule
 SYNTAX_RULE_ID = "syntax"
 RUNTIME_RULE_ID = "runtime_error"
 MAX_OUTPUT_CHARS = 4000
+EXERCISE_MODULE = "__exercise__"
 
 
 @dataclass
@@ -59,7 +62,18 @@ def _short_error(err: BaseException) -> str:
 
 
 def _run_tests(code: str, setup: str, tests: list[dict[str, Any]]) -> CheckResult:
-    namespace: dict[str, Any] = {"__name__": "__exercise__"}
+    # Register the namespace as a real module: dataclasses and pickling look it up.
+    module = types.ModuleType(EXERCISE_MODULE)
+    sys.modules[EXERCISE_MODULE] = module
+    try:
+        return _exec_in(module.__dict__, code, setup, tests)
+    finally:
+        sys.modules.pop(EXERCISE_MODULE, None)
+
+
+def _exec_in(
+    namespace: dict[str, Any], code: str, setup: str, tests: list[dict[str, Any]]
+) -> CheckResult:
     buffer = io.StringIO()
     failures: list[str] = []
     first: tuple[str, str] | None = None

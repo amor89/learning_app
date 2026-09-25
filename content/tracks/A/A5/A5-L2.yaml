@@ -1,0 +1,364 @@
+id: A5-L2
+title: Built-in functions over Python UDFs
+
+concept: |
+  A **Python UDF** runs your Python function once per row. Spark must send each value from the JVM to a Python worker process, run the function, and send the result back. The physical plan shows this as a `BatchEvalPython` step.
+
+  A **built-in function** from `pyspark.sql.functions` runs inside the JVM, in Spark's generated code, with no round trip.
+
+  Measured on 2 million strings (PySpark 4.0.4, two local cores):
+
+  | Approach | Time |
+  |---|---|
+  | `F.upper(col)` | 0.30 s |
+  | pandas UDF (`ArrowEvalPython`) | 1.16 s |
+  | Python UDF (`BatchEvalPython`) | 1.82 s |
+
+  The Python UDF was six times slower, and the gap grows with cluster size and data volume.
+
+  Speed is one reason. There are three more:
+
+  - **Nulls.** Built-ins return NULL for NULL input. A UDF receives `None` and must handle it. `lambda s: s.strip()` fails the whole job with a `PythonException` on the first NULL.
+  - **Optimisation.** The optimiser cannot see inside a UDF, so it cannot push a filter on the UDF's output into the file scan.
+  - **Readability.** `F.when(...).when(...)` states a rule in one expression a reviewer can check.
+
+  Most UDFs in pipelines replace functions that already exist: `F.upper`, `F.trim`, `F.regexp_replace`, `F.regexp_extract`, `F.split`, `F.to_date`, `F.coalesce`, `F.when`, `F.concat_ws`, `F.lpad`. Search the functions reference before you write one.
+
+  When no built-in fits, prefer a **pandas UDF**: it moves data in Arrow batches and runs vectorised pandas code. Use a row-by-row Python UDF only as the last resort, and handle `None` first.
+
+why_it_matters: |
+  A silver job cleans postcodes with a Python UDF: `lambda s: s.replace(" ", "").upper()`. It runs for months on deliveries where every postcode is present. Then a supplier sends a wave with 40 blank postcodes, which arrive as NULL. The first NULL raises `AttributeError: 'NoneType' object has no attribute 'replace'` inside a Python worker, and the whole silver job fails at 02:00.
+
+  `F.upper(F.regexp_replace("postcode", r"\s+", ""))` returns NULL for NULL, runs faster, and would never have failed.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      from pyspark.sql.functions import udf
+
+
+      @udf("string")
+      def clean_postcode(s):
+          return s.replace(" ", "").upper()
+
+
+      @udf("string")
+      def age_band(age):
+          if age < 35:
+              return "16-34"
+          if age < 55:
+              return "35-54"
+          return "55+"
+
+
+      silver = bronze.withColumn("postcode", clean_postcode("postcode")).withColumn("age_group", age_band("age"))
+    annotations:
+      - find: "return s.replace(\" \", \"\").upper()"
+        note: "Crashes on NULL: None has no replace method."
+      - find: "if age < 35:"
+        note: "In Python, comparing None with 35 raises TypeError, so a NULL age crashes the job too."
+      - find: 'silver = bronze.withColumn("postcode", clean_postcode("postcode"))'
+        note: "Two round trips to Python per row, invisible to the optimiser."
+  strong:
+    code: |
+      from pyspark.sql import Column
+      from pyspark.sql import functions as F
+
+
+      def clean_postcode(col: Column) -> Column:
+          """Remove whitespace and upper-case. NULL stays NULL."""
+          return F.upper(F.regexp_replace(col, r"\s+", ""))
+
+
+      def age_band(age: Column) -> Column:
+          """16-34, 35-54 or 55+. NULL age gives NULL."""
+          return (
+              F.when(age < 35, "16-34")
+              .when(age < 55, "35-54")
+              .when(age.isNotNull(), "55+")
+          )
+
+
+      silver = bronze.withColumns({
+          "postcode": clean_postcode(F.col("postcode")),
+          "age_group": age_band(F.col("age")),
+      })
+    annotations:
+      - find: "def clean_postcode(col: Column) -> Column:"
+        note: "A function that builds a Column expression. Reusable and testable, with no UDF."
+      - find: 'return F.upper(F.regexp_replace(col, r"\s+", ""))'
+        note: "Built-ins pass NULL through as NULL."
+      - find: '.when(age.isNotNull(), "55+")'
+        note: "Explicit: a NULL age stays NULL instead of falling into 55+."
+  takeaway: |
+    The strong version runs in the JVM, survives NULLs and reads as a rule. Functions that return Column expressions give you the reuse that UDFs promised.
+
+exercises:
+  - id: A5-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You need to trim and upper-case a string column on 50 million rows. Which approach is fastest?
+    options:
+      - {id: a, text: "A Python UDF: `udf(lambda s: s.strip().upper() if s else None)`"}
+      - {id: b, text: "A pandas UDF using `s.str.strip().str.upper()`"}
+      - {id: c, text: '`F.upper(F.trim(F.col("s")))`'}
+      - {id: d, text: "`collect()` the column and process it in Python"}
+    answer: c
+    reasons:
+      - {id: r1, text: "Built-ins run inside the JVM with no data transfer to Python."}
+      - {id: r2, text: "Built-ins run on the driver, which is faster than executors."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "A Python UDF moves every value to a Python process and back. It measured about six times slower than a built-in."
+      - answer: b
+        feedback: "A pandas UDF beats a Python UDF because it uses Arrow batches, but it still leaves the JVM. A built-in wins."
+      - answer: d
+        feedback: "collect() pulls 50 million values onto one machine. It is the slowest option and can crash the driver."
+      - answer: c|r2
+        feedback: "Right choice, wrong reason. Built-ins run on the executors, like everything else. They win by staying in the JVM."
+    hints:
+      - "Which option never leaves the JVM?"
+      - "Are trim and upper available as built-ins?"
+      - "`F.trim` and `F.upper`."
+    explanation: |
+      Built-ins run in Spark's generated JVM code on the executors. UDFs of either kind pay to move data to Python and back.
+
+  - id: A5-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      What does this print?
+    code: |
+      df = spark.createDataFrame([(" ab 1 ",), (None,)], "s STRING")
+      out = df.select(F.upper(F.regexp_replace(F.col("s"), r"\s+", "")).alias("u"))
+      print([r.u for r in out.collect()])
+    answer: "['AB1', None]"
+    wrong_answers:
+      - answer: "[' AB 1 ', None]"
+        feedback: "`regexp_replace` with `\\s+` removes every run of whitespace, including the inner space."
+      - answer: "PythonException"
+        feedback: "Built-ins handle NULL. Only a Python UDF would raise on the None row."
+      - answer: "['AB1', '']"
+        feedback: "NULL input gives NULL output, not an empty string."
+    hints:
+      - "What does `\\s+` match?"
+      - "What do built-ins return for NULL input?"
+      - "Whitespace removed, then upper-cased. NULL stays NULL."
+    explanation: |
+      The regex removes all whitespace, `upper` capitalises, and the NULL row stays NULL. No special handling needed.
+
+  - id: A5-L2-E3
+    type: fill_gap
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      Replace a UDF that pads respondent IDs to 8 characters with leading zeros and extracts the 2-letter region prefix from a code such as `NW-1234`.
+    template: |
+      df = df.withColumns({
+          "respondent_id": F.[[g1]](F.col("respondent_id"), 8, "0"),
+          "region": F.[[g2]](F.col("area_code"), r"^([A-Z]{2})-", 1),
+      })
+    gaps:
+      g1: {accepted: [lpad]}
+      g2: {accepted: [regexp_extract]}
+    wrong_answers:
+      - answer: {g1: rpad}
+        feedback: "`rpad` pads on the right. Leading zeros go on the left: `lpad`."
+      - answer: {g2: regexp_replace}
+        feedback: "`regexp_replace` substitutes text. To pull out a capture group, use `regexp_extract` with the group index."
+      - answer: {g2: substring}
+        feedback: "`substring` takes positions, not a pattern, and cannot check the hyphen. `regexp_extract` with group 1 matches the rule exactly."
+    hints:
+      - "Padding on the left has a function named after that side."
+      - "Pulling a capture group out of a string uses a regex function."
+      - "`lpad` and `regexp_extract`."
+    explanation: |
+      `F.lpad(col, 8, "0")` adds leading zeros. `F.regexp_extract(col, pattern, 1)` returns capture group 1, or an empty string when there is no match.
+
+  - id: A5-L2-E4
+    type: refactor
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Replace the UDF with a function `age_band(age: Column) -> Column` built from `F.when`. Keep the bands: under 35 is `16-34`, under 55 is `35-54`, anything else `55+`. A NULL age must give NULL.
+    starter: |
+      @udf("string")
+      def age_band(age):
+          if age < 35:
+              return "16-34"
+          if age < 55:
+              return "35-54"
+          return "55+"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: age_band
+          typed: true
+          docstring: true
+          message: "Define `age_band(age: Column) -> Column` with a docstring."
+        - id: no_udf_decorator
+          kind: forbids_decorator
+          name: udf
+          message: "Remove the @udf decorator. Build a Column expression instead."
+        - id: no_udf_call
+          kind: forbids_call
+          name: udf
+          message: "Do not wrap the logic in udf(). Use F.when."
+        - id: uses_when
+          kind: requires_call
+          name: when
+          min: 2
+          message: "Chain `F.when(...).when(...)` for the bands."
+        - id: null_safe
+          kind: requires_call
+          name: isNotNull
+          message: "Guard the last band with `age.isNotNull()`, or a NULL age lands in 55+."
+    solution: |
+      from pyspark.sql import Column
+      from pyspark.sql import functions as F
+
+
+      def age_band(age: Column) -> Column:
+          """16-34, 35-54 or 55+. NULL age gives NULL."""
+          return (
+              F.when(age < 35, "16-34")
+              .when(age < 55, "35-54")
+              .when(age.isNotNull(), "55+")
+          )
+    spark_tests: |
+      df = spark.createDataFrame([(16,), (34,), (35,), (55,), (None,)], "age INT")
+      got = [r.b for r in df.select(age_band(F.col("age")).alias("b")).collect()]
+      assert got == ["16-34", "16-34", "35-54", "55+", None], got
+    seeded_bugs:
+      - |
+        from pyspark.sql import Column
+        from pyspark.sql import functions as F
+
+
+        def age_band(age: Column) -> Column:
+            """NULL lands in 55+."""
+            return F.when(age < 35, "16-34").when(age < 55, "35-54").otherwise("55+")
+      - |
+        from pyspark.sql.functions import udf
+
+
+        @udf("string")
+        def age_band(age: int) -> str:
+            """Still a UDF."""
+            if age is None:
+                return None
+            return "16-34" if age < 35 else "35-54" if age < 55 else "55+"
+    wrong_answers:
+      - answer: |
+          from pyspark.sql import Column
+          from pyspark.sql import functions as F
+
+
+          def age_band(age: Column) -> Column:
+              """NULL lands in 55+."""
+              return F.when(age < 35, "16-34").when(age < 55, "35-54").otherwise("55+")
+        triggers: null_safe
+      - answer: |
+          from pyspark.sql.functions import udf
+
+
+          @udf("string")
+          def age_band(age: int) -> str:
+              """Still a UDF."""
+              if age is None:
+                  return None
+              return "16-34" if age < 35 else "35-54" if age < 55 else "55+"
+        triggers: no_udf_decorator
+    hints:
+      - "The function takes a Column and returns a Column expression."
+      - "`F.when(age < 35, \"16-34\").when(age < 55, \"35-54\")`."
+      - "Finish with `.when(age.isNotNull(), \"55+\")`, not `.otherwise`."
+    explanation: |
+      `F.when` chains evaluate in order. Without `otherwise`, an unmatched row is NULL, and `age < 35` is NULL for a NULL age, so the final `isNotNull()` guard keeps NULL ages NULL.
+
+  - id: A5-L2-E5
+    type: spot_bug
+    difficulty: 5
+    language: pyspark
+    prompt: |
+      This job ran for months, then failed on a wave where some postcodes are blank. Tap the line that fails, then rewrite `clean_postcodes` without a UDF.
+    code: |
+      from pyspark.sql.functions import udf
+
+
+      @udf("string")
+      def _clean(s):
+          return s.replace(" ", "").upper()
+
+
+      def clean_postcodes(df: DataFrame) -> DataFrame:
+          """Remove spaces from postcodes and upper-case them."""
+          return df.withColumn("postcode", _clean("postcode"))
+    bug_lines: [6]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_udf
+          kind: forbids_decorator
+          name: udf
+          message: "Remove the UDF. Use built-in functions."
+        - id: upper
+          kind: requires_call
+          name: upper
+          message: "Upper-case with `F.upper`."
+        - id: removes_space
+          kind: requires_call
+          name: regexp_replace
+          message: "Remove whitespace with `F.regexp_replace(..., r\"\\s+\", \"\")`."
+        - id: defined
+          kind: requires_function
+          name: clean_postcodes
+          typed: true
+          docstring: true
+          message: "Keep `clean_postcodes` with type hints and a docstring."
+    fix_solution: |
+      from pyspark.sql import DataFrame
+      from pyspark.sql import functions as F
+
+
+      def clean_postcodes(df: DataFrame) -> DataFrame:
+          """Remove spaces from postcodes and upper-case them. NULL stays NULL."""
+          return df.withColumn("postcode", F.upper(F.regexp_replace(F.col("postcode"), r"\s+", "")))
+    spark_tests: |
+      df = spark.createDataFrame([("sw1a 1aa",), (None,)], "postcode STRING")
+      assert [r.postcode for r in clean_postcodes(df).collect()] == ["SW1A1AA", None]
+    wrong_answers:
+      - lines: [4]
+        feedback: "The decorator makes it a UDF, which is slow, but the crash happens where a value is used."
+      - lines: [11]
+        feedback: "The call is fine. The failure is inside the function, on a NULL value."
+    hints:
+      - "What does the UDF receive for a NULL postcode?"
+      - "`None.replace` raises AttributeError."
+      - "Replace the UDF with `F.upper(F.regexp_replace(...))`."
+    explanation: |
+      For a NULL postcode the UDF receives `None`, and `None.replace` raises inside the Python worker, failing the job. Built-ins pass NULL through, and run faster.
+
+recap:
+  - front: "Why are Python UDFs slow?"
+    back: "Every value crosses from the JVM to a Python worker and back. The plan shows BatchEvalPython."
+  - front: "Measured cost on 2 million strings"
+    back: "Built-in 0.30 s, pandas UDF 1.16 s, Python UDF 1.82 s (PySpark 4.0.4, local)."
+  - front: "What does a Python UDF receive for NULL?"
+    back: "None. s.strip() then raises and fails the job. Built-ins return NULL for NULL."
+  - front: "Reusable logic without a UDF"
+    back: "A Python function that takes and returns Column expressions, built from F.when, F.regexp_replace and friends."
+
+claims:
+  - claim: "Timings: built-in 0.30 s, pandas UDF 1.16 s, Python UDF 1.82 s on 2 million strings; plans show BatchEvalPython and ArrowEvalPython."
+    status: verified
+    source: "Measured on PySpark 4.0.4, local[2], in this repository."
+  - claim: "Built-ins return NULL for NULL input; a Python UDF calling a string method on None raises PythonException."
+    status: verified
+    source: "Run on PySpark 4.0.4 in this repository."

@@ -1,0 +1,339 @@
+id: A5-L3
+title: Joins, broadcast, partitions and reading the plan
+
+concept: |
+  A join between two large tables needs a **shuffle**: Spark moves rows across the network so equal keys meet on the same executor, then sorts and merges them. The plan shows this as `SortMergeJoin` with `Exchange` steps. Shuffles are the most expensive thing Spark does.
+
+  When one side is small, such as a lookup of 200 region codes, Spark can **broadcast** it: send a full copy to every executor and join locally, with no shuffle of the large side. The plan shows `BroadcastHashJoin`.
+
+  - Spark broadcasts automatically when it estimates a side is under `spark.sql.autoBroadcastJoinThreshold`, 10 MB by default in Spark 4.0.
+  - Adaptive query execution (AQE), on by default, can switch a join to broadcast at run time once it sees real sizes.
+  - You can force it with `F.broadcast(small_df)` or `small_df.hint("broadcast")`. Do this for lookups you know are small. Never broadcast something that grows with your data.
+
+  **Read the plan before you tune.** `df.explain()` prints the physical plan. `df.explain(mode="formatted")` adds details per step, including `PushedFilters`, which confirm that a filter reached the file scan.
+
+  **Partitions** decide parallelism.
+
+  - `repartition(n)` shuffles to exactly `n` partitions. `coalesce(n)` merges partitions without a shuffle, and only reduces the count.
+  - `repartition(1)` or `coalesce(1)` before a large write puts all the work on one task. Avoid it outside tiny outputs.
+  - For table layout on Unity Catalog managed tables, prefer liquid clustering over `partitionBy`. If you do partition a table, choose a low-cardinality column such as `wave_id`, never an ID.
+
+  **Caching**: `df.cache()` helps on classic clusters when several actions reuse a result. Serverless compute does not support it. There, write the intermediate result to a Delta table.
+
+why_it_matters: |
+  A gold job joins 40 million respondent rows to a 200-row region lookup. Auto-broadcast does not kick in, because the lookup is read through a view whose size Spark overestimates. Every run shuffles all 40 million rows across the cluster, and the join takes 22 minutes.
+
+  `explain()` shows `SortMergeJoin` with two `Exchange` steps. Wrapping the lookup in `F.broadcast()` turns it into `BroadcastHashJoin`, and the join drops to under two minutes. Five minutes reading the plan saved twenty minutes on every run.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      def enrich(fact, regions):
+          regions_local = regions.collect()
+          lookup = {r.region_code: r.region for r in regions_local}
+          label = F.udf(lambda code: lookup.get(code), "string")
+          out = fact.withColumn("region", label("region_code"))
+          return out.repartition(1)
+    annotations:
+      - find: "regions_local = regions.collect()"
+        note: "Pulls the lookup to the driver to build a Python dict. A join does this job."
+      - find: 'label = F.udf(lambda code: lookup.get(code), "string")'
+        note: "A Python UDF per row, where a broadcast join would stay in the JVM."
+      - find: "return out.repartition(1)"
+        note: "All 40 million rows squeezed into one partition, so one task does all the writing."
+  strong:
+    code: |
+      def enrich_with_regions(fact: DataFrame, regions: DataFrame) -> DataFrame:
+          """Add region names to fact rows. regions is a small lookup, so broadcast it.
+
+          A left join keeps every fact row, even with an unknown region code.
+          """
+          return fact.join(F.broadcast(regions), on="region_code", how="left")
+
+
+      def show_plan(df: DataFrame) -> None:
+          """Print the formatted physical plan: check for BroadcastHashJoin."""
+          df.explain(mode="formatted")
+    annotations:
+      - find: 'return fact.join(F.broadcast(regions), on="region_code", how="left")'
+        note: "Broadcast the small side. The plan shows BroadcastHashJoin and no shuffle of the fact table."
+      - find: 'how="left"'
+        note: "A left join keeps fact rows with unknown codes. An inner join would silently drop them."
+      - find: 'df.explain(mode="formatted")'
+        note: "Confirm the strategy and the pushed filters before and after tuning."
+  takeaway: |
+    One broadcast join replaces a collect, a dict and a UDF, keeps the work distributed, and shows up clearly in the plan.
+
+exercises:
+  - id: A5-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You join a 40-million-row respondent table with a 200-row region lookup. Which strategy should the plan show?
+    options:
+      - {id: a, text: "SortMergeJoin, shuffling both sides"}
+      - {id: b, text: "BroadcastHashJoin, with the lookup sent to every executor"}
+      - {id: c, text: "Collect the lookup and use a Python UDF"}
+      - {id: d, text: "A cross join, then a filter"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Broadcasting the small side avoids shuffling the large side."}
+      - {id: r2, text: "Broadcast joins always use less memory."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "A sort-merge join shuffles all 40 million rows across the network to meet 200 lookup rows. Broadcasting the lookup avoids that."
+      - answer: c
+        feedback: "That moves the join into a slow Python UDF. A broadcast join does the same job in the JVM."
+      - answer: d
+        feedback: "A cross join multiplies 40 million by 200 before filtering: 8 billion rows."
+      - answer: b|r2
+        feedback: "Right strategy, wrong reason. Broadcasting costs memory on every executor. It wins by avoiding the shuffle, and only when the broadcast side is small."
+    hints:
+      - "Which side is small?"
+      - "What is the most expensive step in a join of two large tables?"
+      - "Copy the small side to every executor."
+    explanation: |
+      With a tiny lookup, broadcast it. The large table stays where it is, and each executor joins locally.
+
+  - id: A5-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Which join node name appears in the physical plan printed by this code on Spark 4.0?
+    code: |
+      joined = fact.join(F.broadcast(regions), "region_code", "left")
+      joined.explain()
+    answer: "BroadcastHashJoin"
+    accepted: ["BroadcastHashJoin LeftOuter"]
+    wrong_answers:
+      - answer: "SortMergeJoin"
+        feedback: "The broadcast hint tells Spark to broadcast `regions`, so the plan uses BroadcastHashJoin."
+      - answer: "BroadcastNestedLoopJoin"
+        feedback: "That node appears for joins without an equality condition. This join is on region_code, so it is a hash join."
+    hints:
+      - "The hint names the strategy."
+      - "An equality join with a broadcast side uses a hash table."
+      - "Broadcast + Hash + Join."
+    explanation: |
+      `F.broadcast` makes Spark build a hash table from `regions` on every executor. The plan shows `BroadcastHashJoin` with `LeftOuter`.
+
+  - id: A5-L3-E3
+    type: fill_gap
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      Broadcast the lookup, keep every fact row, then print the detailed plan.
+    template: |
+      joined = fact.join(F.[[g1]](regions), on="region_code", how="[[g2]]")
+      joined.explain(mode="[[g3]]")
+    gaps:
+      g1: {accepted: [broadcast]}
+      g2: {accepted: [left, left_outer, leftouter]}
+      g3: {accepted: [formatted]}
+    wrong_answers:
+      - answer: {g2: inner}
+        feedback: "An inner join drops fact rows whose region code is missing from the lookup, without any warning. Use a left join."
+      - answer: {g3: verbose}
+        feedback: "explain modes are simple, extended, codegen, cost and formatted. `formatted` gives the per-step details."
+      - answer: {g1: cache}
+        feedback: "Caching does not change the join strategy. `F.broadcast` does."
+    hints:
+      - "The function names the join strategy."
+      - "Keep all rows from the left side."
+      - "The explain mode that splits the plan into numbered, detailed steps."
+    explanation: |
+      `F.broadcast(regions)` forces a broadcast hash join, `how="left"` keeps every fact row, and `mode="formatted"` prints a detailed plan with pushed filters.
+
+  - id: A5-L3-E4
+    type: spot_bug
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Writing gold takes 45 minutes on a 16-core cluster, and the Spark UI shows one busy task. Tap the line, then fix the function.
+    code: |
+      def write_gold(metrics: DataFrame, table: str) -> None:
+          """Write gold metrics for the wave."""
+          (
+              metrics.repartition(1)
+              .write.format("delta")
+              .mode("append")
+              .saveAsTable(table)
+          )
+    bug_lines: [4]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_single_partition
+          kind: forbids_pattern
+          pattern: "(repartition|coalesce)\\(\\s*1\\s*\\)"
+          message: "The write still forces one partition. Let Spark keep its parallelism."
+        - id: still_writes
+          kind: requires_call
+          name: saveAsTable
+          message: "Keep the write."
+    fix_solution: |
+      def write_gold(metrics: DataFrame, table: str) -> None:
+          """Write gold metrics for the wave."""
+          metrics.write.format("delta").mode("append").saveAsTable(table)
+    wrong_answers:
+      - lines: [6]
+        feedback: "Append is the right mode here. The slowness comes from how many tasks do the writing."
+      - lines: [5]
+        feedback: "Delta is the right format. Look at the partition count."
+    hints:
+      - "How many partitions does the write use?"
+      - "One partition means one task."
+      - "Remove `.repartition(1)`."
+    explanation: |
+      `repartition(1)` funnels every row into one task, so 15 of 16 cores sit idle. Remove it. For file sizes, rely on OPTIMIZE, liquid clustering or predictive optimization.
+
+  - id: A5-L3-E5
+    type: write_function
+    difficulty: 5
+    language: pyspark
+    prompt: |
+      Write `enrich_with_regions(fact, regions)`. It left-joins `fact` to the small `regions` lookup on `region_code`, broadcasting the lookup. Then write `unmatched_codes(enriched)` that returns the number of rows where `region` is NULL, using a single aggregation.
+    starter: |
+      from pyspark.sql import DataFrame
+      from pyspark.sql import functions as F
+
+
+      def enrich_with_regions(fact: DataFrame, regions: DataFrame) -> DataFrame:
+          ...
+
+
+      def unmatched_codes(enriched: DataFrame) -> int:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: enrich_typed
+          kind: requires_function
+          name: enrich_with_regions
+          typed: true
+          docstring: true
+          message: "Define `enrich_with_regions` with type hints and a docstring."
+        - id: unmatched_typed
+          kind: requires_function
+          name: unmatched_codes
+          typed: true
+          docstring: true
+          message: "Define `unmatched_codes` with type hints and a docstring."
+        - id: broadcasts
+          kind: requires_call
+          name: broadcast
+          message: "Broadcast the lookup: `F.broadcast(regions)`."
+        - id: left_join
+          kind: requires_pattern
+          pattern: "how\\s*=\\s*[\"'](left|left_outer|leftouter)[\"']|,\\s*[\"'](left|left_outer|leftouter)[\"']\\s*\\)"
+          message: "Use a left join, so fact rows with unknown codes are kept."
+        - id: no_collect_lookup
+          kind: forbids_pattern
+          pattern: "regions\\.collect\\("
+          message: "Do not collect the lookup. Join it."
+        - id: count_if_used
+          kind: requires_call
+          name: count_if
+          message: "Count unmatched rows in one agg with `F.count_if(F.col(\"region\").isNull())`."
+    solution: |
+      from pyspark.sql import DataFrame
+      from pyspark.sql import functions as F
+
+
+      def enrich_with_regions(fact: DataFrame, regions: DataFrame) -> DataFrame:
+          """Left-join fact rows to the small regions lookup, broadcasting the lookup."""
+          return fact.join(F.broadcast(regions), on="region_code", how="left")
+
+
+      def unmatched_codes(enriched: DataFrame) -> int:
+          """Rows whose region_code had no match in the lookup."""
+          return int(enriched.agg(F.count_if(F.col("region").isNull())).collect()[0][0])
+    spark_tests: |
+      fact = spark.createDataFrame([("1", 1.0), ("2", 2.0), ("9", 3.0)], "region_code STRING, w DOUBLE")
+      regions = spark.createDataFrame([("1", "North"), ("2", "South")], "region_code STRING, region STRING")
+      enriched = enrich_with_regions(fact, regions)
+      assert enriched.count() == 3
+      assert unmatched_codes(enriched) == 1
+    seeded_bugs:
+      - |
+        from pyspark.sql import DataFrame
+        from pyspark.sql import functions as F
+
+
+        def enrich_with_regions(fact: DataFrame, regions: DataFrame) -> DataFrame:
+            """Inner join drops unknown codes."""
+            return fact.join(F.broadcast(regions), on="region_code", how="inner")
+
+
+        def unmatched_codes(enriched: DataFrame) -> int:
+            """Unmatched rows."""
+            return int(enriched.agg(F.count_if(F.col("region").isNull())).collect()[0][0])
+      - |
+        from pyspark.sql import DataFrame
+        from pyspark.sql import functions as F
+
+
+        def enrich_with_regions(fact: DataFrame, regions: DataFrame) -> DataFrame:
+            """No broadcast."""
+            return fact.join(regions, on="region_code", how="left")
+
+
+        def unmatched_codes(enriched: DataFrame) -> int:
+            """Unmatched rows."""
+            return enriched.filter(F.col("region").isNull()).count()
+    wrong_answers:
+      - answer: |
+          from pyspark.sql import DataFrame
+          from pyspark.sql import functions as F
+
+
+          def enrich_with_regions(fact: DataFrame, regions: DataFrame) -> DataFrame:
+              """Inner join drops unknown codes."""
+              return fact.join(F.broadcast(regions), on="region_code", how="inner")
+
+
+          def unmatched_codes(enriched: DataFrame) -> int:
+              """Unmatched rows."""
+              return int(enriched.agg(F.count_if(F.col("region").isNull())).collect()[0][0])
+        triggers: left_join
+      - answer: |
+          from pyspark.sql import DataFrame
+          from pyspark.sql import functions as F
+
+
+          def enrich_with_regions(fact: DataFrame, regions: DataFrame) -> DataFrame:
+              """No broadcast."""
+              return fact.join(regions, on="region_code", how="left")
+
+
+          def unmatched_codes(enriched: DataFrame) -> int:
+              """Unmatched rows."""
+              return enriched.filter(F.col("region").isNull()).count()
+        triggers: broadcasts
+    hints:
+      - "`fact.join(F.broadcast(regions), on=..., how=...)`."
+      - "A left join keeps unknown codes, with region NULL."
+      - "`enriched.agg(F.count_if(F.col(\"region\").isNull())).collect()[0][0]`."
+    explanation: |
+      The broadcast left join keeps every fact row and never shuffles the fact table. Counting NULL regions afterwards turns silently unknown codes into a number your QA can check.
+
+recap:
+  - front: "Join strategy for a large table and a small lookup"
+    back: "Broadcast the lookup: F.broadcast(small). The plan shows BroadcastHashJoin."
+  - front: "Default auto-broadcast threshold in Spark 4.0"
+    back: "10 MB (spark.sql.autoBroadcastJoinThreshold). AQE can also switch to broadcast at run time."
+  - front: "repartition versus coalesce"
+    back: "repartition(n) shuffles to n partitions. coalesce(n) merges without a shuffle and only reduces."
+  - front: "How do you confirm a filter reached the file scan?"
+    back: "df.explain(mode=\"formatted\") and look for PushedFilters on the scan."
+
+claims:
+  - claim: "F.broadcast and hint('broadcast') give BroadcastHashJoin; with broadcasting off, SortMergeJoin; autoBroadcastJoinThreshold defaults to 10 MB; AQE is on by default; explain supports mode='formatted' with PushedFilters."
+    status: verified
+    source: "Run on PySpark 4.0.4 in this repository."
+  - claim: "Databricks recommends liquid clustering over partitioning for UC managed tables; serverless does not support cache APIs."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/tables/clustering and https://docs.databricks.com/aws/en/compute/serverless/limitations"

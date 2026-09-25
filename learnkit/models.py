@@ -182,7 +182,7 @@ class FillGapExercise(ExerciseBase):
 
 
 class PredictWrong(Feedback):
-    answer: str
+    answer: str = Field(pattern=r"\S")
 
 
 class PredictOutputExercise(ExerciseBase):
@@ -228,6 +228,7 @@ class SpotBugExercise(ExerciseBase):
     fix_checker: Checker | None = None
     fix_solution: str = ""
     fix_seeded_bugs: list[str] = []
+    spark_tests: str = ""
     wrong_answers: list[SpotBugWrong]
 
     @model_validator(mode="after")
@@ -253,6 +254,7 @@ class CodeExercise(ExerciseBase):
     packages: list[str] = []
     checker: Checker
     solution: str
+    spark_tests: str = ""
     seeded_bugs: list[str] = Field(min_length=1)
     wrong_answers: list[CodeWrong] = []
 

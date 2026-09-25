@@ -1,0 +1,342 @@
+id: A2-L2
+title: "Silver: canonical names, checked types, one row per respondent per wave"
+
+concept: |
+  Silver turns deliveries into a dependable table. Its contract:
+
+  - **Canonical names.** Rename supplier columns to the names in the Variable Registry, loaded at run time.
+  - **Declared types.** Cast each column to the type in the registry.
+  - **Grain.** One row per respondent per wave. Keep the newest delivery version per key, then MERGE (lesson A3-L1).
+
+  Two Spark behaviours make the first two steps fail silently or loudly, in the wrong place.
+
+  **Renames skip missing columns.** `withColumnRenamed("wgt", "final_weight")` does nothing when `wgt` is absent, and so does `withColumnsRenamed`. No error, no warning. If the supplier renames `wgt` to `weight`, silver loses its weight column, and the failure surfaces hours later in gold. Check the source columns yourself before you rename, and raise one error that lists every missing column.
+
+  **Casts under ANSI mode.** Databricks Runtime 17.3 LTS runs Spark 4.0, which turns ANSI mode on by default. `cast("abc" as int)` now raises `CAST_INVALID_INPUT` and stops the job at the first bad value. Older runtimes returned NULL without a word. Neither is what you want in silver. Use `try_cast`, which returns NULL for a bad value, then count the new NULLs and let a data-quality check decide: under 0.1% is a WARN, above it is CRITICAL.
+
+  ```python
+  F.col("final_weight").try_cast("double")
+  ```
+
+  The pattern is: check columns, rename, `try_cast`, count cast failures, deduplicate, MERGE. Each step is a small function you can test.
+
+why_it_matters: |
+  A supplier renames `wgt` to `weight` without notice. The silver job calls `withColumnRenamed("wgt", "final_weight")`, which silently does nothing. The type-casting loop skips `final_weight` because the column is missing. Silver writes the wave with no weight column, since schema evolution is on. At 03:00 the gold job fails with `final_weight` not found. The morning report shows nothing for the new wave.
+
+  A column check before the rename fails the silver job at 01:00 with one clear message: "missing source columns: wgt". The on-call engineer knows exactly what to ask the supplier.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      def transform_to_silver(bronze_df, column_map, type_map, wave_id):
+          for src, tgt in column_map.items():
+              bronze_df = bronze_df.withColumnRenamed(src, tgt)
+          for col_name, col_type in type_map.items():
+              bronze_df = bronze_df.withColumn(col_name, col(col_name).cast(col_type))
+          bronze_df = bronze_df.withColumn("wave_id", lit(wave_id))
+          return bronze_df
+    annotations:
+      - find: "bronze_df = bronze_df.withColumnRenamed(src, tgt)"
+        note: "A missing source column is skipped without an error."
+      - find: ".cast(col_type))"
+        note: "Under ANSI mode one bad value stops the job. Without ANSI, bad values become NULL with no count."
+      - find: 'withColumn("wave_id", lit(wave_id))'
+        note: "Overwrites the wave_id from the delivery, hiding a file loaded against the wrong wave."
+  strong:
+    code: |
+      def require_columns(df: DataFrame, columns: list[str]) -> None:
+          """Raise ValueError listing every column missing from df."""
+          missing = sorted(set(columns) - set(df.columns))
+          if missing:
+              raise ValueError(f"missing source columns: {missing}")
+
+
+      def rename_to_canonical(df: DataFrame, column_map: dict[str, str]) -> DataFrame:
+          """Rename supplier columns to registry names. Fails on any missing column."""
+          require_columns(df, list(column_map))
+          return df.withColumnsRenamed(column_map)
+
+
+      def cast_to_registry_types(df: DataFrame, type_map: dict[str, str]) -> DataFrame:
+          """Cast with try_cast, so a bad value becomes NULL instead of stopping the job."""
+          require_columns(df, list(type_map))
+          return df.withColumns({c: F.col(c).try_cast(t) for c, t in type_map.items()})
+
+
+      def count_cast_failures(df: DataFrame, type_map: dict[str, str]) -> dict[str, int]:
+          """Per column, rows whose non-null value fails try_cast. One pass over df."""
+          failures = [
+              F.count_if(F.col(c).isNotNull() & F.col(c).try_cast(t).isNull()).alias(c)
+              for c, t in type_map.items()
+          ]
+          return df.agg(*failures).collect()[0].asDict()
+    annotations:
+      - find: 'raise ValueError(f"missing source columns: {missing}")'
+        note: "One error that names every missing column."
+      - find: "return df.withColumnsRenamed(column_map)"
+        note: "Safe to call now: every source column exists."
+      - find: "return df.withColumns({c: F.col(c).try_cast(t)"
+        note: "Column.try_cast (PySpark 4.0) returns NULL for a bad value."
+      - find: "F.count_if(F.col(c).isNotNull() & F.col(c).try_cast(t).isNull())"
+        note: "Run on the uncast frame: a value that is present but fails the cast is a failure. All columns counted in one agg pass."
+  takeaway: |
+    The strong version fails early and clearly on a changed delivery, and turns bad values into a number you can check instead of a crash or a silent NULL.
+
+exercises:
+  - id: A2-L2-E1
+    type: predict_output
+    difficulty: 1
+    language: pyspark
+    prompt: |
+      What does this print on PySpark 4.0?
+    code: |
+      df = spark.createDataFrame([(1, 2.5)], "respondent_id INT, weight DOUBLE")
+      print(df.withColumnRenamed("wgt", "final_weight").columns)
+    answer: "['respondent_id', 'weight']"
+    wrong_answers:
+      - answer: "['respondent_id', 'final_weight']"
+        feedback: "There is no column called `wgt`, so nothing is renamed. `weight` keeps its name."
+      - answer: "AnalysisException"
+        feedback: "No error. withColumnRenamed silently ignores a missing column, which is exactly the danger."
+    hints:
+      - "Does the frame have a column called `wgt`?"
+      - "What does withColumnRenamed do when the source column is missing?"
+      - "It returns the frame unchanged."
+    explanation: |
+      `withColumnRenamed` is a no-op when the source column is missing. No exception, no warning. Check the columns yourself before you rename.
+
+  - id: A2-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      On Databricks Runtime 17.3 LTS, silver runs `F.col("final_weight").cast("double")`. One row holds `"n/a"`. What happens?
+    options:
+      - {id: a, text: "The row gets NULL in final_weight, and the job succeeds."}
+      - {id: b, text: "The job fails with CAST_INVALID_INPUT."}
+      - {id: c, text: "The row is dropped."}
+      - {id: d, text: "The value becomes 0.0."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Spark 4.0 enables ANSI mode by default, and ANSI casts raise on malformed input."}
+      - {id: r2, text: "Delta rejects NULL values in DOUBLE columns."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That was the behaviour before ANSI mode became the default. On Spark 4.0 use `try_cast` to get NULL."
+      - answer: c
+        feedback: "Casting never drops rows. It either raises or returns a value."
+      - answer: d
+        feedback: "Spark never turns malformed text into 0.0. It raises, or with try_cast returns NULL."
+      - answer: b|r2
+        feedback: "Right outcome, wrong reason. Delta accepts NULLs unless a NOT NULL constraint says otherwise. The error comes from the ANSI cast."
+    hints:
+      - "Which Spark version does Runtime 17.3 LTS use?"
+      - "What changed about casts in Spark 4.0?"
+      - "ANSI mode is on by default."
+    explanation: |
+      Spark 4.0 turns ANSI mode on, so a malformed cast raises `CAST_INVALID_INPUT`. `try_cast` returns NULL instead, which you then count.
+
+  - id: A2-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Cast every column in `type_map` so that a bad value becomes NULL instead of stopping the job.
+    template: |
+      df = df.withColumns({c: F.col(c).[[g1]](t) for c, t in type_map.items()})
+    gaps:
+      g1: {accepted: [try_cast]}
+    wrong_answers:
+      - answer: {g1: cast}
+        feedback: "Under ANSI mode on Spark 4.0, `cast` raises on the first bad value. You need the variant that returns NULL."
+      - answer: {g1: astype}
+        feedback: "`astype` is an alias of `cast`, so it raises under ANSI mode too."
+    hints:
+      - "The safe variant of cast starts with a word meaning attempt."
+      - "It exists as a SQL function and, since PySpark 4.0, as a Column method."
+      - "`try_cast`."
+    explanation: |
+      `Column.try_cast` returns NULL where the value cannot be cast. Count those NULLs and let a data-quality check decide what to do.
+
+  - id: A2-L2-E4
+    type: write_function
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      Write `rename_to_canonical(df, column_map)`. It raises `ValueError` naming every missing source column, then renames all columns in one call. Use type hints and a docstring.
+    starter: |
+      from pyspark.sql import DataFrame
+
+
+      def rename_to_canonical(df: DataFrame, column_map: dict[str, str]) -> DataFrame:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: rename_to_canonical
+          typed: true
+          docstring: true
+          message: "Define `rename_to_canonical` with type hints and a docstring."
+        - id: checks_columns
+          kind: requires_pattern
+          pattern: "df\\.columns"
+          message: "Compare the keys of `column_map` with `df.columns` before you rename."
+        - id: raises
+          kind: requires_pattern
+          pattern: "raise\\s+ValueError"
+          message: "Raise `ValueError` when any source column is missing."
+        - id: renames_at_once
+          kind: requires_call
+          name: withColumnsRenamed
+          message: "Rename all columns in one call with `df.withColumnsRenamed(column_map)`."
+    solution: |
+      from pyspark.sql import DataFrame
+
+
+      def rename_to_canonical(df: DataFrame, column_map: dict[str, str]) -> DataFrame:
+          """Rename supplier columns to registry names.
+
+          Args:
+              df: A bronze delivery.
+              column_map: Supplier name to canonical name.
+
+          Returns:
+              The frame with canonical names.
+
+          Raises:
+              ValueError: If any source column in column_map is missing from df.
+          """
+          missing = sorted(set(column_map) - set(df.columns))
+          if missing:
+              raise ValueError(f"missing source columns: {missing}")
+          return df.withColumnsRenamed(column_map)
+    spark_tests: |
+      df = spark.createDataFrame([(1, 2.5)], "rid INT, wgt DOUBLE")
+      assert rename_to_canonical(df, {"rid": "respondent_id", "wgt": "final_weight"}).columns == ["respondent_id", "final_weight"]
+      try:
+          rename_to_canonical(df, {"rid": "respondent_id", "weight": "final_weight"})
+      except ValueError as err:
+          assert "weight" in str(err)
+      else:
+          raise AssertionError("no ValueError for a missing column")
+    seeded_bugs:
+      - |
+        from pyspark.sql import DataFrame
+
+
+        def rename_to_canonical(df: DataFrame, column_map: dict[str, str]) -> DataFrame:
+            """Rename without checking."""
+            return df.withColumnsRenamed(column_map)
+      - |
+        from pyspark.sql import DataFrame
+
+
+        def rename_to_canonical(df: DataFrame, column_map: dict[str, str]) -> DataFrame:
+            """Rename one by one, checking nothing."""
+            for src, tgt in column_map.items():
+                df = df.withColumnRenamed(src, tgt)
+            return df
+    wrong_answers:
+      - answer: |
+          from pyspark.sql import DataFrame
+
+
+          def rename_to_canonical(df: DataFrame, column_map: dict[str, str]) -> DataFrame:
+              """Rename without checking."""
+              return df.withColumnsRenamed(column_map)
+        triggers: checks_columns
+    hints:
+      - "Find the missing columns with a set difference."
+      - "`missing = sorted(set(column_map) - set(df.columns))`."
+      - "Raise if `missing` is not empty, then `return df.withColumnsRenamed(column_map)`."
+    explanation: |
+      The set difference lists every missing source column in one go. Only then is the rename safe, because `withColumnsRenamed` would skip missing columns without telling you.
+
+  - id: A2-L2-E5
+    type: spot_bug
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Silver's grain is one row per respondent per wave. After loading waves W1 and W2, silver holds only one row per respondent. Tap the line, then fix the function.
+    code: |
+      def prepare_silver(df: DataFrame, column_map: dict[str, str], type_map: dict[str, str]) -> DataFrame:
+          """Rename, cast and keep the newest version per respondent and wave."""
+          renamed = rename_to_canonical(df, column_map)
+          typed = cast_to_registry_types(renamed, type_map)
+          return latest_per_key(typed, ["respondent_id"], "delivery_version")
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: full_grain
+          kind: requires_pattern
+          pattern: "\\[\\s*[\"']respondent_id[\"']\\s*,\\s*[\"']wave_id[\"']\\s*\\]"
+          message: "Deduplicate on the full grain: `[\"respondent_id\", \"wave_id\"]`."
+    fix_solution: |
+      def prepare_silver(df: DataFrame, column_map: dict[str, str], type_map: dict[str, str]) -> DataFrame:
+          """Rename, cast and keep the newest version per respondent and wave."""
+          renamed = rename_to_canonical(df, column_map)
+          typed = cast_to_registry_types(renamed, type_map)
+          return latest_per_key(typed, ["respondent_id", "wave_id"], "delivery_version")
+    wrong_answers:
+      - lines: [3]
+        feedback: "The rename is checked and correct. Look at which keys the deduplication uses."
+      - lines: [4]
+        feedback: "try_cast is the right choice for silver. The rows vanish in a later step."
+    hints:
+      - "What is silver's grain?"
+      - "Which columns does the deduplication treat as the key?"
+      - "The key must include wave_id."
+    explanation: |
+      Deduplicating on `respondent_id` alone keeps one wave per respondent and throws the others away. The key must match the grain: respondent and wave.
+
+  - id: A2-L2-E6
+    type: order
+    difficulty: 5
+    prompt: |
+      Put the silver steps in order.
+    items:
+      - {id: require, text: "Check that every mapped source column exists"}
+      - {id: rename, text: "Rename to canonical names"}
+      - {id: cast, text: "try_cast to registry types"}
+      - {id: count, text: "Count cast failures and apply the WARN or CRITICAL threshold"}
+      - {id: dedupe, text: "Keep the newest version per respondent and wave"}
+      - {id: merge, text: "MERGE into silver"}
+    answer: [require, rename, cast, count, dedupe, merge]
+    wrong_answers:
+      - answer: [rename, require, cast, count, dedupe, merge]
+        feedback: "After the rename, the source names are gone. Check the source columns first."
+      - answer: [require, rename, cast, dedupe, merge, count]
+        feedback: "Count cast failures before the MERGE. A CRITICAL failure must stop bad data reaching silver."
+      - answer: [require, rename, cast, count, merge, dedupe]
+        feedback: "Deduplicating after the MERGE is too late. A repeated key fails the MERGE, or inserts twice when the target has no match."
+    hints:
+      - "Checks on source names come before anything renames them."
+      - "A CRITICAL result must stop the run before the write."
+      - "The MERGE needs a source with one row per key."
+    explanation: |
+      Check, rename, cast, count failures, deduplicate, merge. Each step depends on the one before, and nothing reaches silver until the checks pass.
+
+recap:
+  - front: "What does withColumnRenamed do with a missing column?"
+    back: "Nothing, silently. Check the source columns yourself and raise one error listing every missing one."
+  - front: "cast on Spark 4.0 (Runtime 17.3 LTS) with a malformed value"
+    back: "Raises CAST_INVALID_INPUT, because ANSI mode is on by default."
+  - front: "Safe cast for silver"
+    back: "F.col(c).try_cast(t), then count the new NULLs and check them against a threshold."
+  - front: "Silver dedup key"
+    back: "The full grain: respondent_id and wave_id."
+
+claims:
+  - claim: "withColumnRenamed and withColumnsRenamed ignore missing columns without an error."
+    status: verified
+    source: "Run on PySpark 4.0.4 in this repository."
+  - claim: "Spark 4.0 enables ANSI mode by default; cast raises CAST_INVALID_INPUT on malformed input; try_cast returns NULL."
+    status: verified
+    source: "Run on PySpark 4.0.4 in this repository. Databricks Runtime 17.3 LTS uses Spark 4.0.0 (search-only, VERSIONS.md)."
+  - claim: "Column.try_cast exists in PySpark 4.0."
+    status: verified
+    source: "Run on PySpark 4.0.4 in this repository."

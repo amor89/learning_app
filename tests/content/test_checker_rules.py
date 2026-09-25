@@ -96,3 +96,10 @@ def test_error_in_test_includes_exception() -> None:
 def test_stdout_is_captured() -> None:
     checker = {"tests": [{"id": "a", "code": "assert True", "message": "m"}]}
     assert check_python(checker, "print('hello')").stdout == "hello\n"
+
+
+def test_dataclass_in_submitted_code() -> None:
+    """Regression: dataclasses look up the defining module in sys.modules."""
+    checker = {"tests": [{"id": "a", "code": "assert Cfg(1).x == 1", "message": "m"}]}
+    code = "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass Cfg:\n    x: int\n"
+    assert check_python(checker, code).passed

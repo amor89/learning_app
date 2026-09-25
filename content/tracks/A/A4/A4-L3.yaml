@@ -1,0 +1,322 @@
+id: A4-L3
+title: Row filters and column masks in Unity Catalog
+
+concept: |
+  Grants decide who can read a table. **Row filters** and **column masks** decide what each reader sees inside it. Both are SQL user-defined functions that Unity Catalog applies at query time, for every query, from every tool.
+
+  **Row filter.** A SQL UDF that returns BOOLEAN. Unity Catalog passes it the columns you name, and drops each row where the function returns FALSE or NULL.
+
+  ```sql
+  CREATE FUNCTION research_prod.research_governance.respondent_filter(tracker_id STRING)
+  RETURN is_account_group_member('research_approved_analysts') OR tracker_id = 'TRK-PUBLIC';
+
+  ALTER TABLE research_prod.research_silver.nat_respondents
+  SET ROW FILTER research_prod.research_governance.respondent_filter ON (tracker_id);
+  ```
+
+  **Column mask.** A SQL UDF whose first parameter is the column value. It returns the value, or a masked version.
+
+  ```sql
+  CREATE FUNCTION research_prod.research_governance.mask_postcode(postcode STRING)
+  RETURN CASE WHEN is_account_group_member('pii_readers') THEN postcode ELSE '***' END;
+
+  ALTER TABLE research_prod.research_silver.nat_respondents
+  ALTER COLUMN postcode SET MASK research_prod.research_governance.mask_postcode;
+  ```
+
+  Three rules:
+
+  - Use `is_account_group_member()`. It checks account-level groups, which Unity Catalog uses. `is_member()` checks workspace-local groups.
+  - Test group membership, never `current_user() = 'someone@example.org'`. A named user in a function is a hidden grant nobody reviews.
+  - Keep filter and mask functions in a governance schema, so their owners and grants are separate from the data.
+
+  Your reference script uses `CREATE ROW ACCESS POLICY`. That is Snowflake syntax. Databricks rejects it. Where many tables share one rule, Databricks also offers attribute-based policies on governed tags.
+
+why_it_matters: |
+  The reference `unity_catalog.sql` was written with an AI assistant and never run. Its row-level security uses `CREATE ROW ACCESS POLICY`, which does not exist in Databricks. The deployment script stops at that statement, and the PII table goes live without a filter, because the grants earlier in the script had already succeeded. Every analyst with SELECT on silver can read restricted respondent rows until someone notices the failed step.
+
+  A SQL UDF with `SET ROW FILTER`, tested in dev, applies the rule where Databricks enforces it.
+
+worked_example:
+  language: sql
+  weak:
+    code: |
+      CREATE ROW ACCESS POLICY restrict_respondent_data
+          ON research_silver.nat_respondents
+          USING (
+              is_member('research_approved_analysts')
+              OR current_user() = 'pipeline-svc@example.org'
+          );
+    annotations:
+      - find: "CREATE ROW ACCESS POLICY restrict_respondent_data"
+        note: "Snowflake syntax. Databricks raises a parse error. Reference defect 4."
+      - find: "ON research_silver.nat_respondents"
+        note: "Two-part name: resolves against whatever catalog is current."
+      - find: "is_member('research_approved_analysts')"
+        note: "Checks workspace-local groups. Unity Catalog groups are account-level."
+      - find: "OR current_user() = 'pipeline-svc@example.org'"
+        note: "A named identity inside a function: a grant hidden from every access review."
+  strong:
+    code: |
+      CREATE OR REPLACE FUNCTION research_prod.research_governance.respondent_filter(tracker_id STRING)
+      RETURN is_account_group_member('research_approved_analysts')
+          OR is_account_group_member('research_pipelines');
+
+      ALTER TABLE research_prod.research_silver.nat_respondents
+      SET ROW FILTER research_prod.research_governance.respondent_filter ON (tracker_id);
+
+      CREATE OR REPLACE FUNCTION research_prod.research_governance.mask_postcode(postcode STRING)
+      RETURN CASE WHEN is_account_group_member('pii_readers') THEN postcode ELSE '***' END;
+
+      ALTER TABLE research_prod.research_silver.nat_respondents
+      ALTER COLUMN postcode SET MASK research_prod.research_governance.mask_postcode;
+    annotations:
+      - find: "CREATE OR REPLACE FUNCTION research_prod.research_governance.respondent_filter(tracker_id STRING)"
+        note: "A SQL UDF in the governance schema. Its parameter receives the column named in ON (...)."
+      - find: "OR is_account_group_member('research_pipelines');"
+        note: "The pipeline service principal is in a group. No identity is named in the function."
+      - find: "SET ROW FILTER research_prod.research_governance.respondent_filter ON (tracker_id);"
+        note: "Binds the filter to the table. It applies to every query from every tool."
+      - find: "ALTER COLUMN postcode SET MASK research_prod.research_governance.mask_postcode;"
+        note: "Masks one column. Readers outside pii_readers see ***."
+  takeaway: |
+    The strong script runs on Databricks, names groups instead of people, and uses three-part names throughout.
+
+exercises:
+  - id: A4-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which statement applies a row filter to a Unity Catalog table?
+    options:
+      - {id: a, text: "`CREATE ROW ACCESS POLICY p ON t USING (...)`"}
+      - {id: b, text: "`ALTER TABLE t SET ROW FILTER f ON (col)`"}
+      - {id: c, text: "`GRANT SELECT ON t TO g WHERE col = 'x'`"}
+      - {id: d, text: "`CREATE VIEW v AS SELECT * FROM t WHERE ...` and nothing else"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Databricks row filters are SQL UDFs bound to a table with SET ROW FILTER."}
+      - {id: r2, text: "Row filters must be created before the table."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That is Snowflake syntax. Databricks raises a parse error on it."
+      - answer: c
+        feedback: "GRANT has no WHERE clause. Grants control the whole object."
+      - answer: d
+        feedback: "A view filters only readers who use the view. Anyone with SELECT on the table bypasses it. A row filter applies to the table itself."
+      - answer: b|r2
+        feedback: "Right statement, wrong reason. You can add a row filter to an existing table with ALTER TABLE."
+    hints:
+      - "The filter is a SQL function."
+      - "You attach it with ALTER TABLE."
+      - "SET ROW FILTER ... ON (column)."
+    explanation: |
+      Create a SQL UDF that returns BOOLEAN, then bind it with `ALTER TABLE ... SET ROW FILTER f ON (col)`.
+
+  - id: A4-L3-E2
+    type: fill_gap
+    difficulty: 2
+    language: sql
+    prompt: |
+      Complete the mask so that only members of the account group `pii_readers` see real postcodes.
+    template: |
+      CREATE FUNCTION research_prod.research_governance.mask_postcode(postcode STRING)
+      RETURN CASE WHEN [[g1]]('pii_readers') THEN postcode ELSE '***' END;
+
+      ALTER TABLE research_prod.research_silver.nat_respondents
+      ALTER COLUMN postcode [[g2]] research_prod.research_governance.mask_postcode;
+    gaps:
+      g1: {accepted: [is_account_group_member], case_sensitive: false}
+      g2: {accepted: [SET MASK], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: is_member}
+        feedback: "`is_member` checks workspace-local groups. Unity Catalog uses account-level groups: `is_account_group_member`."
+      - answer: {g1: current_user}
+        feedback: "`current_user()` returns a name, not a group check. Masks should test group membership."
+      - answer: {g2: SET ROW FILTER}
+        feedback: "Row filters apply to the table. A column uses SET MASK."
+    hints:
+      - "The function checks account-level group membership."
+      - "The column clause has two words."
+      - "`is_account_group_member` and `SET MASK`."
+    explanation: |
+      `is_account_group_member('pii_readers')` checks the account group. `ALTER COLUMN ... SET MASK f` binds the mask to the column.
+
+  - id: A4-L3-E3
+    type: spot_bug
+    difficulty: 3
+    language: sql
+    prompt: |
+      An access review flags this filter. Tap the line that hides a grant from reviewers, then rewrite the function.
+    code: |
+      CREATE OR REPLACE FUNCTION research_prod.research_governance.respondent_filter(tracker_id STRING)
+      RETURN is_account_group_member('research_approved_analysts')
+          OR current_user() = 'pipeline-svc@example.org';
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: no_current_user
+          type: forbidden
+          pattern: "current_user\\s*\\("
+          message: "The function still names an identity with current_user(). Test a group instead."
+        - id: no_email
+          type: forbidden
+          pattern: "@"
+          message: "Remove the email address. Put the service principal in a group."
+        - id: two_groups
+          type: required
+          pattern: "is_account_group_member\\([^)]*\\)\\s+OR\\s+is_account_group_member\\("
+          message: "Keep the analysts group and add a second group for the pipeline."
+    fix_solution: |
+      CREATE OR REPLACE FUNCTION research_prod.research_governance.respondent_filter(tracker_id STRING)
+      RETURN is_account_group_member('research_approved_analysts')
+          OR is_account_group_member('research_pipelines');
+    wrong_answers:
+      - lines: [2]
+        feedback: "Testing an account group is the right pattern. Look for a named person or identity."
+      - lines: [1]
+        feedback: "A governance schema is the right home for the function."
+    hints:
+      - "Which line names one identity?"
+      - "Access reviews look at groups and grants, not at function bodies."
+      - "Replace the email check with a group check."
+    explanation: |
+      Line 3 grants access to one named identity inside the function body, where no access review looks. Put the service principal in a group and test the group.
+
+  - id: A4-L3-E4
+    type: write_function
+    difficulty: 4
+    language: sql
+    prompt: |
+      Write a row filter for `research_prod.research_gold.nat_metrics`. Members of `research_all_regions` see every row. Everyone else sees only rows where `region = 'NATIONAL'`. Create the function `research_prod.research_governance.region_filter` and bind it to the table on the `region` column.
+    starter: |
+      CREATE OR REPLACE FUNCTION research_prod.research_governance.region_filter(region STRING)
+      RETURN ...
+    checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: creates_function
+          type: required
+          pattern: "CREATE\\s+(OR\\s+REPLACE\\s+)?FUNCTION\\s+research_prod\\.research_governance\\.region_filter\\s*\\(\\s*region\\s+STRING\\s*\\)"
+          message: "Create `research_prod.research_governance.region_filter(region STRING)`."
+        - id: group_check
+          type: required
+          pattern: "is_account_group_member\\(\\s*'research_all_regions'\\s*\\)"
+          message: "Check the account group `research_all_regions` with is_account_group_member."
+        - id: national
+          type: required
+          pattern: "region\\s*=\\s*'NATIONAL'"
+          message: "Everyone else sees rows where region = 'NATIONAL'."
+        - id: or_logic
+          type: required
+          pattern: "is_account_group_member\\(\\s*'research_all_regions'\\s*\\)\\s+OR\\s+region\\s*=|region\\s*=\\s*'NATIONAL'\\s+OR\\s+is_account_group_member"
+          message: "Combine the two conditions with OR: group members see all, others see NATIONAL."
+        - id: binds
+          type: required
+          pattern: "ALTER\\s+TABLE\\s+research_prod\\.research_gold\\.nat_metrics\\s+SET\\s+ROW\\s+FILTER\\s+research_prod\\.research_governance\\.region_filter\\s+ON\\s*\\(\\s*region\\s*\\)"
+          message: "Bind it: ALTER TABLE research_prod.research_gold.nat_metrics SET ROW FILTER ... ON (region)."
+        - id: no_snowflake
+          type: forbidden
+          pattern: "ROW\\s+ACCESS\\s+POLICY"
+          message: "ROW ACCESS POLICY is Snowflake syntax."
+    solution: |
+      CREATE OR REPLACE FUNCTION research_prod.research_governance.region_filter(region STRING)
+      RETURN is_account_group_member('research_all_regions') OR region = 'NATIONAL';
+
+      ALTER TABLE research_prod.research_gold.nat_metrics
+      SET ROW FILTER research_prod.research_governance.region_filter ON (region);
+    seeded_bugs:
+      - |
+        CREATE OR REPLACE FUNCTION research_prod.research_governance.region_filter(region STRING)
+        RETURN is_account_group_member('research_all_regions') AND region = 'NATIONAL';
+
+        ALTER TABLE research_prod.research_gold.nat_metrics
+        SET ROW FILTER research_prod.research_governance.region_filter ON (region);
+      - |
+        CREATE OR REPLACE FUNCTION research_prod.research_governance.region_filter(region STRING)
+        RETURN is_account_group_member('research_all_regions') OR region = 'NATIONAL';
+      - |
+        CREATE ROW ACCESS POLICY region_filter ON research_gold.nat_metrics
+        USING (is_account_group_member('research_all_regions') OR region = 'NATIONAL');
+    wrong_answers:
+      - answer: |
+          CREATE OR REPLACE FUNCTION research_prod.research_governance.region_filter(region STRING)
+          RETURN is_account_group_member('research_all_regions') AND region = 'NATIONAL';
+
+          ALTER TABLE research_prod.research_gold.nat_metrics
+          SET ROW FILTER research_prod.research_governance.region_filter ON (region);
+        triggers: or_logic
+      - answer: |
+          CREATE OR REPLACE FUNCTION research_prod.research_governance.region_filter(region STRING)
+          RETURN is_account_group_member('research_all_regions') OR region = 'NATIONAL';
+        triggers: binds
+    hints:
+      - "The function returns TRUE for rows the reader may see."
+      - "Group members see everything, so the group check stands alone on one side of OR."
+      - "Then bind with ALTER TABLE ... SET ROW FILTER ... ON (region)."
+    explanation: |
+      `group OR region = 'NATIONAL'` is TRUE for every row when the reader is in the group, and only for national rows otherwise. `AND` would hide everything from people outside the group. The function does nothing until `SET ROW FILTER` binds it.
+
+  - id: A4-L3-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      Choose the control for each requirement on `nat_respondents`.
+    slots:
+      - id: team
+        label: "The client team must not query the table at all"
+        options: &controls
+          - {id: grant, text: "Grants (or their absence)"}
+          - {id: filter, text: "Row filter"}
+          - {id: mask, text: "Column mask"}
+        answer: grant
+      - id: tracker
+        label: "Analysts see only the trackers their group is approved for"
+        options: *controls
+        answer: filter
+      - id: postcode
+        label: "Analysts see respondent rows, but postcodes appear as *** unless they are in pii_readers"
+        options: *controls
+        answer: mask
+    model_answer: |
+      - No access at all: do not grant SELECT. Grants decide who reads the table.
+      - Some rows only: a row filter decides which rows each reader sees.
+      - All rows, hidden values: a column mask decides what each reader sees in one column.
+    wrong_answers:
+      - answer: {team: filter}
+        feedback: "A filter that returns nothing still lets the team query the table and see its structure. Withhold the grant."
+      - answer: {tracker: mask}
+        feedback: "A mask changes values in a column. The requirement removes whole rows."
+      - answer: {postcode: filter}
+        feedback: "Filtering would remove the respondents entirely. The requirement keeps the rows and hides one column."
+    hints:
+      - "Whole table, some rows, one column."
+      - "Grants are all or nothing on an object."
+      - "Filters remove rows. Masks change values."
+    explanation: |
+      Grants control access to the object, filters control rows, masks control column values. Combine them: grant SELECT to analysts, filter trackers, mask postcodes.
+
+recap:
+  - front: "Row filter in Databricks"
+    back: "A SQL UDF returning BOOLEAN, bound with ALTER TABLE t SET ROW FILTER f ON (col)."
+  - front: "Column mask in Databricks"
+    back: "A SQL UDF taking the column value, bound with ALTER TABLE t ALTER COLUMN c SET MASK f."
+  - front: "is_account_group_member or is_member?"
+    back: "is_account_group_member: Unity Catalog groups are account-level. is_member checks workspace groups."
+  - front: "What is CREATE ROW ACCESS POLICY?"
+    back: "Snowflake syntax. Databricks rejects it. Reference defect 4."
+
+claims:
+  - claim: "Row filters are SQL UDFs returning BOOLEAN bound with SET ROW FILTER ... ON (cols); column masks are bound with ALTER COLUMN ... SET MASK."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/manually-apply"
+  - claim: "is_account_group_member returns true when the session user is a direct or indirect member of an account-level group; is_member checks workspace groups."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/sql/language-manual/functions/is_account_group_member"
+  - claim: "Attribute-based access control (ABAC) policies apply filters and masks centrally through governed tags."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/abac/policies"

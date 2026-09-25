@@ -1,0 +1,293 @@
+id: A4-L2
+title: Grant to groups, grant the least, grant at the right level
+
+concept: |
+  Unity Catalog controls access with privileges on securable objects. Four privileges cover most pipeline work:
+
+  | Privilege | On | Lets the principal |
+  |---|---|---|
+  | `USE CATALOG` | catalog | see into the catalog. Grants no data access by itself. |
+  | `USE SCHEMA` | schema | see into the schema. Grants no data access by itself. |
+  | `SELECT` | table, or schema | read data |
+  | `MODIFY` | table, or schema | insert, update and delete data |
+
+  To read a table, a principal needs all three: `USE CATALOG` on its catalog, `USE SCHEMA` on its schema and `SELECT` on the table. `MODIFY` also needs `SELECT` and both `USE` privileges.
+
+  **Grant at the container.** A privilege granted on a schema is inherited by every current and future table in it. `GRANT SELECT ON SCHEMA research_prod.research_gold` covers next month's new gold table without another ticket.
+
+  **Grant to groups, never to individual users.** People join, move and leave. A group grant is managed once, in one place. A user grant outlives the reason it was made, and nobody finds it until an audit.
+
+  **Run pipelines as a service principal.** Jobs that write bronze, silver and gold run as a service principal with `MODIFY` on those schemas. People get `SELECT` on the layers they need, and no person needs `MODIFY` on production.
+
+  ```sql
+  GRANT USE CATALOG ON CATALOG research_prod TO `research_analysts`;
+  GRANT USE SCHEMA, SELECT ON SCHEMA research_prod.research_gold TO `research_analysts`;
+  SHOW GRANTS ON SCHEMA research_prod.research_gold;
+  ```
+
+  Avoid `ALL PRIVILEGES` outside sandboxes. It includes privileges you did not think about, and future privileges too.
+
+why_it_matters: |
+  During a deadline, an analyst gets `MODIFY` on `research_prod.research_silver` "for one day" to patch a mapping by hand. The grant is to their user account. Eight months later they run a clean-up notebook against what they believe is a dev copy and delete 12,000 silver rows. Nobody remembered the grant, and silver had to be rebuilt from bronze.
+
+  With the rule "people get SELECT, pipelines get MODIFY, grants go to groups", the patch would have gone through the pipeline, and the delete would have failed with a permission error.
+
+worked_example:
+  language: sql
+  weak:
+    code: |
+      GRANT ALL PRIVILEGES ON CATALOG research_prod TO `alex@example.org`;
+      GRANT SELECT ON TABLE research_prod.research_gold.nat_metrics TO `research_analysts`;
+      GRANT MODIFY ON SCHEMA research_prod.research_silver TO `research_analysts`;
+    annotations:
+      - find: "GRANT ALL PRIVILEGES ON CATALOG research_prod TO `alex@example.org`;"
+        note: "Everything, on all of production, to one person. Outlives the reason for it."
+      - find: "GRANT SELECT ON TABLE research_prod.research_gold.nat_metrics"
+        note: "SELECT alone is not enough, and a table-level grant misses every new gold table."
+      - find: "GRANT MODIFY ON SCHEMA research_prod.research_silver TO `research_analysts`;"
+        note: "Analysts can now change silver directly, bypassing the pipeline and its checks."
+  strong:
+    code: |
+      -- Analysts read gold.
+      GRANT USE CATALOG ON CATALOG research_prod TO `research_analysts`;
+      GRANT USE SCHEMA, SELECT ON SCHEMA research_prod.research_gold TO `research_analysts`;
+
+      -- The pipeline service principal writes silver and gold.
+      GRANT USE CATALOG ON CATALOG research_prod TO `research-pipeline-sp`;
+      GRANT USE SCHEMA, SELECT, MODIFY ON SCHEMA research_prod.research_silver TO `research-pipeline-sp`;
+      GRANT USE SCHEMA, SELECT, MODIFY ON SCHEMA research_prod.research_gold TO `research-pipeline-sp`;
+
+      -- Check what is in place.
+      SHOW GRANTS ON SCHEMA research_prod.research_gold;
+    annotations:
+      - find: "GRANT USE SCHEMA, SELECT ON SCHEMA research_prod.research_gold TO `research_analysts`;"
+        note: "Schema level: inherited by every current and future gold table."
+      - find: "GRANT USE SCHEMA, SELECT, MODIFY ON SCHEMA research_prod.research_silver TO `research-pipeline-sp`;"
+        note: "Only the pipeline identity writes to silver."
+      - find: "SHOW GRANTS ON SCHEMA research_prod.research_gold;"
+        note: "Review grants from SQL, and keep these statements in version control."
+  takeaway: |
+    Three rules: groups not users, schemas not tables, SELECT for people and MODIFY for pipelines.
+
+exercises:
+  - id: A4-L2-E1
+    type: order
+    difficulty: 1
+    prompt: |
+      Analysts must read every table in `research_prod.research_gold`. Put the grants in order from the outermost object inwards.
+    items:
+      - {id: cat, text: "GRANT USE CATALOG ON CATALOG research_prod TO `research_analysts`"}
+      - {id: sch, text: "GRANT USE SCHEMA ON SCHEMA research_prod.research_gold TO `research_analysts`"}
+      - {id: sel, text: "GRANT SELECT ON SCHEMA research_prod.research_gold TO `research_analysts`"}
+    answer: [cat, sch, sel]
+    wrong_answers:
+      - answer: [sel, sch, cat]
+        feedback: "The grants all work in any order, but read them outermost first: catalog, then schema, then data. This order is inside out."
+      - answer: [sch, cat, sel]
+        feedback: "Catalog comes before schema. USE CATALOG opens the catalog, USE SCHEMA opens the schema inside it."
+    hints:
+      - "The namespace goes catalog, schema, table."
+      - "Each USE privilege opens one level."
+      - "The data privilege comes last."
+    explanation: |
+      Reading a table needs USE CATALOG, USE SCHEMA and SELECT. Granting SELECT on the schema makes every current and future table readable.
+
+  - id: A4-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      An analyst has `SELECT` on `research_prod.research_gold.nat_metrics` and nothing else. What happens when they query the table?
+    options:
+      - {id: a, text: "The query succeeds."}
+      - {id: b, text: "The query fails, because they lack USE CATALOG and USE SCHEMA."}
+      - {id: c, text: "The query returns an empty result."}
+      - {id: d, text: "The query succeeds for columns without a mask."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Reading needs USE on the parent catalog and schema as well as SELECT on the table."}
+      - {id: r2, text: "SELECT only works when granted on a schema."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "SELECT on the table is necessary but not enough. The catalog and schema must be usable too."
+      - answer: c
+        feedback: "Missing privileges raise a permission error. They never return an empty result."
+      - answer: d
+        feedback: "Masks are unrelated. The query fails before any column is read."
+      - answer: b|r2
+        feedback: "Right outcome, wrong reason. SELECT can be granted on a table. The missing pieces are USE CATALOG and USE SCHEMA."
+    hints:
+      - "How many privileges does a read need?"
+      - "Each parent level must be usable."
+      - "USE CATALOG and USE SCHEMA are missing."
+    explanation: |
+      A read needs USE CATALOG, USE SCHEMA and SELECT. With SELECT alone the query fails with a permission error.
+
+  - id: A4-L2-E3
+    type: spot_bug
+    difficulty: 3
+    language: sql
+    prompt: |
+      A reviewer rejects this grant script. Tap the line that breaks the "groups, not users" rule, then rewrite the script.
+    code: |
+      GRANT USE CATALOG ON CATALOG research_prod TO `research_analysts`;
+      GRANT USE SCHEMA, SELECT ON SCHEMA research_prod.research_gold TO `research_analysts`;
+      GRANT USE SCHEMA, SELECT ON SCHEMA research_prod.research_silver TO `sam.jones@example.org`;
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: no_user
+          type: forbidden
+          pattern: "TO\\s+`[^`]*@[^`]*`"
+          message: "A grant still goes to a user's email. Grant to a group."
+        - id: silver_to_group
+          type: required
+          pattern: "ON\\s+SCHEMA\\s+research_prod\\.research_silver\\s+TO\\s+`[a-z0-9_-]+`"
+          message: "Give silver read access to a group, for example `research_silver_readers`."
+        - id: keeps_gold
+          type: required
+          pattern: "ON\\s+SCHEMA\\s+research_prod\\.research_gold\\s+TO\\s+`research_analysts`"
+          message: "Keep the gold grant to research_analysts."
+    fix_solution: |
+      GRANT USE CATALOG ON CATALOG research_prod TO `research_analysts`;
+      GRANT USE SCHEMA, SELECT ON SCHEMA research_prod.research_gold TO `research_analysts`;
+      GRANT USE CATALOG ON CATALOG research_prod TO `research_silver_readers`;
+      GRANT USE SCHEMA, SELECT ON SCHEMA research_prod.research_silver TO `research_silver_readers`;
+    wrong_answers:
+      - lines: [2]
+        feedback: "That grant goes to a group at schema level, which is the pattern to follow."
+      - lines: [1]
+        feedback: "USE CATALOG to a group is correct and needed."
+    hints:
+      - "Which principal is not a group?"
+      - "An email address names one person."
+      - "Create a group such as research_silver_readers and grant to it."
+    explanation: |
+      Line 3 grants to one person. Grant to a group instead, and add Sam to the group. When Sam moves teams, one membership change removes the access.
+
+  - id: A4-L2-E4
+    type: write_function
+    difficulty: 4
+    language: sql
+    prompt: |
+      Write the grants for the pipeline service principal `research-pipeline-sp`: it must read and write every table in `research_prod.research_silver`, now and in future. Give it only what it needs, on the right objects.
+    starter: |
+      -- Grants for research-pipeline-sp
+    checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: use_catalog
+          type: required
+          pattern: "GRANT\\s+USE\\s+CATALOG\\s+ON\\s+CATALOG\\s+research_prod\\s+TO\\s+`research-pipeline-sp`"
+          message: "Start with USE CATALOG on research_prod for the service principal."
+        - id: use_schema
+          type: required
+          pattern: "GRANT\\s+[^;]*USE\\s+SCHEMA[^;]*ON\\s+SCHEMA\\s+research_prod\\.research_silver\\s+TO\\s+`research-pipeline-sp`"
+          message: "Grant USE SCHEMA on research_prod.research_silver."
+        - id: select_modify
+          type: required
+          pattern: "GRANT\\s+[^;]*(SELECT[^;]*MODIFY|MODIFY[^;]*SELECT)[^;]*ON\\s+SCHEMA\\s+research_prod\\.research_silver"
+          message: "Grant SELECT and MODIFY on the schema, so every current and future table is covered."
+        - id: no_all
+          type: forbidden
+          pattern: "ALL\\s+PRIVILEGES"
+          message: "ALL PRIVILEGES grants far more than the pipeline needs."
+        - id: no_table_level
+          type: forbidden
+          pattern: "ON\\s+TABLE"
+          message: "Table-level grants miss future tables. Grant on the schema."
+    solution: |
+      GRANT USE CATALOG ON CATALOG research_prod TO `research-pipeline-sp`;
+      GRANT USE SCHEMA, SELECT, MODIFY ON SCHEMA research_prod.research_silver TO `research-pipeline-sp`;
+    seeded_bugs:
+      - |
+        GRANT ALL PRIVILEGES ON CATALOG research_prod TO `research-pipeline-sp`;
+      - |
+        GRANT USE CATALOG ON CATALOG research_prod TO `research-pipeline-sp`;
+        GRANT USE SCHEMA ON SCHEMA research_prod.research_silver TO `research-pipeline-sp`;
+        GRANT SELECT, MODIFY ON TABLE research_prod.research_silver.nat_respondents TO `research-pipeline-sp`;
+      - |
+        GRANT USE SCHEMA, SELECT, MODIFY ON SCHEMA research_prod.research_silver TO `research-pipeline-sp`;
+    wrong_answers:
+      - answer: |
+          GRANT USE CATALOG ON CATALOG research_prod TO `research-pipeline-sp`;
+          GRANT USE SCHEMA ON SCHEMA research_prod.research_silver TO `research-pipeline-sp`;
+          GRANT SELECT, MODIFY ON TABLE research_prod.research_silver.nat_respondents TO `research-pipeline-sp`;
+        triggers: select_modify
+      - answer: |
+          GRANT USE SCHEMA, SELECT, MODIFY ON SCHEMA research_prod.research_silver TO `research-pipeline-sp`;
+        triggers: use_catalog
+    hints:
+      - "Two statements are enough."
+      - "One for the catalog, one for the schema."
+      - "`GRANT USE SCHEMA, SELECT, MODIFY ON SCHEMA research_prod.research_silver TO ...`."
+    explanation: |
+      USE CATALOG opens the catalog. USE SCHEMA, SELECT and MODIFY on the schema cover every table in it, now and in future. Nothing else is needed.
+
+  - id: A4-L2-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      Assign each principal the least privilege that lets them do their job.
+    slots:
+      - id: analysts
+        label: "research_analysts build Power BI reports from gold"
+        options: &privs
+          - {id: select, text: "USE CATALOG, USE SCHEMA, SELECT on the schema"}
+          - {id: modify, text: "USE CATALOG, USE SCHEMA, SELECT, MODIFY on the schema"}
+          - {id: all, text: "ALL PRIVILEGES on the catalog"}
+          - {id: none, text: "Nothing on this schema"}
+        answer: select
+      - id: pipeline
+        label: "research-pipeline-sp writes silver"
+        options: *privs
+        answer: modify
+      - id: analysts_bronze
+        label: "research_analysts and the bronze schema"
+        options: *privs
+        answer: none
+      - id: admin
+        label: "Platform administrators managing the metastore"
+        options:
+          - {id: owner, text: "Ownership or management rights through an admin group"}
+          - {id: user_all, text: "ALL PRIVILEGES granted to each admin's user account"}
+        answer: owner
+    model_answer: |
+      - Analysts read gold: USE CATALOG, USE SCHEMA and SELECT on the gold schema.
+      - The pipeline writes silver: the same plus MODIFY on the silver schema.
+      - Analysts have no reason to see raw deliveries, so no bronze access.
+      - Administration goes through an admin group, never through grants on user accounts.
+    wrong_answers:
+      - answer: {analysts: modify}
+        feedback: "Reports only read. MODIFY would let an analyst change gold outside the pipeline."
+      - answer: {analysts_bronze: select}
+        feedback: "Bronze holds raw deliveries, which can include fields gold never exposes. Give access only when there is a need."
+      - answer: {admin: user_all}
+        feedback: "Grants to user accounts outlive the people's roles. Use a group."
+    hints:
+      - "Who writes, and who only reads?"
+      - "Does anyone in the list need raw deliveries?"
+      - "Groups, not users, for every grant."
+    explanation: |
+      Least privilege: people read the layer they report from, pipelines write the layers they own, and admin rights live in a group.
+
+recap:
+  - front: "Privileges needed to read a table"
+    back: "USE CATALOG on the catalog, USE SCHEMA on the schema, SELECT on the table or schema."
+  - front: "Why grant SELECT on the schema rather than the table?"
+    back: "Schema grants are inherited by every current and future table in it."
+  - front: "Who gets MODIFY on production silver and gold?"
+    back: "The pipeline service principal. People get SELECT."
+  - front: "Why never grant to a user account?"
+    back: "User grants outlive the reason for them. Group membership is managed in one place."
+
+claims:
+  - claim: "Reading a table needs USE CATALOG, USE SCHEMA and SELECT; MODIFY needs SELECT and both USE privileges; privileges granted on a schema are inherited by current and future tables."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/manage-privileges/"
+  - claim: "GRANT accepts a comma-separated list of privileges, and SHOW GRANTS lists grants on a securable."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/sql/language-manual/security-grant and https://docs.databricks.com/aws/en/sql/language-manual/security-show-grant"

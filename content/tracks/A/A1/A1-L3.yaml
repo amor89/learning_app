@@ -1,0 +1,446 @@
+id: A1-L3
+title: Config over hardcoded values, and PEP 8 with ruff
+
+concept: |
+  Pipeline code should contain logic. Everything that changes between environments, trackers or contract versions belongs in configuration:
+
+  - catalog, schema and table names
+  - column maps and type maps
+  - thresholds, such as `weight_sum_min` or a stability tolerance
+  - contract rules and their severity
+
+  Keep configuration in one of two places. Versioned JSON or YAML files in the repository suit values that change with a code release. Registry tables in Unity Catalog suit values that analysts maintain, such as the Variable Registry column map.
+
+  Load configuration once, at the start of the run, into a typed object. A frozen dataclass or a pydantic model works. Validate on load: every required key present, `weight_sum_min` below `weight_sum_max`, names non-empty. Fail at 00:01 with "missing key: silver_table", not at 02:47 with a KeyError deep in a transform.
+
+  Then pass the object, or the values from it, into your functions. A function that reads a global config dictionary is as hard to test as one with hardcoded strings.
+
+  Style is part of the same discipline. PEP 8 is the Python style guide. **ruff** checks it and formats code in one fast tool:
+
+  - `ruff check .` finds errors and style problems, such as undefined names (F821) or `== True` (E712).
+  - `ruff format .` rewrites layout consistently. `ruff format --check .` fails CI when a file needs formatting.
+
+  Settle the rules once in `pyproject.toml` under `[tool.ruff]`, run both commands in CI, and stop debating layout in reviews.
+
+why_it_matters: |
+  A developer copies the production silver notebook to test a change in the dev workspace. The notebook hardcodes `research_prod.research_silver.nat_respondents`. The dev run MERGEs half-finished test data into the production table. The morning report shows impossible reach figures, and the team restores the table from Delta history.
+
+  With the catalog in a config file per environment, the dev run writes to `research_dev`. The same code runs in both places, and only the config changes.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def check_weight_sum(spark, wave_id):
+          total = (
+              spark.table("research_prod.research_silver.nat_respondents")
+              .filter(F.col("wave_id") == wave_id)
+              .agg(F.sum("final_weight")).collect()[0][0]
+          )
+          if total < 45000000 or total > 55000000:
+              raise ValueError("weight sum out of range")
+    annotations:
+      - find: '"research_prod.research_silver.nat_respondents"'
+        note: "The production table is typed into the function. A dev run writes, or here reads, production."
+      - find: "if total < 45000000 or total > 55000000:"
+        note: "Contract thresholds are buried in code. A new contract version needs a code change in every notebook that repeats them."
+      - find: 'raise ValueError("weight sum out of range")'
+        note: "The error hides the numbers. You cannot tell how far out of range the total is."
+  strong:
+    code: |
+      import json
+      from dataclasses import dataclass
+      from pathlib import Path
+
+
+      @dataclass(frozen=True)
+      class WeightContract:
+          """Weight total limits from the data contract."""
+
+          silver_table: str
+          weight_sum_min: float
+          weight_sum_max: float
+
+          def __post_init__(self) -> None:
+              if self.weight_sum_min >= self.weight_sum_max:
+                  raise ValueError("weight_sum_min must be below weight_sum_max")
+
+
+      def load_contract(path: Path) -> WeightContract:
+          """Load and validate the contract file. Fails fast on a missing key."""
+          raw = json.loads(path.read_text())
+          return WeightContract(
+              silver_table=raw["silver_table"],
+              weight_sum_min=float(raw["weight_sum_min"]),
+              weight_sum_max=float(raw["weight_sum_max"]),
+          )
+
+
+      def weight_sum_in_range(total: float, contract: WeightContract) -> bool:
+          """True when the weight total is inside the contract limits."""
+          return contract.weight_sum_min <= total <= contract.weight_sum_max
+    annotations:
+      - find: "@dataclass(frozen=True)"
+        note: "Frozen: no code can change a limit halfway through a run."
+      - find: "def __post_init__(self) -> None:"
+        note: "Validation on load. An impossible contract fails before any data moves."
+      - find: 'silver_table=raw["silver_table"],'
+        note: "A missing key raises KeyError here, at load, with the key's name."
+      - find: "def weight_sum_in_range("
+        note: "Pure logic with the limits passed in. Test it with plain numbers, no Spark needed."
+  takeaway: |
+    The strong version runs unchanged in dev and prod. The contract file decides the table and the limits.
+
+exercises:
+  - id: A1-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which of these belongs in configuration rather than in pipeline code?
+    options:
+      - {id: a, text: "The formula for weighted reach: weighted reach divided by weighted base"}
+      - {id: b, text: "The catalog name, `research_prod` or `research_dev`"}
+      - {id: c, text: "The order of steps: read, validate, transform, write"}
+      - {id: d, text: "The decision to MERGE rather than append in silver"}
+    answer: b
+    reasons:
+      - {id: r1, text: "It changes between environments while the logic stays the same."}
+      - {id: r2, text: "Short strings belong in configuration."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The formula is business logic. It is the same in every environment, so it belongs in a tested function."
+      - answer: c
+        feedback: "The step order is the pipeline's design. It lives in the orchestrator and changes only with a code review."
+      - answer: d
+        feedback: "MERGE versus append is a design decision about idempotence, not a setting."
+      - answer: b|r2
+        feedback: "Right choice, wrong reason. Length is irrelevant. Configuration holds what varies between environments, trackers or contract versions."
+    hints:
+      - "What changes when the same code runs in dev and in prod?"
+      - "Logic stays the same. Names and limits change."
+      - "The catalog differs between environments."
+    explanation: |
+      The catalog name varies by environment. The formula, the step order and the write strategy are logic, which belongs in reviewed, tested code.
+
+  - id: A1-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      from dataclasses import FrozenInstanceError, dataclass
+
+
+      @dataclass(frozen=True)
+      class RunConfig:
+          catalog: str
+
+
+      cfg = RunConfig("research_dev")
+      try:
+          cfg.catalog = "research_prod"
+      except FrozenInstanceError:
+          print("blocked")
+      print(cfg.catalog)
+    answer: |
+      blocked
+      research_dev
+    wrong_answers:
+      - answer: "research_prod"
+        feedback: "A frozen dataclass rejects assignment after creation, so the value stays `research_dev`."
+      - answer: |
+          blocked
+          research_prod
+        feedback: "The assignment raised before it changed anything. The value stays `research_dev`."
+    hints:
+      - "What does `frozen=True` do to attribute assignment?"
+      - "The exception fires before the value changes."
+      - "Two lines are printed."
+    explanation: |
+      `frozen=True` makes assignment raise `FrozenInstanceError`, so `blocked` prints and the catalog stays `research_dev`. No code can switch a run to production halfway through.
+
+  - id: A1-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the two CI commands. The first finds lint errors. The second fails when a file needs reformatting, without changing it.
+    template: |
+      ruff [[g1]] .
+      ruff [[g2]] --check .
+    gaps:
+      g1: {accepted: [check]}
+      g2: {accepted: [format]}
+    wrong_answers:
+      - answer: {g1: lint}
+        feedback: "ruff has no `lint` command. Linting runs with `ruff check`."
+      - answer: {g2: fmt}
+        feedback: "The formatter command is `ruff format`. Add `--check` so CI reports instead of rewriting."
+      - answer: {g1: format, g2: check}
+        feedback: "Swapped. `ruff check` lints, `ruff format --check` verifies formatting."
+    hints:
+      - "One command lints, one formats."
+      - "The lint command's name means inspecting code."
+      - "`ruff check .` and `ruff format --check .`."
+    explanation: |
+      `ruff check .` reports lint errors such as F821 and E712. `ruff format --check .` exits non-zero when any file would be reformatted, which fails CI without touching the code.
+
+  - id: A1-L3-E4
+    type: write_function
+    difficulty: 4
+    language: python
+    prompt: |
+      Write `load_run_config(raw)`. It takes a dict parsed from JSON and returns a frozen `RunConfig` dataclass with `catalog` (str), `tracker` (str) and `stability_tolerance` (float).
+
+      - Raise `KeyError` naming the key when one is missing.
+      - Raise `ValueError` when `stability_tolerance` is not between 0 and 1.
+      - Add a property `silver_table` that returns `f"{catalog}.research_silver.{tracker}_respondents"`.
+    starter: |
+      from dataclasses import dataclass
+
+
+      @dataclass(frozen=True)
+      class RunConfig:
+          ...
+
+
+      def load_run_config(raw: dict[str, object]) -> RunConfig:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: load_run_config
+          typed: true
+          docstring: true
+          message: "Give `load_run_config` type hints and a docstring."
+        - id: frozen
+          kind: requires_pattern
+          pattern: "@dataclass\\(\\s*frozen\\s*=\\s*True\\s*\\)"
+          message: "Make `RunConfig` a frozen dataclass: `@dataclass(frozen=True)`."
+      tests:
+        - id: loads
+          code: |
+            cfg = load_run_config({"catalog": "research_dev", "tracker": "nat", "stability_tolerance": 0.1})
+            assert cfg.catalog == "research_dev" and cfg.tracker == "nat" and cfg.stability_tolerance == 0.1
+          message: "A valid dict must load into RunConfig with the same values."
+        - id: silver_table
+          code: |
+            cfg = load_run_config({"catalog": "research_dev", "tracker": "nat", "stability_tolerance": 0.1})
+            assert cfg.silver_table == "research_dev.research_silver.nat_respondents"
+          message: "`silver_table` must build the three-level name from catalog and tracker."
+        - id: missing_key
+          code: |
+            try:
+                load_run_config({"catalog": "research_dev", "stability_tolerance": 0.1})
+            except KeyError as err:
+                assert "tracker" in str(err)
+            else:
+                raise AssertionError("no KeyError")
+          message: "A missing key must raise KeyError that names the key."
+        - id: bad_tolerance
+          code: |
+            try:
+                load_run_config({"catalog": "c", "tracker": "t", "stability_tolerance": 10})
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "A tolerance outside 0 to 1 must raise ValueError. 10 means 1000 percentage points."
+        - id: frozen_runtime
+          code: |
+            cfg = load_run_config({"catalog": "c", "tracker": "t", "stability_tolerance": 0.1})
+            try:
+                cfg.catalog = "x"
+            except Exception:
+                pass
+            else:
+                raise AssertionError("config changed")
+          message: "The config must be frozen, so no code can change it mid-run."
+    solution: |
+      from dataclasses import dataclass
+
+
+      @dataclass(frozen=True)
+      class RunConfig:
+          """Settings for one pipeline run."""
+
+          catalog: str
+          tracker: str
+          stability_tolerance: float
+
+          @property
+          def silver_table(self) -> str:
+              """Three-level name of the silver table."""
+              return f"{self.catalog}.research_silver.{self.tracker}_respondents"
+
+
+      def load_run_config(raw: dict[str, object]) -> RunConfig:
+          """Build a validated RunConfig from parsed JSON.
+
+          Args:
+              raw: Parsed configuration.
+
+          Returns:
+              The frozen configuration.
+
+          Raises:
+              KeyError: If a required key is missing.
+              ValueError: If stability_tolerance is outside 0 to 1.
+          """
+          tolerance = float(str(raw["stability_tolerance"]))
+          if not 0 <= tolerance <= 1:
+              raise ValueError(f"stability_tolerance {tolerance} is outside 0 to 1")
+          return RunConfig(
+              catalog=str(raw["catalog"]),
+              tracker=str(raw["tracker"]),
+              stability_tolerance=tolerance,
+          )
+    seeded_bugs:
+      - |
+        from dataclasses import dataclass
+
+
+        @dataclass(frozen=True)
+        class RunConfig:
+            """Settings."""
+
+            catalog: str
+            tracker: str
+            stability_tolerance: float
+
+            @property
+            def silver_table(self) -> str:
+                """Name."""
+                return f"{self.catalog}.research_silver.{self.tracker}_respondents"
+
+
+        def load_run_config(raw: dict[str, object]) -> RunConfig:
+            """Load with defaults, which hides a missing tracker."""
+            return RunConfig(
+                catalog=str(raw.get("catalog", "research_prod")),
+                tracker=str(raw.get("tracker", "nat")),
+                stability_tolerance=float(str(raw.get("stability_tolerance", 0.1))),
+            )
+      - |
+        from dataclasses import dataclass
+
+
+        @dataclass
+        class RunConfig:
+            """Settings."""
+
+            catalog: str
+            tracker: str
+            stability_tolerance: float
+
+            @property
+            def silver_table(self) -> str:
+                """Name."""
+                return f"{self.catalog}.research_silver.{self.tracker}_respondents"
+
+
+        def load_run_config(raw: dict[str, object]) -> RunConfig:
+            """Load."""
+            tolerance = float(str(raw["stability_tolerance"]))
+            if not 0 <= tolerance <= 1:
+                raise ValueError("bad tolerance")
+            return RunConfig(str(raw["catalog"]), str(raw["tracker"]), tolerance)
+    wrong_answers:
+      - answer: |
+          from dataclasses import dataclass
+
+
+          @dataclass(frozen=True)
+          class RunConfig:
+              """Settings."""
+
+              catalog: str
+              tracker: str
+              stability_tolerance: float
+
+              @property
+              def silver_table(self) -> str:
+                  """Name."""
+                  return f"{self.catalog}.research_silver.{self.tracker}_respondents"
+
+
+          def load_run_config(raw: dict[str, object]) -> RunConfig:
+              """Load with defaults, which hides a missing tracker."""
+              return RunConfig(
+                  catalog=str(raw.get("catalog", "research_prod")),
+                  tracker=str(raw.get("tracker", "nat")),
+                  stability_tolerance=float(str(raw.get("stability_tolerance", 0.1))),
+              )
+        triggers: missing_key
+    hints:
+      - "Declare three fields on a frozen dataclass, then add a `@property` for the table name."
+      - "Index the dict with `raw[\"key\"]`. `.get` with a default hides a missing key."
+      - "Check `0 <= tolerance <= 1` before you build the object."
+    explanation: |
+      Indexing with `raw[\"key\"]` fails at load with the key's name. Defaults such as `raw.get(\"catalog\", \"research_prod\")` are worse than no config: a missing value silently points the run at production.
+
+  - id: A1-L3-E5
+    type: spot_bug
+    difficulty: 5
+    language: pyspark
+    prompt: |
+      The team moved every table name into `RunConfig`. A dev run still reads production. Tap the line, then fix the function.
+    code: |
+      def weighted_base_by_wave(spark: SparkSession, cfg: RunConfig) -> DataFrame:
+          """Weighted base per wave from the configured silver table."""
+          silver = spark.table(cfg.silver_table)
+          scope = spark.table("research_prod.research_governance.scope_rules")
+          in_scope = silver.join(scope, "region").filter(F.col("in_scope"))
+          return in_scope.groupBy("wave_id").agg(F.sum("final_weight").alias("weighted_base"))
+    bug_lines: [4]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_prod
+          kind: forbids_pattern
+          pattern: "research_prod"
+          message: "The function still names `research_prod`. Read the scope table name from `cfg`."
+        - id: uses_cfg
+          kind: requires_pattern
+          pattern: "spark\\.table\\(\\s*cfg\\.\\w+"
+          message: "Read the scope rules table from a `cfg` attribute, such as `cfg.scope_table`."
+    fix_solution: |
+      def weighted_base_by_wave(spark: SparkSession, cfg: RunConfig) -> DataFrame:
+          """Weighted base per wave from the configured silver table."""
+          silver = spark.table(cfg.silver_table)
+          scope = spark.table(cfg.scope_table)
+          in_scope = silver.join(scope, "region").filter(F.col("in_scope"))
+          return in_scope.groupBy("wave_id").agg(F.sum("final_weight").alias("weighted_base"))
+    wrong_answers:
+      - lines: [3]
+        feedback: "Line 3 reads the silver table from config, which is correct. Look for a name typed into the code."
+      - lines: [5]
+        feedback: "The join and filter are fine. The problem is which table the join reads."
+    hints:
+      - "Search the function for a catalog name."
+      - "Every table name must come from `cfg`."
+      - "Add `scope_table` to RunConfig and read `cfg.scope_table`."
+    explanation: |
+      Line 4 hardcodes a production table, so every environment reads production scope rules. Add `scope_table` to the config and read it from `cfg`.
+
+recap:
+  - front: "What belongs in configuration?"
+    back: "Anything that changes between environments, trackers or contract versions: names, maps, thresholds, rules."
+  - front: "When do you validate configuration?"
+    back: "Once, on load, before any data moves. Fail fast with the key's name."
+  - front: "Why not raw.get(\"catalog\", \"research_prod\")?"
+    back: "A default hides a missing key and can point a run at production."
+  - front: "The two ruff commands for CI"
+    back: "ruff check . and ruff format --check ."
+
+claims:
+  - claim: "ruff check reports F821 (undefined name) and E712 (comparison to True); ruff format --check fails when a file needs formatting."
+    status: verified
+    source: "ruff 0.16.9 run in this repository."
+  - claim: "Assigning to a frozen dataclass field raises FrozenInstanceError."
+    status: verified
+    source: "Python 3.11 standard library, run in this repository."

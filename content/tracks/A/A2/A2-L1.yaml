@@ -1,0 +1,454 @@
+id: A2-L1
+title: "Bronze: keep every delivery exactly as received"
+
+concept: |
+  Bronze is your evidence. Its contract has four rules.
+
+  1. **Append only.** Every delivery adds rows. Nothing in bronze is updated, deleted or overwritten. A redelivery of wave W14 appends again, with a new `ingestion_id`.
+  2. **As received.** No cleaning, filtering, renaming or type casting. Read CSV columns as strings. `inferSchema` guesses types, and a guess can destroy data: the ID `00123` becomes the integer `123`, and the leading zeros are gone for good.
+  3. **Audit columns.** Add four columns to every row: `ingestion_id` (one UUID per load), `source_file`, `ingestion_timestamp` and `delivery_version`. Later layers use them to pick the newest version and to trace any number back to a file.
+  4. **Grain.** One row per respondent per wave per delivery file. Duplicates across deliveries are expected here. Silver resolves them.
+
+  Why keep the mess? Because silver logic changes. When you fix a mapping bug in March, you rebuild silver from bronze for every wave since January. You can only do that if bronze still holds the original deliveries.
+
+  Two practical points for Databricks Runtime 17.3 LTS:
+
+  - Count what you wrote from the Delta history instead of calling `count()` before the write. `DeltaTable.forName(spark, table).history(1)` returns `operationMetrics["numOutputRows"]`. A separate `count()` reads the source file a second time.
+  - Open-source Spark defaults `saveAsTable` to Parquet. Databricks defaults to Delta. Write `.format("delta")` explicitly, so the code behaves the same in local tests.
+
+why_it_matters: |
+  A bronze job reads supplier CSVs with `inferSchema=true`. Respondent IDs such as `00123` land as the integer `123`. Months later, the supplier sends a correction file keyed on the original IDs, and 18% of rows fail to match silver. The original IDs are not recoverable from bronze, because bronze never held them. The team asks the supplier to resend six months of deliveries.
+
+  Reading every column as a string keeps `00123` intact. Silver can then cast deliberately, with checks.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      def ingest(path, table):
+          df = spark.read.option("header", True).option("inferSchema", True).csv(path)
+          df = df.filter(F.col("final_weight").isNotNull())
+          print(df.count())
+          df.write.mode("overwrite").saveAsTable(table)
+    annotations:
+      - find: 'option("inferSchema", True)'
+        note: "Type guessing. `00123` becomes `123`, and the original value is lost."
+      - find: 'df.filter(F.col("final_weight").isNotNull())'
+        note: "Cleaning in bronze. The rows with missing weights vanish before anyone can count them."
+      - find: "print(df.count())"
+        note: "Reads the whole file a second time, only to print a number."
+      - find: 'df.write.mode("overwrite")'
+        note: "Overwrite destroys every earlier delivery."
+  strong:
+    code: |
+      import uuid
+
+      from delta.tables import DeltaTable
+      from pyspark.sql import DataFrame, SparkSession
+      from pyspark.sql import functions as F
+
+
+      def add_audit_columns(df: DataFrame, ingestion_id: str, source_file: str, delivery_version: int) -> DataFrame:
+          """Add the four bronze audit columns."""
+          return df.withColumns({
+              "ingestion_id": F.lit(ingestion_id),
+              "source_file": F.lit(source_file),
+              "ingestion_timestamp": F.current_timestamp(),
+              "delivery_version": F.lit(delivery_version),
+          })
+
+
+      def ingest_to_bronze(spark: SparkSession, path: str, table: str, delivery_version: int) -> int:
+          """Append one delivery file to bronze as received. Returns rows written."""
+          raw = spark.read.option("header", True).csv(path)
+          audited = add_audit_columns(raw, str(uuid.uuid4()), path, delivery_version)
+          audited.write.format("delta").mode("append").saveAsTable(table)
+          metrics = DeltaTable.forName(spark, table).history(1).collect()[0]["operationMetrics"]
+          return int(metrics["numOutputRows"])
+    annotations:
+      - find: "def add_audit_columns("
+        note: "A pure transform. Test it with two rows and no files."
+      - find: '"ingestion_timestamp": F.current_timestamp(),'
+        note: "When the row landed, from the cluster clock."
+      - find: 'raw = spark.read.option("header", True).csv(path)'
+        note: "No inferSchema: every column arrives as a string, exactly as delivered."
+      - find: '.write.format("delta").mode("append")'
+        note: "Append only, and Delta stated explicitly."
+      - find: 'history(1).collect()[0]["operationMetrics"]'
+        note: "The row count comes from the commit metrics. No second read of the file."
+  takeaway: |
+    The strong version keeps every byte the supplier sent, labels every row with its origin, and reads the file once.
+
+exercises:
+  - id: A2-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A delivery contains 12 rows with a null `final_weight`. What should the bronze job do with them?
+    options:
+      - {id: a, text: "Drop them, so silver never sees bad rows."}
+      - {id: b, text: "Append them as received, with the audit columns."}
+      - {id: c, text: "Replace the null weights with 1.0."}
+      - {id: d, text: "Reject the whole file."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Bronze records deliveries as received. Silver and the data contract decide what to do with bad rows."}
+      - {id: r2, text: "Delta tables cannot hold null values."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Dropping them in bronze destroys the evidence. You can no longer tell the supplier which rows were wrong."
+      - answer: c
+        feedback: "Imputing a weight in bronze invents data. The weighted totals would look plausible and be wrong."
+      - answer: d
+        feedback: "Accept or reject is the contract check's decision, after the delivery is recorded. Bronze records first."
+      - answer: b|r2
+        feedback: "Right action, wrong reason. Delta columns accept nulls unless you add a NOT NULL constraint."
+    hints:
+      - "What is bronze for?"
+      - "Which layer cleans and validates?"
+      - "Bronze keeps everything, labelled with where it came from."
+    explanation: |
+      Bronze records every delivery as received. The contract check flags the null weights, and silver decides how to handle them. Nothing is lost.
+
+  - id: A2-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      `ids.csv` holds a header line `respondent_id` and one data line `00123`. What does this print on Spark 4.0?
+    code: |
+      df = spark.read.option("header", True).option("inferSchema", True).csv("ids.csv")
+      print(df.collect()[0]["respondent_id"])
+    answer: "123"
+    wrong_answers:
+      - answer: "00123"
+        feedback: "That is what you get without inferSchema. With it, Spark sees digits, picks an integer type, and drops the leading zeros."
+      - answer: "'00123'"
+        feedback: "The value is no longer a string. inferSchema made the column an integer."
+    hints:
+      - "What type does inferSchema pick for a column of digits?"
+      - "Integers have no leading zeros."
+      - "The value prints as an int."
+    explanation: |
+      `inferSchema` reads the column as an integer, so `00123` becomes `123`. Read bronze without inferSchema and every column stays a string, zeros included.
+
+  - id: A2-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Complete the bronze write and the timestamp audit column.
+    template: |
+      audited = raw.withColumn("ingestion_timestamp", F.[[g1]]())
+      audited.write.format("delta").mode("[[g2]]").saveAsTable(table)
+    gaps:
+      g1: {accepted: [current_timestamp]}
+      g2: {accepted: [append]}
+    wrong_answers:
+      - answer: {g2: overwrite}
+        feedback: "Overwrite deletes every earlier delivery. Bronze is append-only."
+      - answer: {g1: now}
+        feedback: "There is no `F.now`. The PySpark function is `F.current_timestamp()`."
+      - answer: {g2: merge}
+        feedback: "`merge` is not a write mode, and bronze never updates rows. Use `append`."
+    hints:
+      - "Bronze never removes what is already there."
+      - "The timestamp function's name describes the current moment."
+      - "`current_timestamp` and `append`."
+    explanation: |
+      `F.current_timestamp()` stamps each load. `mode("append")` adds rows and leaves earlier deliveries untouched.
+
+  - id: A2-L1-E4
+    type: write_function
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      Write `add_audit_columns(df, ingestion_id, source_file, delivery_version)`. It returns `df` with four extra columns: `ingestion_id`, `source_file`, `ingestion_timestamp` (current timestamp) and `delivery_version`. Do not change any existing column. Use type hints and a docstring.
+    starter: |
+      from pyspark.sql import DataFrame
+      from pyspark.sql import functions as F
+
+
+      def add_audit_columns(df: DataFrame, ingestion_id: str, source_file: str, delivery_version: int) -> DataFrame:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: add_audit_columns
+          typed: true
+          docstring: true
+          message: "Define `add_audit_columns` with type hints and a docstring."
+        - id: functions_as_f
+          kind: requires_import
+          module: pyspark.sql
+          name: functions
+          alias: F
+          message: "Import the functions module as `F`."
+        - id: timestamp
+          kind: requires_call
+          name: current_timestamp
+          message: "Stamp the load with `F.current_timestamp()`."
+        - id: literals
+          kind: requires_call
+          name: lit
+          min: 3
+          message: "The ID, file and version are the same on every row: wrap each in `F.lit()`."
+        - id: no_cast
+          kind: forbids_call
+          name: cast
+          message: "Bronze keeps columns as received. Do not cast anything here."
+        - id: no_filter
+          kind: forbids_call
+          name: filter
+          message: "Bronze keeps every row. Do not filter."
+    solution: |
+      from pyspark.sql import DataFrame
+      from pyspark.sql import functions as F
+
+
+      def add_audit_columns(df: DataFrame, ingestion_id: str, source_file: str, delivery_version: int) -> DataFrame:
+          """Add the four bronze audit columns to a delivery.
+
+          Args:
+              df: The delivery as read, all columns as strings.
+              ingestion_id: One UUID for this load.
+              source_file: Path of the delivery file.
+              delivery_version: Supplier's version number for the delivery.
+
+          Returns:
+              The delivery with ingestion_id, source_file, ingestion_timestamp and delivery_version.
+          """
+          return df.withColumns({
+              "ingestion_id": F.lit(ingestion_id),
+              "source_file": F.lit(source_file),
+              "ingestion_timestamp": F.current_timestamp(),
+              "delivery_version": F.lit(delivery_version),
+          })
+    spark_tests: |
+      raw = spark.createDataFrame([("00123", "1.5"), ("00124", "")], "respondent_id STRING, final_weight STRING")
+      out = add_audit_columns(raw, "abc", "/landing/w14.csv", 2)
+      assert out.columns == ["respondent_id", "final_weight", "ingestion_id", "source_file", "ingestion_timestamp", "delivery_version"], out.columns
+      row = out.collect()[0]
+      assert row.respondent_id == "00123" and row.ingestion_id == "abc" and row.delivery_version == 2
+      assert out.count() == 2
+    seeded_bugs:
+      - |
+        from pyspark.sql import DataFrame
+        from pyspark.sql import functions as F
+
+
+        def add_audit_columns(df: DataFrame, ingestion_id: str, source_file: str, delivery_version: int) -> DataFrame:
+            """Adds audit columns and drops rows without a weight."""
+            return df.filter(F.col("final_weight") != "").withColumns({
+                "ingestion_id": F.lit(ingestion_id),
+                "source_file": F.lit(source_file),
+                "ingestion_timestamp": F.current_timestamp(),
+                "delivery_version": F.lit(delivery_version),
+            })
+      - |
+        from pyspark.sql import DataFrame
+        from pyspark.sql import functions as F
+
+
+        def add_audit_columns(df: DataFrame, ingestion_id: str, source_file: str, delivery_version: int) -> DataFrame:
+            """Adds audit columns and casts the weight."""
+            return df.withColumns({
+                "final_weight": F.col("final_weight").cast("double"),
+                "ingestion_id": F.lit(ingestion_id),
+                "source_file": F.lit(source_file),
+                "ingestion_timestamp": F.current_timestamp(),
+                "delivery_version": F.lit(delivery_version),
+            })
+    wrong_answers:
+      - answer: |
+          from pyspark.sql import DataFrame
+          from pyspark.sql import functions as F
+
+
+          def add_audit_columns(df: DataFrame, ingestion_id: str, source_file: str, delivery_version: int) -> DataFrame:
+              """Adds audit columns and casts the weight."""
+              return df.withColumns({
+                  "final_weight": F.col("final_weight").cast("double"),
+                  "ingestion_id": F.lit(ingestion_id),
+                  "source_file": F.lit(source_file),
+                  "ingestion_timestamp": F.current_timestamp(),
+                  "delivery_version": F.lit(delivery_version),
+              })
+        triggers: no_cast
+      - answer: |
+          from pyspark.sql import DataFrame
+          from pyspark.sql import functions as F
+
+
+          def add_audit_columns(df: DataFrame, ingestion_id: str, source_file: str, delivery_version: int) -> DataFrame:
+              """Adds audit columns and drops rows without a weight."""
+              return df.filter(F.col("final_weight") != "").withColumns({
+                  "ingestion_id": F.lit(ingestion_id),
+                  "source_file": F.lit(source_file),
+                  "ingestion_timestamp": F.current_timestamp(),
+                  "delivery_version": F.lit(delivery_version),
+              })
+        triggers: no_filter
+    hints:
+      - "`df.withColumns({...})` adds several columns in one call (PySpark 3.3 and later)."
+      - "Constants go through `F.lit()`. The timestamp comes from `F.current_timestamp()`."
+      - "Add columns only. No filter, no cast."
+    explanation: |
+      `withColumns` adds all four audit columns in one step. Everything else stays as delivered: no filter, no cast.
+
+  - id: A2-L1-E5
+    type: spot_bug
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Run this job twice for two deliveries of the same wave. Bronze ends with only the second delivery. Tap the line, then fix the function.
+    code: |
+      def ingest_to_bronze(spark: SparkSession, path: str, table: str, delivery_version: int) -> None:
+          """Append one delivery file to bronze as received."""
+          raw = spark.read.option("header", True).csv(path)
+          audited = add_audit_columns(raw, str(uuid.uuid4()), path, delivery_version)
+          audited.write.format("delta").mode("overwrite").saveAsTable(table)
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_overwrite
+          kind: forbids_pattern
+          pattern: "mode\\(\\s*[\"']overwrite[\"']\\s*\\)"
+          message: "The write still overwrites. Bronze appends."
+        - id: appends
+          kind: requires_pattern
+          pattern: "mode\\(\\s*[\"']append[\"']\\s*\\)"
+          message: "Write with `.mode(\"append\")`."
+    fix_solution: |
+      def ingest_to_bronze(spark: SparkSession, path: str, table: str, delivery_version: int) -> None:
+          """Append one delivery file to bronze as received."""
+          raw = spark.read.option("header", True).csv(path)
+          audited = add_audit_columns(raw, str(uuid.uuid4()), path, delivery_version)
+          audited.write.format("delta").mode("append").saveAsTable(table)
+    wrong_answers:
+      - lines: [3]
+        feedback: "Reading without inferSchema is correct for bronze. Look at how the rows are written."
+      - lines: [4]
+        feedback: "A new UUID per load is correct: each delivery gets its own ingestion_id."
+    hints:
+      - "What happens to existing rows when this job writes?"
+      - "One word on line 5 decides it."
+      - "Use `mode(\"append\")`."
+    explanation: |
+      `overwrite` replaces the table, so each delivery erases the one before. Bronze must append.
+
+  - id: A2-L1-E6
+    type: design
+    difficulty: 5
+    prompt: |
+      Assign each piece of work to the layer that owns it.
+    slots:
+      - id: raw
+        label: "Store the supplier's CSV with every column as a string"
+        options: &layers
+          - {id: bronze, text: Bronze}
+          - {id: silver, text: Silver}
+          - {id: gold, text: Gold}
+        answer: bronze
+      - id: cast
+        label: "Rename wgt to final_weight and cast it to DOUBLE"
+        options: *layers
+        answer: silver
+      - id: dedupe
+        label: "Keep only the newest delivery version per respondent and wave"
+        options: *layers
+        answer: silver
+      - id: reach
+        label: "Weighted reach by wave, age group and region for Power BI"
+        options: *layers
+        answer: gold
+    model_answer: |
+      - Bronze stores deliveries as received.
+      - Silver renames, casts and resolves versions, so it holds one row per respondent per wave.
+      - Gold aggregates for reporting, with the grain stated.
+    wrong_answers:
+      - answer: {cast: bronze}
+        feedback: "Casting in bronze loses the original value when the cast fails or guesses wrong. Cast in silver, with checks."
+      - answer: {dedupe: bronze}
+        feedback: "Bronze keeps every delivery, duplicates included. Silver picks the newest version."
+      - answer: {reach: silver}
+        feedback: "Silver holds respondent-level rows. Aggregates for reporting belong in gold."
+    hints:
+      - "Bronze never changes what the supplier sent."
+      - "Silver has one clean row per respondent per wave."
+      - "Gold holds aggregates."
+    explanation: |
+      Bronze keeps evidence, silver makes it clean and unique, gold makes it ready to report.
+
+recap:
+  - front: "The four rules of the bronze contract"
+    back: "Append only. As received. Audit columns. Grain: respondent per wave per delivery file."
+  - front: "The four bronze audit columns"
+    back: "ingestion_id, source_file, ingestion_timestamp, delivery_version."
+  - front: "Why no inferSchema in bronze?"
+    back: "It guesses types and can destroy values, such as the leading zeros in 00123."
+  - front: "Rows written, without a second read"
+    back: "DeltaTable.forName(spark, t).history(1) and operationMetrics[\"numOutputRows\"]."
+
+claims:
+  - claim: "inferSchema turns 00123 into the integer 123."
+    status: verified
+    source: "Run on PySpark 4.0.4 in this repository."
+  - claim: "Delta history operationMetrics holds numOutputRows for an append."
+    status: verified
+    source: "Run on delta-spark 4.0.1 in this repository."
+  - claim: "DataFrame.withColumns exists (PySpark 3.3 and later)."
+    status: verified
+    source: "Checked on PySpark 4.0.4 in this repository."
+  - claim: "Open-source Spark defaults saveAsTable to Parquet; Databricks defaults to Delta."
+    status: verified
+    source: "OSS behaviour run locally; Databricks default per docs (VERSIONS.md)."
+
+practical:
+  platform: databricks
+  title: "Build a bronze loader and prove it keeps every delivery"
+  intro: |
+    Run this in Databricks Free Edition. It builds two small deliveries of the same wave in memory, loads both into bronze, and shows them side by side. In production the rows come from `spark.read.option("header", True).csv(path)`.
+  cells:
+    - kind: code
+      source: |
+        import uuid
+
+        from delta.tables import DeltaTable
+        from pyspark.sql import DataFrame, SparkSession
+        from pyspark.sql import functions as F
+
+        CATALOG = spark.catalog.currentCatalog()
+        SCHEMA = f"{CATALOG}.learning_a2"
+        TABLE = f"{SCHEMA}.nat_raw"
+        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
+        spark.sql(f"DROP TABLE IF EXISTS {TABLE}")
+    - kind: code
+      source: |
+        def add_audit_columns(df: DataFrame, ingestion_id: str, source_file: str, delivery_version: int) -> DataFrame:
+            """Add the four bronze audit columns."""
+            return df.withColumns({
+                "ingestion_id": F.lit(ingestion_id),
+                "source_file": F.lit(source_file),
+                "ingestion_timestamp": F.current_timestamp(),
+                "delivery_version": F.lit(delivery_version),
+            })
+
+
+        def ingest_rows(spark: SparkSession, rows: list[tuple[str, str]], table: str, source: str, version: int) -> int:
+            """Append a delivery given as rows. Stands in for a CSV read in this demo."""
+            raw = spark.createDataFrame(rows, "respondent_id STRING, final_weight STRING")
+            add_audit_columns(raw, str(uuid.uuid4()), source, version).write.format("delta").mode("append").saveAsTable(table)
+            metrics = DeltaTable.forName(spark, table).history(1).collect()[0]["operationMetrics"]
+            return int(metrics["numOutputRows"])
+    - kind: code
+      source: |
+        print(ingest_rows(spark, [("00123", "1.5"), ("00124", "")], TABLE, "w14_v1.csv", 1))
+        print(ingest_rows(spark, [("00123", "1.6"), ("00124", "0.9")], TABLE, "w14_v2.csv", 2))
+        display(spark.table(TABLE).orderBy("respondent_id", "delivery_version"))
+    - kind: markdown
+      source: "Both deliveries are there. The leading zeros survive, and the empty weight is kept for the contract check to report."

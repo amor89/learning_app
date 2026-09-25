@@ -1,0 +1,461 @@
+id: A6-L1
+title: Data contracts with severity levels and structured results
+
+concept: |
+  A **data contract** states what a delivery must look like before it may enter silver: row count range, mandatory columns, weight total, unique keys, allowed categories, expected distributions. Your reference project keeps each contract as versioned JSON, such as `nat_contract_v2.json`.
+
+  Every check produces a **structured result**, never a sentence:
+
+  ```python
+  CheckName = str
+  Status = Literal["PASS", "WARN", "FAIL", "SKIP"]
+  Severity = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+
+  @dataclass(frozen=True)
+  class CheckResult:
+      check_name: CheckName
+      status: Status
+      severity: Severity
+      expected: str
+      actual: str
+  ```
+
+  Records can be counted, stored in a Delta table, charted and compared across waves. A narrative such as "weights look a bit high" cannot.
+
+  **Severity decides what happens next.**
+
+  - A failed **CRITICAL** check stops the pipeline: raise an exception, so the job fails and silver stays untouched. Row count out of range, null keys, duplicate keys and a weight total outside limits are CRITICAL.
+  - A **WARN** logs the result and the run continues. Unexpected category values and distribution shifts are warnings: worth a look, not worth a missed report.
+
+  Evaluate every check first, store all the results, then decide. If you raise on the first failure, you learn about one problem per run.
+
+  Keep the contract in data and the logic in code. A new contract version changes JSON, not Python.
+
+  On Databricks, Lakeflow Spark Declarative Pipelines offer the same idea declaratively: `@dp.expect` records violations, `@dp.expect_or_drop` removes violating rows, and `@dp.expect_or_fail` stops the update. Use them when your pipeline runs in that framework. The contract pattern here works in any job.
+
+why_it_matters: |
+  A contract validator raises on the first failed check. A redelivery has a row count 2% below the minimum, so the run stops at check 1. The supplier fixes the count and resends. The next run stops at check 4, duplicate keys. The third run stops at check 6, a weight total outside the range. Three round trips with the supplier cost four days.
+
+  Evaluating every check, storing all results, and then raising once for all CRITICAL failures gives the supplier one complete list on the first day.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def validate(df, contract):
+          if df.count() < contract["row_count_min"]:
+              raise Exception("Too few rows")
+          if df.filter("respondent_id is null").count() > 0:
+              raise Exception("Null ids found")
+          if df.select("gender").distinct().count() > 4:
+              print("warning: odd genders")
+          return "ok"
+    annotations:
+      - find: 'raise Exception("Too few rows")'
+        note: "Stops at the first failure, with no numbers. Later checks never run."
+      - find: "raise Exception(\"Null ids found\")"
+        note: "A bare Exception with a sentence: nothing to store, count or compare."
+      - find: 'print("warning: odd genders")'
+        note: "A warning that goes to stdout and is lost."
+      - find: 'return "ok"'
+        note: "The caller learns nothing about which checks ran."
+  strong:
+    code: |
+      from dataclasses import dataclass
+      from typing import Literal
+
+      Status = Literal["PASS", "WARN", "FAIL", "SKIP"]
+      Severity = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+
+
+      @dataclass(frozen=True)
+      class CheckResult:
+          """One contract check outcome, ready to store in the QA results table."""
+
+          check_name: str
+          status: Status
+          severity: Severity
+          expected: str
+          actual: str
+
+
+      class ContractViolation(Exception):
+          """Raised when one or more CRITICAL checks fail."""
+
+
+      def critical_failures(results: list[CheckResult]) -> list[CheckResult]:
+          """Failed checks with CRITICAL severity."""
+          return [r for r in results if r.status == "FAIL" and r.severity == "CRITICAL"]
+
+
+      def enforce(results: list[CheckResult]) -> None:
+          """Raise once, listing every CRITICAL failure. WARN results pass through."""
+          failures = critical_failures(results)
+          if failures:
+              names = ", ".join(f"{r.check_name} (expected {r.expected}, got {r.actual})" for r in failures)
+              raise ContractViolation(f"{len(failures)} critical check(s) failed: {names}")
+    annotations:
+      - find: 'Status = Literal["PASS", "WARN", "FAIL", "SKIP"]'
+        note: "Typed statuses: a typo such as \"FAILED\" is a mypy error."
+      - find: "class CheckResult:"
+        note: "A record with expected and actual values, stored for every check, pass or fail."
+      - find: "class ContractViolation(Exception):"
+        note: "A specific exception type the orchestrator can catch, log and re-raise."
+      - find: "def enforce(results: list[CheckResult]) -> None:"
+        note: "Decides after every check has run, and reports all CRITICAL failures at once."
+  takeaway: |
+    Results are data, severity decides the action, and one run reports every problem.
+
+exercises:
+  - id: A6-L1-E1
+    type: design
+    difficulty: 1
+    prompt: |
+      Assign a severity to each contract check.
+    slots:
+      - id: keys
+        label: "Duplicate respondent_id values within a wave"
+        options: &sev
+          - {id: critical, text: "CRITICAL: stop the pipeline"}
+          - {id: warn, text: "WARN: log and continue"}
+        answer: critical
+      - id: weights
+        label: "Weight total outside the contracted range"
+        options: *sev
+        answer: critical
+      - id: category
+        label: "12 rows with an unexpected gender label"
+        options: *sev
+        answer: warn
+      - id: distribution
+        label: "Share of 16-34s at 19%, just below the expected 20-35%"
+        options: *sev
+        answer: warn
+    model_answer: |
+      - Duplicate keys break the silver grain and the MERGE: CRITICAL.
+      - A weight total out of range makes every weighted figure wrong: CRITICAL.
+      - A few unexpected labels are worth investigating but do not corrupt totals: WARN.
+      - A small distribution shift can be real change: WARN, reviewed by a person.
+    wrong_answers:
+      - answer: {keys: warn}
+        feedback: "Duplicate keys fail the MERGE or break the grain. Silver must not receive them."
+      - answer: {weights: warn}
+        feedback: "Every weighted estimate depends on the weight total. Publishing with wrong weights is worse than publishing late."
+      - answer: {category: critical}
+        feedback: "Twelve odd labels should not stop the whole wave. Log them and follow up with the supplier."
+    hints:
+      - "Would the problem corrupt totals or the grain?"
+      - "Or is it something a person should look at, with no immediate harm?"
+      - "Keys and weights are CRITICAL. Labels and small shifts are WARN."
+    explanation: |
+      CRITICAL is for problems that make published numbers wrong or break the table. WARN is for anomalies that need a human look.
+
+  - id: A6-L1-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A validator finds three problems in a delivery: a low row count (CRITICAL), null keys (CRITICAL) and odd labels (WARN). What should one run report?
+    options:
+      - {id: a, text: "Only the first CRITICAL failure, then stop."}
+      - {id: b, text: "All three results stored, then one exception naming both CRITICAL failures."}
+      - {id: c, text: "Nothing: warnings and failures are only printed."}
+      - {id: d, text: "All three results stored, and the run continues to silver."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Evaluate everything, record everything, then act on severity once."}
+      - {id: r2, text: "Exceptions should always be raised as early as possible."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Stopping at the first failure hides the second, and the supplier needs another round trip."
+      - answer: c
+        feedback: "Printed text is lost. Results must be records in a table."
+      - answer: d
+        feedback: "Two CRITICAL failures must stop the run before silver."
+      - answer: b|r2
+        feedback: "Right outcome, wrong reason. Here you deliberately raise late, after all checks have run, so one run reports everything."
+    hints:
+      - "How many round trips with the supplier do you want?"
+      - "Which failures must stop the run?"
+      - "Store all results, then raise once."
+    explanation: |
+      Run every check, store every result, then raise one exception listing all CRITICAL failures. The WARN is stored and reviewed.
+
+  - id: A6-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Type the result fields so mypy rejects any status or severity outside the allowed values.
+    template: |
+      Status = [[g1]]["PASS", "WARN", "FAIL", "SKIP"]
+
+
+      @dataclass([[g2]]=True)
+      class CheckResult:
+          check_name: str
+          status: Status
+    gaps:
+      g1: {accepted: [Literal]}
+      g2: {accepted: [frozen]}
+    wrong_answers:
+      - answer: {g1: Union}
+        feedback: "`Union` combines types, not values. A fixed set of strings is a `Literal`."
+      - answer: {g2: slots}
+        feedback: "`slots=True` saves memory but still allows changes. `frozen=True` makes a result immutable once recorded."
+    hints:
+      - "The typing construct for exact values."
+      - "The dataclass option that forbids changing fields after creation."
+      - "`Literal` and `frozen`."
+    explanation: |
+      `Literal[...]` lists the allowed strings. `frozen=True` means no code can change a result after the check records it.
+
+  - id: A6-L1-E4
+    type: write_function
+    difficulty: 4
+    language: python
+    prompt: |
+      Results arrive as dicts with keys `check_name`, `status`, `severity`, `expected`, `actual`. Write `enforce(results)`:
+
+      - Return the list of WARN results.
+      - Raise `ContractViolation` (define it, subclassing `Exception`) when any result has status `FAIL` and severity `CRITICAL`. The message must name every such check.
+      - A FAIL with a non-CRITICAL severity does not raise.
+    starter: |
+      class ContractViolation(Exception):
+          ...
+
+
+      def enforce(results: list[dict[str, str]]) -> list[dict[str, str]]:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: enforce
+          typed: true
+          docstring: true
+          message: "Give `enforce` type hints and a docstring."
+        - id: exception_class
+          kind: requires_pattern
+          pattern: "class\\s+ContractViolation\\s*\\(\\s*Exception\\s*\\)"
+          message: "Define `class ContractViolation(Exception)`."
+      tests:
+        - id: returns_warnings
+          code: |
+            rs = [
+                {"check_name": "rows", "status": "PASS", "severity": "CRITICAL", "expected": "1-2", "actual": "1"},
+                {"check_name": "gender", "status": "WARN", "severity": "MEDIUM", "expected": "4 labels", "actual": "5"},
+            ]
+            assert [r["check_name"] for r in enforce(rs)] == ["gender"]
+          message: "With no CRITICAL failure, return the WARN results."
+        - id: names_all
+          code: |
+            rs = [
+                {"check_name": "rows", "status": "FAIL", "severity": "CRITICAL", "expected": "1500-2500", "actual": "1470"},
+                {"check_name": "null_ids", "status": "FAIL", "severity": "CRITICAL", "expected": "0", "actual": "3"},
+            ]
+            try:
+                enforce(rs)
+            except ContractViolation as err:
+                assert "rows" in str(err) and "null_ids" in str(err)
+            else:
+                raise AssertionError("no ContractViolation")
+          message: "Raise ContractViolation naming every CRITICAL failure, not only the first."
+        - id: noncritical_fail
+          code: |
+            rs = [{"check_name": "dist", "status": "FAIL", "severity": "MEDIUM", "expected": "20-35%", "actual": "19%"}]
+            assert enforce(rs) == []
+          message: "A FAIL with MEDIUM severity must not raise."
+        - id: subclass
+          code: |
+            assert issubclass(ContractViolation, Exception) and ContractViolation is not Exception
+          message: "ContractViolation must be its own subclass of Exception."
+    solution: |
+      class ContractViolation(Exception):
+          """Raised when one or more CRITICAL checks fail."""
+
+
+      def enforce(results: list[dict[str, str]]) -> list[dict[str, str]]:
+          """Act on contract results.
+
+          Args:
+              results: Every check result for one delivery.
+
+          Returns:
+              The WARN results, for logging.
+
+          Raises:
+              ContractViolation: If any CRITICAL check failed. The message names each one.
+          """
+          critical = [r for r in results if r["status"] == "FAIL" and r["severity"] == "CRITICAL"]
+          if critical:
+              names = ", ".join(f"{r['check_name']} (expected {r['expected']}, got {r['actual']})" for r in critical)
+              raise ContractViolation(f"{len(critical)} critical check(s) failed: {names}")
+          return [r for r in results if r["status"] == "WARN"]
+    seeded_bugs:
+      - |
+        class ContractViolation(Exception):
+            """Critical failure."""
+
+
+        def enforce(results: list[dict[str, str]]) -> list[dict[str, str]]:
+            """Raises on the first CRITICAL failure only."""
+            for r in results:
+                if r["status"] == "FAIL" and r["severity"] == "CRITICAL":
+                    raise ContractViolation(r["check_name"])
+            return [r for r in results if r["status"] == "WARN"]
+      - |
+        class ContractViolation(Exception):
+            """Critical failure."""
+
+
+        def enforce(results: list[dict[str, str]]) -> list[dict[str, str]]:
+            """Raises on any FAIL."""
+            failed = [r for r in results if r["status"] == "FAIL"]
+            if failed:
+                raise ContractViolation(", ".join(r["check_name"] for r in failed))
+            return [r for r in results if r["status"] == "WARN"]
+    wrong_answers:
+      - answer: |
+          class ContractViolation(Exception):
+              """Critical failure."""
+
+
+          def enforce(results: list[dict[str, str]]) -> list[dict[str, str]]:
+              """Raises on the first CRITICAL failure only."""
+              for r in results:
+                  if r["status"] == "FAIL" and r["severity"] == "CRITICAL":
+                      raise ContractViolation(r["check_name"])
+              return [r for r in results if r["status"] == "WARN"]
+        triggers: names_all
+      - answer: |
+          class ContractViolation(Exception):
+              """Critical failure."""
+
+
+          def enforce(results: list[dict[str, str]]) -> list[dict[str, str]]:
+              """Raises on any FAIL."""
+              failed = [r for r in results if r["status"] == "FAIL"]
+              if failed:
+                  raise ContractViolation(", ".join(r["check_name"] for r in failed))
+              return [r for r in results if r["status"] == "WARN"]
+        triggers: noncritical_fail
+    hints:
+      - "Collect all CRITICAL failures into a list first."
+      - "Raise once, joining their names into the message."
+      - "Return the WARN results when nothing CRITICAL failed."
+    explanation: |
+      Collecting before raising means one run reports every CRITICAL failure. Filtering on both status and severity keeps a MEDIUM failure from stopping the pipeline.
+
+  - id: A6-L1-E5
+    type: spot_bug
+    difficulty: 5
+    language: python
+    prompt: |
+      This is the reference `ContractValidationResult.pass_rate`. It fails with a type error the first time it runs. Tap the line that causes it, then fix the imports.
+    code: |
+      from dataclasses import dataclass, field
+      from pyspark.sql.functions import col, sum
+
+
+      @dataclass
+      class ContractValidationResult:
+          checks: list = field(default_factory=list)
+
+          @property
+          def pass_rate(self) -> float:
+              passed = sum(1 for c in self.checks if c.status == "PASS")
+              return passed / len(self.checks) if self.checks else 0
+    bug_lines: [2]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_shadow
+          kind: forbids_import_from
+          module: pyspark.sql.functions
+          names: [sum, min, max, round, abs, filter]
+          message: "`sum` is still imported from pyspark.sql.functions, shadowing the built-in."
+        - id: functions_as_f
+          kind: requires_import
+          module: pyspark.sql
+          name: functions
+          alias: F
+          message: "Import the module as `F` for Spark functions: `from pyspark.sql import functions as F`."
+        - id: keeps_pass_rate
+          kind: requires_pattern
+          pattern: "passed\\s*=\\s*sum\\(1 for c in self\\.checks"
+          message: "Keep the built-in sum over the generator in pass_rate."
+    fix_solution: |
+      from dataclasses import dataclass, field
+      from pyspark.sql import functions as F
+
+
+      @dataclass
+      class ContractValidationResult:
+          checks: list = field(default_factory=list)
+
+          @property
+          def pass_rate(self) -> float:
+              passed = sum(1 for c in self.checks if c.status == "PASS")
+              return passed / len(self.checks) if self.checks else 0
+    wrong_answers:
+      - lines: [11]
+        feedback: "The generator and the built-in sum are correct. But which `sum` does this line call?"
+      - lines: [12]
+        feedback: "The empty-list guard is fine. The failure happens one line earlier, caused by an import."
+    hints:
+      - "Which `sum` does line 11 call?"
+      - "An import can replace a built-in name for the whole module."
+      - "Import `functions as F` instead of importing `sum` by name."
+    explanation: |
+      Line 2 imports Spark's `sum`, which replaces Python's built-in for the whole module. Line 11 then passes a generator to a Spark column function, which fails. Import the module as `F` and use `F.sum` where you need Spark's version. This is defect 2 in your reference README.
+
+  - id: A6-L1-E6
+    type: mcq
+    difficulty: 5
+    prompt: |
+      Your silver table is built with Lakeflow Spark Declarative Pipelines. Rows with a NULL `respondent_id` must never reach the table, but the update should keep going for valid rows. Which decorator fits?
+    options:
+      - {id: a, text: "`@dp.expect(\"valid_id\", \"respondent_id IS NOT NULL\")`"}
+      - {id: b, text: "`@dp.expect_or_drop(\"valid_id\", \"respondent_id IS NOT NULL\")`"}
+      - {id: c, text: "`@dp.expect_or_fail(\"valid_id\", \"respondent_id IS NOT NULL\")`"}
+      - {id: d, text: "No decorator: filter in the next notebook"}
+    answer: b
+    reasons:
+      - {id: r1, text: "expect_or_drop removes violating rows and records how many were dropped."}
+      - {id: r2, text: "expect_or_drop fails the update when any row violates."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "`expect` keeps violating rows and only records metrics. NULL keys would reach the table."
+      - answer: c
+        feedback: "`expect_or_fail` stops the whole update on the first violation. The requirement keeps valid rows flowing."
+      - answer: d
+        feedback: "A later filter lets bad rows land first, and loses the violation metrics."
+      - answer: b|r2
+        feedback: "Right decorator, wrong reason. Failing the update is expect_or_fail. expect_or_drop drops the rows and keeps going."
+    hints:
+      - "Three behaviours: keep, drop, fail."
+      - "The requirement says never reach the table, but keep going."
+      - "Drop."
+    explanation: |
+      `expect` keeps and records, `expect_or_drop` drops and records, `expect_or_fail` stops. Choose the one that matches the severity of the rule.
+
+recap:
+  - front: "What does a contract check produce?"
+    back: "A structured record: check_name, status, severity, expected, actual. Never a sentence."
+  - front: "CRITICAL versus WARN"
+    back: "CRITICAL failures stop the pipeline by raising. WARN results are logged and the run continues."
+  - front: "Why evaluate every check before raising?"
+    back: "One run reports every problem, so the supplier fixes everything in one round trip."
+  - front: "Lakeflow Declarative Pipelines expectations"
+    back: "@dp.expect keeps and records, @dp.expect_or_drop drops, @dp.expect_or_fail stops the update."
+
+claims:
+  - claim: "Importing sum from pyspark.sql.functions shadows the built-in, so sum over a generator fails."
+    status: verified
+    source: "Run on PySpark 4.0.4: PySparkTypeError [NOT_COLUMN_OR_STR] Argument `col` should be a Column or str, got generator."
+  - claim: "Lakeflow Spark Declarative Pipelines provide @dp.expect, @dp.expect_or_drop and @dp.expect_or_fail in pyspark.pipelines."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/ldp/developer/ldp-python-ref-expectations"

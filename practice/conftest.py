@@ -8,7 +8,9 @@ Needs Java 17 or 21 and the `spark` dependency group (pyspark 4.0.4, delta-spark
 from __future__ import annotations
 
 import importlib
+import os
 import shutil
+import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -30,6 +32,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 @pytest.fixture(scope="session")
 def spark() -> Iterator[SparkSession]:
     """One local Spark session with Delta, shared by every test."""
+    # Workers must use this interpreter, or pandas UDFs cannot import pandas.
+    os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     warehouse = Path(tempfile.mkdtemp(prefix="practice-warehouse-"))
     builder = (
         SparkSession.builder.master("local[2]")
@@ -41,6 +45,8 @@ def spark() -> Iterator[SparkSession]:
         .config("spark.sql.warehouse.dir", str(warehouse))
         .config("spark.sql.shuffle.partitions", "2")
         .config("spark.ui.enabled", "false")
+        # Databricks defaults saveAsTable to Delta; open-source Spark defaults to Parquet.
+        .config("spark.sql.sources.default", "delta")
     )
     session = configure_spark_with_delta_pip(builder).getOrCreate()
     yield session

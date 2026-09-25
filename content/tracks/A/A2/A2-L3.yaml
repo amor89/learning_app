@@ -1,0 +1,393 @@
+id: A2-L3
+title: "Gold: state the grain, group by all of it, guard every ratio"
+
+concept: |
+  Gold tables feed Power BI and clients. The contract has three parts.
+
+  **1. State the grain.** Write it in the function docstring and on the table. "One row per tracker x wave x age group x gender x region." Store it as a table comment or a custom table property:
+
+  ```sql
+  COMMENT ON TABLE research_gold.nat_metrics IS 'Grain: tracker x wave x age_group x gender x region';
+  ALTER TABLE research_gold.nat_metrics SET TBLPROPERTIES ('grain' = 'tracker x wave x age_group x gender x region');
+  ```
+
+  Avoid the property name `owner`. It is reserved, and Spark 4.0 rejects it with `UNSUPPORTED_FEATURE.SET_TABLE_PROPERTY`. Ownership is set with `ALTER TABLE ... OWNER TO`.
+
+  **2. Group by every grain column.** If the grain names `tracker_id`, the `groupBy` must include `tracker_id`. Miss one and two trackers' respondents fall into the same row. The numbers look plausible and are wrong.
+
+  **3. Make aggregates safe.**
+
+  - A `sum` over no matching rows returns NULL, not 0. `F.sum(F.when(F.col("reach_flag") == 1, 1))` gives NULL for a subgroup with no reach. Wrap it: `F.coalesce(F.sum(...), F.lit(0))`.
+  - Guard every ratio. `F.when(F.col("weighted_base") > 0, reach / base)` returns NULL for an empty base instead of an error or an infinite value.
+  - Keep the unweighted count next to every weighted figure. Analysts need it to judge whether a subgroup is too small to report.
+
+  Gold is also where you check totals against silver. The sum of `weighted_base` across all subgroups for a wave must equal the silver weight total for in-scope respondents. Lesson A6-L3 builds that check.
+
+why_it_matters: |
+  The reference `compute_gold_reach_metrics` promises "tracker x wave x subgroup grain" but groups by wave and subgroup only. When a second tracker starts writing to the same silver table, its respondents fold into the first tracker's rows. Weighted bases roughly double, and reach percentages blend two audiences. The dashboard shows smooth, believable figures for three weeks, until a client compares a subgroup against its published sample size.
+
+  Adding `tracker_id` to `groupBy`, and a test that checks the output has one row per grain key, prevents it.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      from pyspark.sql.functions import col, count, sum, when
+
+      def compute_gold_reach_metrics(silver_table, wave_id, weight_col="final_weight"):
+          """Compute reach metrics at tracker x wave x subgroup grain."""
+          silver = spark.table(silver_table).filter(col("wave_id") == wave_id)
+          return (
+              silver.filter(col("in_scope") == True)
+              .groupBy("wave_id", "age_group", "gender", "region")
+              .agg(
+                  count("*").alias("unweighted_n"),
+                  sum(weight_col).alias("weighted_base"),
+                  sum(when(col("reach_flag") == 1, col(weight_col))).alias("weighted_reach"),
+              )
+              .withColumn("weighted_reach_pct", col("weighted_reach") / col("weighted_base"))
+          )
+    annotations:
+      - find: "from pyspark.sql.functions import col, count, sum, when"
+        note: "Imports `sum` by name, shadowing the Python built-in (reference defect 3)."
+      - find: '.groupBy("wave_id", "age_group", "gender", "region")'
+        note: "The docstring promises tracker grain, but tracker_id is missing."
+      - find: 'sum(when(col("reach_flag") == 1, col(weight_col))).alias("weighted_reach")'
+        note: "NULL, not 0, for a subgroup where nobody is reached."
+      - find: 'col("weighted_reach") / col("weighted_base")'
+        note: "No guard on the base, and NULL reach gives a NULL percentage."
+  strong:
+    code: |
+      from pyspark.sql import DataFrame
+      from pyspark.sql import functions as F
+
+      GRAIN = ["tracker_id", "wave_id", "age_group", "gender", "region"]
+
+
+      def reach_metrics(df: DataFrame, weight_col: str = "final_weight") -> DataFrame:
+          """Weighted reach at tracker x wave x age_group x gender x region grain.
+
+          Args:
+              df: In-scope silver respondents with reach_flag and weights.
+              weight_col: Weight column to aggregate.
+
+          Returns:
+              One row per GRAIN key with unweighted_n, weighted_base, weighted_reach
+              and weighted_reach_pct (NULL when the base is 0).
+          """
+          reached = F.when(F.col("reach_flag") == 1, F.col(weight_col))
+          metrics = df.groupBy(*GRAIN).agg(
+              F.count("*").alias("unweighted_n"),
+              F.coalesce(F.sum(weight_col), F.lit(0.0)).alias("weighted_base"),
+              F.coalesce(F.sum(reached), F.lit(0.0)).alias("weighted_reach"),
+          )
+          return metrics.withColumn(
+              "weighted_reach_pct",
+              F.when(F.col("weighted_base") > 0, F.col("weighted_reach") / F.col("weighted_base")),
+          )
+    annotations:
+      - find: 'GRAIN = ["tracker_id", "wave_id", "age_group", "gender", "region"]'
+        note: "The grain is one constant, used by the groupBy and by the tests."
+      - find: "metrics = df.groupBy(*GRAIN).agg("
+        note: "Groups by every grain column, tracker included."
+      - find: 'F.coalesce(F.sum(reached), F.lit(0.0)).alias("weighted_reach"),'
+        note: "Zero, not NULL, when a subgroup has no reach."
+      - find: 'F.when(F.col("weighted_base") > 0,'
+        note: "NULL for an empty base, never an error or infinity."
+  takeaway: |
+    The strong version cannot merge two trackers, reports a true zero for zero reach, and never divides by nothing.
+
+exercises:
+  - id: A2-L3-E1
+    type: spot_bug
+    difficulty: 1
+    language: pyspark
+    prompt: |
+      The docstring states the grain. The code does not match it. Tap the line, then fix the function.
+    code: |
+      def base_by_subgroup(df: DataFrame) -> DataFrame:
+          """Weighted base at tracker x wave x region grain."""
+          return df.groupBy("wave_id", "region").agg(F.sum("final_weight").alias("weighted_base"))
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: has_tracker
+          kind: requires_pattern
+          pattern: "groupBy\\([^)]*[\"']tracker_id[\"']"
+          message: "Group by tracker_id as well. The grain names it."
+        - id: keeps_wave_region
+          kind: requires_pattern
+          pattern: "groupBy\\((?=[^)]*[\"']wave_id[\"'])(?=[^)]*[\"']region[\"'])"
+          message: "Keep wave_id and region in the groupBy."
+    fix_solution: |
+      def base_by_subgroup(df: DataFrame) -> DataFrame:
+          """Weighted base at tracker x wave x region grain."""
+          return df.groupBy("tracker_id", "wave_id", "region").agg(F.sum("final_weight").alias("weighted_base"))
+    spark_tests: |
+      rows = [("T1", "W1", "N", 1.0), ("T2", "W1", "N", 2.0)]
+      df = spark.createDataFrame(rows, "tracker_id STRING, wave_id STRING, region STRING, final_weight DOUBLE")
+      assert base_by_subgroup(df).count() == 2
+    wrong_answers:
+      - lines: [2]
+        feedback: "The docstring is the contract, and it is right. The code has to match it."
+    hints:
+      - "List the grain columns in the docstring."
+      - "Compare them with the groupBy."
+      - "tracker_id is missing."
+    explanation: |
+      The grain names three columns, and the `groupBy` has two. Without `tracker_id`, rows from different trackers fold into one.
+
+  - id: A2-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Region `S` has one respondent, and nobody in `S` is reached. What does this print?
+    code: |
+      df = spark.createDataFrame([("S", 0)], "region STRING, reach_flag INT")
+      out = df.groupBy("region").agg(F.sum(F.when(F.col("reach_flag") == 1, 1)).alias("reached"))
+      print(out.collect()[0]["reached"])
+    answer: "None"
+    wrong_answers:
+      - answer: "0"
+        feedback: "`F.when` without `otherwise` returns NULL for non-matching rows, and `sum` of only NULLs is NULL. Wrap it in `F.coalesce(..., F.lit(0))`."
+      - answer: "1"
+        feedback: "The `when` condition is false for the only row, so there is nothing to add."
+    hints:
+      - "What does `F.when(cond, 1)` return when `cond` is false?"
+      - "What is the sum of a column that holds only NULL?"
+      - "NULL prints as None in Python."
+    explanation: |
+      `F.when` without `otherwise` yields NULL for the unmatched row, and the sum of only NULLs is NULL. Power BI shows a blank instead of 0. Wrap the sum in `F.coalesce(..., F.lit(0))`.
+
+  - id: A2-L3-E3
+    type: fill_gap
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      Make reach a true zero when nobody is reached, and the percentage NULL when the base is zero.
+    template: |
+      F.[[g1]](F.sum(reached), F.lit(0.0)).alias("weighted_reach")
+      ...
+      F.[[g2]](F.col("weighted_base") > 0, F.col("weighted_reach") / F.col("weighted_base"))
+    gaps:
+      g1: {accepted: [coalesce]}
+      g2: {accepted: [when]}
+    wrong_answers:
+      - answer: {g1: ifnull}
+        feedback: "`ifnull` works in SQL, but the standard DataFrame function for this is `F.coalesce`, which takes any number of columns."
+      - answer: {g2: where}
+        feedback: "`where` filters rows. You want a conditional value per row: `F.when`."
+      - answer: {g1: nvl}
+        feedback: "`nvl` is a SQL function name. In the DataFrame API use `F.coalesce`."
+    hints:
+      - "The first function returns its first non-null argument."
+      - "The second returns a value only when a condition holds."
+      - "`coalesce` and `when`."
+    explanation: |
+      `F.coalesce(x, 0)` turns a NULL sum into 0. `F.when(base > 0, ratio)` returns NULL when the base is 0, because there is no `otherwise`.
+
+  - id: A2-L3-E4
+    type: write_function
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Write `reach_metrics(df, grain)`. It groups by every column in `grain` and returns `unweighted_n`, `weighted_base` (sum of `final_weight`, 0 when empty), `weighted_reach` (sum of `final_weight` where `reach_flag == 1`, 0 when none) and `weighted_reach_pct` (NULL when the base is 0).
+    starter: |
+      from pyspark.sql import DataFrame
+      from pyspark.sql import functions as F
+
+
+      def reach_metrics(df: DataFrame, grain: list[str]) -> DataFrame:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: reach_metrics
+          typed: true
+          docstring: true
+          message: "Define `reach_metrics` with type hints and a docstring that states the grain."
+        - id: functions_as_f
+          kind: requires_import
+          module: pyspark.sql
+          name: functions
+          alias: F
+          message: "Import the functions module as `F`."
+        - id: no_shadowing
+          kind: forbids_import_from
+          module: pyspark.sql.functions
+          names: [sum, min, max, round, abs, filter]
+          message: "Do not import `sum` by name. Use `F.sum`."
+        - id: group_by_grain
+          kind: requires_pattern
+          pattern: "groupBy\\(\\s*\\*grain\\s*\\)"
+          message: "Group by every grain column: `df.groupBy(*grain)`."
+        - id: coalesced
+          kind: requires_call
+          name: coalesce
+          min: 2
+          message: "Wrap both sums in `F.coalesce(..., F.lit(0.0))`, so an empty subgroup gives 0."
+        - id: guarded
+          kind: requires_pattern
+          pattern: "when\\(\\s*F\\.col\\(\\s*[\"']weighted_base[\"']\\s*\\)\\s*>\\s*0"
+          message: "Guard the ratio: `F.when(F.col(\"weighted_base\") > 0, ...)`."
+    solution: |
+      from pyspark.sql import DataFrame
+      from pyspark.sql import functions as F
+
+
+      def reach_metrics(df: DataFrame, grain: list[str]) -> DataFrame:
+          """Weighted reach, one row per grain key.
+
+          Args:
+              df: In-scope respondents with reach_flag and final_weight.
+              grain: Columns that define one output row.
+
+          Returns:
+              unweighted_n, weighted_base, weighted_reach and weighted_reach_pct per grain key.
+          """
+          reached = F.when(F.col("reach_flag") == 1, F.col("final_weight"))
+          metrics = df.groupBy(*grain).agg(
+              F.count("*").alias("unweighted_n"),
+              F.coalesce(F.sum("final_weight"), F.lit(0.0)).alias("weighted_base"),
+              F.coalesce(F.sum(reached), F.lit(0.0)).alias("weighted_reach"),
+          )
+          return metrics.withColumn(
+              "weighted_reach_pct",
+              F.when(F.col("weighted_base") > 0, F.col("weighted_reach") / F.col("weighted_base")),
+          )
+    spark_tests: |
+      rows = [("T1", "N", 1, 2.0), ("T1", "N", 0, 2.0), ("T1", "S", 0, 1.0), ("T2", "N", 1, 0.0)]
+      df = spark.createDataFrame(rows, "tracker_id STRING, region STRING, reach_flag INT, final_weight DOUBLE")
+      out = {(r.tracker_id, r.region): r for r in reach_metrics(df, ["tracker_id", "region"]).collect()}
+      assert len(out) == 3
+      assert out[("T1", "N")].weighted_reach_pct == 0.5
+      assert out[("T1", "S")].weighted_reach == 0.0
+      assert out[("T2", "N")].weighted_reach_pct is None
+    seeded_bugs:
+      - |
+        from pyspark.sql import DataFrame
+        from pyspark.sql import functions as F
+
+
+        def reach_metrics(df: DataFrame, grain: list[str]) -> DataFrame:
+            """No coalesce, no guard."""
+            reached = F.when(F.col("reach_flag") == 1, F.col("final_weight"))
+            metrics = df.groupBy(*grain).agg(
+                F.count("*").alias("unweighted_n"),
+                F.sum("final_weight").alias("weighted_base"),
+                F.sum(reached).alias("weighted_reach"),
+            )
+            return metrics.withColumn("weighted_reach_pct", F.col("weighted_reach") / F.col("weighted_base"))
+      - |
+        from pyspark.sql import DataFrame
+        from pyspark.sql import functions as F
+
+
+        def reach_metrics(df: DataFrame, grain: list[str]) -> DataFrame:
+            """Groups by the first grain column only."""
+            reached = F.when(F.col("reach_flag") == 1, F.col("final_weight"))
+            metrics = df.groupBy(grain[0]).agg(
+                F.count("*").alias("unweighted_n"),
+                F.coalesce(F.sum("final_weight"), F.lit(0.0)).alias("weighted_base"),
+                F.coalesce(F.sum(reached), F.lit(0.0)).alias("weighted_reach"),
+            )
+            return metrics.withColumn(
+                "weighted_reach_pct",
+                F.when(F.col("weighted_base") > 0, F.col("weighted_reach") / F.col("weighted_base")),
+            )
+    wrong_answers:
+      - answer: |
+          from pyspark.sql import DataFrame
+          from pyspark.sql import functions as F
+
+
+          def reach_metrics(df: DataFrame, grain: list[str]) -> DataFrame:
+              """No coalesce, no guard."""
+              reached = F.when(F.col("reach_flag") == 1, F.col("final_weight"))
+              metrics = df.groupBy(*grain).agg(
+                  F.count("*").alias("unweighted_n"),
+                  F.sum("final_weight").alias("weighted_base"),
+                  F.sum(reached).alias("weighted_reach"),
+              )
+              return metrics.withColumn("weighted_reach_pct", F.col("weighted_reach") / F.col("weighted_base"))
+        triggers: coalesced
+      - answer: |
+          from pyspark.sql import DataFrame
+          from pyspark.sql import functions as F
+
+
+          def reach_metrics(df: DataFrame, grain: list[str]) -> DataFrame:
+              """Groups by the first grain column only."""
+              reached = F.when(F.col("reach_flag") == 1, F.col("final_weight"))
+              metrics = df.groupBy(grain[0]).agg(
+                  F.count("*").alias("unweighted_n"),
+                  F.coalesce(F.sum("final_weight"), F.lit(0.0)).alias("weighted_base"),
+                  F.coalesce(F.sum(reached), F.lit(0.0)).alias("weighted_reach"),
+              )
+              return metrics.withColumn(
+                  "weighted_reach_pct",
+                  F.when(F.col("weighted_base") > 0, F.col("weighted_reach") / F.col("weighted_base")),
+              )
+        triggers: group_by_grain
+    hints:
+      - "Build the reached-weight expression with `F.when`, then aggregate with `groupBy(*grain)`."
+      - "Wrap each sum in `F.coalesce(..., F.lit(0.0))`."
+      - "Add the percentage with `F.when(F.col(\"weighted_base\") > 0, reach / base)`."
+    explanation: |
+      `groupBy(*grain)` takes the grain as data, so the same function serves every gold table. Coalesce turns empty sums into 0, and the guarded ratio returns NULL for an empty base.
+
+  - id: A2-L3-E5
+    type: mcq
+    difficulty: 5
+    prompt: |
+      You want the grain of `research_gold.nat_metrics` recorded on the table itself. Which statement fails on Spark 4.0?
+    options:
+      - {id: a, text: "`COMMENT ON TABLE research_gold.nat_metrics IS 'Grain: tracker x wave x region'`"}
+      - {id: b, text: "`ALTER TABLE research_gold.nat_metrics SET TBLPROPERTIES ('grain' = 'tracker x wave x region')`"}
+      - {id: c, text: "`ALTER TABLE research_gold.nat_metrics SET TBLPROPERTIES ('owner' = 'data.engineering@example.org')`"}
+      - {id: d, text: "`ALTER TABLE research_gold.nat_metrics SET TBLPROPERTIES ('layer' = 'gold')`"}
+    answer: c
+    reasons:
+      - {id: r1, text: "`owner` is a reserved table property, so Spark rejects setting it this way."}
+      - {id: r2, text: "Table properties cannot hold email addresses."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "COMMENT ON TABLE is valid and a good home for the grain."
+      - answer: b
+        feedback: "A custom property such as `grain` is valid. Tools can read it with SHOW TBLPROPERTIES."
+      - answer: d
+        feedback: "A custom property such as `layer` is valid."
+      - answer: c|r2
+        feedback: "Right statement, wrong reason. Property values can be any string. The key `owner` is reserved, and Spark raises UNSUPPORTED_FEATURE.SET_TABLE_PROPERTY."
+    hints:
+      - "Three of these are ordinary custom properties or comments."
+      - "One property key has a special meaning in Spark."
+      - "Ownership is set with ALTER TABLE ... OWNER TO."
+    explanation: |
+      Spark reserves `owner` and rejects it with `UNSUPPORTED_FEATURE.SET_TABLE_PROPERTY`. Your reference `unity_catalog.sql` sets it, so that script fails. Use `ALTER TABLE ... OWNER TO` for ownership, and a comment or custom property for the grain.
+
+recap:
+  - front: "Where do you record a gold table's grain?"
+    back: "In the function docstring and on the table: COMMENT ON TABLE or a custom property such as 'grain'."
+  - front: "sum over no matching rows"
+    back: "Returns NULL, not 0. Wrap it: F.coalesce(F.sum(...), F.lit(0))."
+  - front: "Safe ratio in PySpark"
+    back: "F.when(base > 0, part / base). NULL when the base is 0."
+  - front: "Why is SET TBLPROPERTIES ('owner' = ...) wrong?"
+    back: "owner is reserved. Spark 4.0 raises UNSUPPORTED_FEATURE.SET_TABLE_PROPERTY. Use ALTER TABLE ... OWNER TO."
+
+claims:
+  - claim: "sum(when(cond, 1)) over rows where cond is false returns NULL."
+    status: verified
+    source: "Run on PySpark 4.0.4 in this repository."
+  - claim: "'owner' is a reserved table property; Spark 4.0 raises UNSUPPORTED_FEATURE.SET_TABLE_PROPERTY."
+    status: verified
+    source: "Run on PySpark 4.0.4 with delta-spark 4.0.1 in this repository."
+  - claim: "COMMENT ON TABLE and custom TBLPROPERTIES work on Delta tables."
+    status: verified
+    source: "Run on delta-spark 4.0.1 in this repository."

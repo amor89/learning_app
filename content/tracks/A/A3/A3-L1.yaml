@@ -334,6 +334,13 @@ exercises:
               .filter(F.col("_rank") == 1)
               .drop("_rank")
           )
+    spark_tests: |
+      src = spark.createDataFrame(
+          [("R1", "W1", 1.0, 1), ("R1", "W1", 2.0, 2), ("R2", "W1", 3.0, 1)],
+          "respondent_id STRING, wave_id STRING, final_weight DOUBLE, delivery_version INT",
+      )
+      out = {(r.respondent_id, r.delivery_version) for r in latest_per_key(src, ["respondent_id", "wave_id"], "delivery_version").collect()}
+      assert out == {("R1", 2), ("R2", 1)}, out
     seeded_bugs:
       - |
         from pyspark.sql import DataFrame

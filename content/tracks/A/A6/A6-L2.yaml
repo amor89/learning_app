@@ -1,0 +1,329 @@
+id: A6-L2
+title: Statistical checks that survive empty, single-row and zero data
+
+concept: |
+  Statistical QA runs on every wave, including the strange ones: an empty delivery, a subgroup with one respondent, a metric that drops to exactly zero. A check that crashes on those cases fails exactly when you need it.
+
+  Know what Spark 4.0 returns at the edges (all tested on PySpark 4.0.4):
+
+  | Case | Result |
+  |---|---|
+  | `F.mean`, `F.stddev`, `percentile_approx` on an empty DataFrame | NULL |
+  | `F.stddev` on one row | NULL (it is the sample standard deviation) |
+  | `F.col("a") / F.col("b")` where b is 0, ANSI mode on | Error: `DIVIDE_BY_ZERO`, even for DOUBLE |
+  | `F.try_divide(a, b)` where b is 0 | NULL |
+  | Python `round(None, 4)` | `TypeError` |
+
+  So a weight-spread check built as `round(stats["stddev"] / stats["mean"], 4)` fails three ways: NULL mean on an empty wave, NULL stddev on one row, and `round(None)` in Python.
+
+  Four habits make checks robust:
+
+  1. **Compute the count with the statistics**, in the same `agg`, and decide early. Fewer than two rows: return a `SKIP` result that says why.
+  2. **Divide with `F.try_divide`** or guard with `F.when(denominator > 0, ...)`. Never a bare `/` on data you do not control.
+  3. **Test for None with `is None`** in Python. `if cv:` treats a real CV of 0.0 as missing, and `if current_pct and prior_pct:` skips a share that fell to 0.0 (reference defect 8).
+  4. **Return a result for every check**, including SKIP. A check that silently returns nothing looks exactly like a check that passed.
+
+why_it_matters: |
+  A new tracker's first wave has one respondent in a small region, because of a routing test. The weight-spread check computes the sample standard deviation for that region: NULL. Python then runs `round(None, 4)` and raises `TypeError`. The QA job fails, and because QA gates publication, the whole wave's reporting is delayed by a day while someone reads the stack trace.
+
+  With the count checked first, that region gets a SKIP result, "fewer than 2 respondents", and every other region is checked as normal.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      def check_weight_distribution(df, weight_col):
+          stats = df.agg(
+              F.mean(weight_col).alias("mean"),
+              F.stddev(weight_col).alias("stddev"),
+          ).collect()[0]
+          cv = stats["stddev"] / stats["mean"] if stats["mean"] else None
+          return {
+              "mean": round(stats["mean"], 4),
+              "cv": round(cv, 4) if cv else None,
+              "cv_warning": cv > 1.5 if cv else False,
+          }
+    annotations:
+      - find: 'cv = stats["stddev"] / stats["mean"] if stats["mean"] else None'
+        note: "stddev is NULL for one row, so None / mean raises TypeError."
+      - find: '"mean": round(stats["mean"], 4),'
+        note: "An empty frame gives mean None, and round(None) raises TypeError."
+      - find: '"cv_warning": cv > 1.5 if cv else False,'
+        note: "Truthiness: a missing CV reports no warning, as if the check had passed."
+  strong:
+    code: |
+      MIN_ROWS = 2
+      MAX_WEIGHT_CV = 1.5
+
+
+      def weight_spread(df: DataFrame, weight_col: str) -> dict[str, float | int | None]:
+          """Count, mean, stddev and CV of weights in one pass. CV is NULL when undefined."""
+          row = df.agg(
+              F.count(weight_col).alias("n"),
+              F.mean(weight_col).alias("mean"),
+              F.stddev(weight_col).alias("stddev"),
+              F.try_divide(F.stddev(weight_col), F.mean(weight_col)).alias("cv"),
+          ).collect()[0]
+          return row.asDict()
+
+
+      def check_weight_spread(stats: dict[str, float | int | None]) -> CheckResult:
+          """PASS, WARN, or SKIP with a reason. Never raises on edge cases."""
+          if stats["n"] < MIN_ROWS or stats["cv"] is None:
+              return CheckResult("weight_cv", "SKIP", "MEDIUM", f">= {MIN_ROWS} rows", f"n={stats['n']}")
+          status = "WARN" if stats["cv"] > MAX_WEIGHT_CV else "PASS"
+          return CheckResult("weight_cv", status, "MEDIUM", f"<= {MAX_WEIGHT_CV}", f"{stats['cv']:.4f}")
+    annotations:
+      - find: 'F.count(weight_col).alias("n"),'
+        note: "The count travels with the statistics, in the same pass."
+      - find: 'F.try_divide(F.stddev(weight_col), F.mean(weight_col)).alias("cv"),'
+        note: "CV computed in Spark. try_divide returns NULL for a zero or NULL mean instead of raising."
+      - find: 'if stats["n"] < MIN_ROWS or stats["cv"] is None:'
+        note: "Edge cases become an explicit SKIP with the reason, checked with `is None`."
+      - find: 'status = "WARN" if stats["cv"] > MAX_WEIGHT_CV else "PASS"'
+        note: "Only reached with a real number, so the comparison is safe."
+  takeaway: |
+    The strong version returns a result for every wave and every subgroup, and says why when a statistic is undefined.
+
+exercises:
+  - id: A6-L2-E1
+    type: predict_output
+    difficulty: 1
+    language: pyspark
+    prompt: |
+      A region has exactly one respondent. What does this print?
+    code: |
+      one = spark.createDataFrame([(1.2,)], "final_weight DOUBLE")
+      print(one.agg(F.stddev("final_weight")).collect()[0][0])
+    answer: "None"
+    wrong_answers:
+      - answer: "0.0"
+        feedback: "`F.stddev` is the sample standard deviation, which divides by n - 1. With one row that is undefined, so Spark returns NULL."
+      - answer: "1.2"
+        feedback: "That is the mean. The spread of a single value is undefined for the sample formula."
+    hints:
+      - "`F.stddev` is an alias for `stddev_samp`."
+      - "The sample formula divides by n - 1."
+      - "With n = 1 the result is NULL, printed as None."
+    explanation: |
+      `F.stddev` computes the sample standard deviation, dividing by n - 1. For one row that is undefined, so the result is NULL. Your checks must expect it.
+
+  - id: A6-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      On Spark 4.0 (Runtime 17.3 LTS), `F.col("weighted_reach") / F.col("weighted_base")` meets a row where `weighted_base` is `0.0`. What happens?
+    options:
+      - {id: a, text: "The result is Infinity."}
+      - {id: b, text: "The result is NULL."}
+      - {id: c, text: "The query fails with DIVIDE_BY_ZERO."}
+      - {id: d, text: "The result is 0.0."}
+    answer: c
+    reasons:
+      - {id: r1, text: "ANSI mode is on by default in Spark 4.0, and it raises on division by zero, DOUBLE included."}
+      - {id: r2, text: "Delta rejects infinite values."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Without ANSI mode some engines return Infinity for doubles. Spark 4.0 with ANSI on raises DIVIDE_BY_ZERO."
+      - answer: b
+        feedback: "NULL is what `F.try_divide` returns. The plain `/` raises under ANSI mode."
+      - answer: d
+        feedback: "No engine returns 0.0 for a division by zero. Spark 4.0 raises."
+      - answer: c|r2
+        feedback: "Right outcome, wrong reason. The error comes from the ANSI division, before anything is written."
+    hints:
+      - "Which mode is on by default in Spark 4.0?"
+      - "Does that mode tolerate division by zero?"
+      - "It raises, and the message suggests try_divide."
+    explanation: |
+      Under ANSI mode, division by zero raises `DIVIDE_BY_ZERO`, even for doubles. Use `F.try_divide(a, b)` or `F.when(b > 0, a / b)`.
+
+  - id: A6-L2-E3
+    type: fill_gap
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      Compute the coefficient of variation in Spark so that a zero or NULL mean gives NULL instead of an error.
+    template: |
+      cv = F.[[g1]](F.stddev("final_weight"), F.[[g2]]("final_weight"))
+    gaps:
+      g1: {accepted: [try_divide]}
+      g2: {accepted: [mean, avg]}
+    wrong_answers:
+      - answer: {g1: divide}
+        feedback: "There is no `F.divide`. The safe version is `F.try_divide`, which returns NULL for a zero divisor."
+      - answer: {g2: stddev}
+        feedback: "The CV divides the standard deviation by the mean."
+    hints:
+      - "The safe division function starts with try."
+      - "CV = standard deviation / mean."
+      - "`try_divide` and `mean`."
+    explanation: |
+      `F.try_divide(F.stddev(w), F.mean(w))` gives the CV, or NULL when the mean is 0 or NULL.
+
+  - id: A6-L2-E4
+    type: write_function
+    difficulty: 4
+    language: python
+    prompt: |
+      Write `check_weight_spread(stats, max_cv=1.5)`. `stats` is a dict with `n` (int), `cv` (float or None). Return a tuple `(status, reason)`:
+
+      - `("SKIP", "fewer than 2 rows")` when `n < 2`.
+      - `("SKIP", "cv undefined")` when `cv` is None.
+      - `("WARN", ...)` when `cv > max_cv`, otherwise `("PASS", ...)`. A CV of `0.0` is a real value and passes.
+    starter: |
+      def check_weight_spread(stats: dict[str, float | int | None], max_cv: float = 1.5) -> tuple[str, str]:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: check_weight_spread
+          typed: true
+          docstring: true
+          message: "Give `check_weight_spread` type hints and a docstring."
+        - id: no_truthiness
+          kind: forbids_bare_truthiness
+          names: [cv]
+          message: "Do not test `cv` for truth. A CV of 0.0 is real. Use `is None`."
+      tests:
+        - id: few_rows
+          code: |
+            assert check_weight_spread({"n": 1, "cv": None}) == ("SKIP", "fewer than 2 rows")
+          message: "n below 2 must return (\"SKIP\", \"fewer than 2 rows\")."
+        - id: undefined
+          code: |
+            assert check_weight_spread({"n": 10, "cv": None}) == ("SKIP", "cv undefined")
+          message: "A None CV with enough rows must return (\"SKIP\", \"cv undefined\")."
+        - id: zero_cv
+          code: |
+            assert check_weight_spread({"n": 10, "cv": 0.0})[0] == "PASS"
+          message: "A CV of 0.0 means all weights are equal. It is a real value and passes."
+        - id: warn
+          code: |
+            assert check_weight_spread({"n": 10, "cv": 2.0})[0] == "WARN"
+            assert check_weight_spread({"n": 10, "cv": 1.2}, max_cv=1.0)[0] == "WARN"
+          message: "Above max_cv must WARN. Use the max_cv argument, not a fixed number."
+    solution: |
+      def check_weight_spread(stats: dict[str, float | int | None], max_cv: float = 1.5) -> tuple[str, str]:
+          """Classify the weight coefficient of variation.
+
+          Args:
+              stats: n (row count) and cv (None when undefined).
+              max_cv: Largest CV that passes.
+
+          Returns:
+              (status, reason), where status is SKIP, WARN or PASS.
+          """
+          n = stats["n"]
+          cv = stats["cv"]
+          if n is None or n < 2:
+              return ("SKIP", "fewer than 2 rows")
+          if cv is None:
+              return ("SKIP", "cv undefined")
+          if cv > max_cv:
+              return ("WARN", f"cv {cv:.4f} above {max_cv}")
+          return ("PASS", f"cv {cv:.4f}")
+    seeded_bugs:
+      - |
+        def check_weight_spread(stats: dict[str, float | int | None], max_cv: float = 1.5) -> tuple[str, str]:
+            """Truthiness bug."""
+            cv = stats["cv"]
+            if stats["n"] < 2:
+                return ("SKIP", "fewer than 2 rows")
+            if not cv:
+                return ("SKIP", "cv undefined")
+            return ("WARN", "high") if cv > max_cv else ("PASS", "ok")
+      - |
+        def check_weight_spread(stats: dict[str, float | int | None], max_cv: float = 1.5) -> tuple[str, str]:
+            """Crashes on None."""
+            cv = stats["cv"]
+            if stats["n"] < 2:
+                return ("SKIP", "fewer than 2 rows")
+            return ("WARN", "high") if cv > max_cv else ("PASS", "ok")
+    wrong_answers:
+      - answer: |
+          def check_weight_spread(stats: dict[str, float | int | None], max_cv: float = 1.5) -> tuple[str, str]:
+              """Crashes on None."""
+              cv = stats["cv"]
+              if stats["n"] < 2:
+                  return ("SKIP", "fewer than 2 rows")
+              return ("WARN", "high") if cv > max_cv else ("PASS", "ok")
+        triggers: undefined
+    hints:
+      - "Check n first, then cv with `is None`."
+      - "Only compare cv with max_cv once you know it is a number."
+      - "Return the status and a short reason in a tuple."
+    explanation: |
+      Ordering the checks means the comparison only ever sees a real number. `is None` keeps a CV of 0.0 as a pass.
+
+  - id: A6-L2-E5
+    type: spot_bug
+    difficulty: 5
+    language: python
+    prompt: |
+      This is the reference wave-stability comparison. A share that dropped from 12% to 0% produced no result at all. Tap the line, then fix the function.
+    code: |
+      def compare_share(metric: str, current_pct: float | None, prior_pct: float | None, tolerance: float = 0.10) -> dict[str, object] | None:
+          """Return a stability result, or None when a share is missing."""
+          if current_pct and prior_pct:
+              change = abs(current_pct - prior_pct)
+              return {"metric": metric, "change_pp": round(change, 4), "status": "WARN" if change > tolerance else "PASS"}
+          return None
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_truthiness
+          kind: forbids_bare_truthiness
+          names: [current_pct, prior_pct]
+          message: "The shares are still tested for truth. 0.0 is falsy. Compare with `is not None`."
+      tests:
+        - id: zero_share
+          code: |
+            r = compare_share("reach", 0.0, 0.12)
+            assert r is not None and r["status"] == "WARN"
+          message: "A drop from 0.12 to 0.0 must return a WARN result."
+        - id: missing
+          code: |
+            assert compare_share("reach", None, 0.12) is None
+          message: "A missing share must still return None."
+        - id: stable
+          code: |
+            assert compare_share("reach", 0.40, 0.42)["status"] == "PASS"
+          message: "A small change must PASS."
+    fix_solution: |
+      def compare_share(metric: str, current_pct: float | None, prior_pct: float | None, tolerance: float = 0.10) -> dict[str, object] | None:
+          """Return a stability result, or None when a share is missing."""
+          if current_pct is not None and prior_pct is not None:
+              change = abs(current_pct - prior_pct)
+              return {"metric": metric, "change_pp": round(change, 4), "status": "WARN" if change > tolerance else "PASS"}
+          return None
+    wrong_answers:
+      - lines: [5]
+        feedback: "The rounding and status logic are fine once reached. The share of 0.0 never reaches them."
+      - lines: [4]
+        feedback: "The subtraction is correct. The problem is the condition guarding it."
+    hints:
+      - "What is `0.0 and 0.12` in Python?"
+      - "The block is skipped for a share of exactly zero."
+      - "Use `is not None` on both shares."
+    explanation: |
+      `0.0` is falsy, so the largest possible drop skipped the comparison. This is defect 8 in your reference README. Test for missing values with `is not None`.
+
+recap:
+  - front: "F.stddev on one row, and mean on an empty frame"
+    back: "Both NULL. stddev is the sample standard deviation."
+  - front: "Division by zero on Spark 4.0 with ANSI on"
+    back: "Raises DIVIDE_BY_ZERO, even for DOUBLE. Use F.try_divide or F.when(b > 0, a / b)."
+  - front: "What should a check return when a statistic is undefined?"
+    back: "An explicit SKIP result with the reason. Never nothing, and never a crash."
+  - front: "Why is `if cv:` wrong?"
+    back: "A real CV of 0.0 is falsy. Test missing values with `is None`."
+
+claims:
+  - claim: "On PySpark 4.0.4: stddev of one row and mean/stddev/percentile_approx of an empty frame are NULL; division by zero raises DIVIDE_BY_ZERO for DOUBLE under ANSI; try_divide returns NULL; Python round(None) raises TypeError."
+    status: verified
+    source: "Run in this repository."

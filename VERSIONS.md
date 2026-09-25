@@ -66,3 +66,36 @@ Every Track C lesson cites a row in this table. Microsoft Learn pages were block
 - `owner` is a reserved table property in Spark and fails in `SET TBLPROPERTIES`. Unverified. Affects `reference/pipelines/unity_catalog.sql` and A4.
 - MERGE fails with a multiple-source-rows error when two source rows match one target row. Verified locally by `practice/tests/test_a3_l1_merge.py` on delta-spark 4.0.1.
 - Spark 4.0 turns ANSI mode on by default, so an invalid `cast` raises an error instead of returning null. Unverified for DBR 17.3 LTS. Affects A2 and D3.
+
+## Track A facts
+
+Checked on 25 September 2026. "Local" means run on PySpark 4.0.4 with delta-spark 4.0.1 (script in `practice/`). "Search" means confirmed through search results quoting docs.databricks.com, which this build environment cannot open directly.
+
+| Fact | Status | Evidence |
+|---|---|---|
+| Spark 4.0 sets `spark.sql.ansi.enabled=true`. `cast('abc' as int)` raises `CAST_INVALID_INPUT`. `try_cast` returns NULL. | Verified | Local |
+| `spark.sql.autoBroadcastJoinThreshold` defaults to 10 MB (10485760 bytes). AQE is on by default. | Verified | Local |
+| Appending a DataFrame with an extra column to a Delta table fails with a schema mismatch. `mergeSchema=true` adds the column. A missing column is filled with NULL. A type clash fails with `DELTA_FAILED_TO_MERGE_FIELDS`. | Verified | Local |
+| `DESCRIBE HISTORY`, `versionAsOf`, `VERSION AS OF`, `RESTORE TABLE ... TO VERSION AS OF`, `OPTIMIZE ... ZORDER BY` work in Delta 4.0. | Verified | Local |
+| `VACUUM ... RETAIN 0 HOURS` fails the retention safety check. Default retention (`delta.deletedFileRetentionDuration`) is 7 days. | Verified (check); Search (7 days) | Local; docs.databricks.com/aws/en/delta/optimize |
+| `owner` is a reserved table property: `UNSUPPORTED_FEATURE.SET_TABLE_PROPERTY`. | Verified | Local |
+| CHECK constraints fail with `DELTA_VIOLATE_CONSTRAINT_WITH_VALUES`; NOT NULL with `DELTA_NOT_NULL_CONSTRAINT_VIOLATED`. | Verified | Local |
+| Change data feed: `delta.enableChangeDataFeed`, `readChangeFeed`, `startingVersion`, `table_changes()`, `_change_type` values `insert`, `update_preimage`, `update_postimage`, `delete`. | Verified | Local and search |
+| A Python UDF shows as `BatchEvalPython` in the physical plan. `F.broadcast` gives `BroadcastHashJoin`; with broadcast off, `SortMergeJoin`. | Verified | Local |
+| `row_number()` without ORDER BY in the window fails. | Verified | Local |
+| `F.col("b") == None` matches no rows. Join on NULL keys matches nothing; `eqNullSafe` matches. | Verified | Local |
+| `createDataFrame` from dicts fails with `CANNOT_DETERMINE_TYPE` when a column holds only None. | Verified | Local |
+| `withColumnRenamed` on a missing column is a silent no-op. | Verified | Local |
+| `pyspark.testing.assertDataFrameEqual` (with `checkRowOrder`, `rtol`, `atol`) and `assertSchemaEqual` exist. | Verified | Local |
+| Open-source Spark defaults `saveAsTable` to Parquet. Databricks defaults to Delta. The practice harness sets `spark.sql.sources.default=delta`. | Verified (OSS) | Local |
+| Serverless compute (and so Free Edition) does not support `cache()`, `persist()` or SQL `CACHE`. The Spark UI is replaced by the query profile. | Search | docs.databricks.com/aws/en/compute/serverless/limitations |
+| Row filters: SQL UDF returning BOOLEAN, applied with `ALTER TABLE ... SET ROW FILTER f ON (col)`. Column masks: `ALTER TABLE ... ALTER COLUMN c SET MASK f`. | Search | docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/manually-apply |
+| `is_account_group_member()` checks account-level groups, directly or indirectly. | Search | docs.databricks.com/aws/en/sql/language-manual/functions/is_account_group_member |
+| UC privileges `USE CATALOG`, `USE SCHEMA`, `SELECT`, `MODIFY`; grants on a schema inherit to current and future tables. | Search | docs.databricks.com/aws/en/data-governance/unity-catalog/manage-privileges/ |
+| Auto Loader: `cloudFiles.schemaLocation`, `_rescued_data`, `cloudFiles.schemaEvolutionMode` (for example `rescue`, `addNewColumns`), `trigger(availableNow=True)`. | Search | docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/schema |
+| Lakeflow Spark Declarative Pipelines expectations: `@dp.expect`, `@dp.expect_or_drop`, `@dp.expect_or_fail` from `pyspark.pipelines`. | Search | docs.databricks.com/aws/en/ldp/developer/ldp-python-ref-expectations |
+| Databricks Asset Bundles were renamed Declarative Automation Bundles on 16 March 2026. The `databricks bundle` CLI and `databricks.yml` are unchanged. | Search | docs.databricks.com/aws/en/release-notes/dev-tools/bundles |
+| Bundle variables resolve in order: `--var`, `BUNDLE_VAR_` environment variables, `variable-overrides.json`, target mappings, default. | Search | docs.databricks.com/aws/en/dev-tools/bundles/variables |
+| Job parameters read in notebooks with `dbutils.widgets.get`; dynamic value references such as `{{job.run_id}}` use double braces and are not expressions. | Search | docs.databricks.com/aws/en/jobs/parameter-use |
+| Git folders: one branch per developer under `/Workspace/Users/`; production Git folders updated only by automation. | Search | docs.databricks.com/aws/en/repos/ci-cd |
+| Liquid clustering `CLUSTER BY` / `CLUSTER BY AUTO` and predictive optimization for UC managed tables. | Search | docs.databricks.com/aws/en/tables/clustering |

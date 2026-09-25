@@ -1,0 +1,382 @@
+id: A1-L1
+title: Single-purpose functions and clear names
+
+concept: |
+  A function should do **one** of five jobs: read, transform, validate, write or log. A sixth kind, the **orchestrator**, calls the others in order and does nothing else.
+
+  Single-purpose functions pay off in three ways:
+
+  - **Tests.** A transform that takes a DataFrame and returns a DataFrame runs on a local SparkSession with three rows. A function that reads a table, transforms it and writes it needs a live catalog.
+  - **Reuse.** `filter_in_scope()` serves gold, QA and ad hoc analysis. A 200-line `process()` serves one notebook.
+  - **Change.** When the supplier renames a column, you edit one transform. Nothing else moves.
+
+  A useful test: describe the function in one sentence without "and". "Aggregate reach by wave and subgroup" passes. "Read silver and compute reach and write gold" fails three times.
+
+  Names carry the contract. Follow the standard from your reference project:
+
+  | Object | Convention | Example |
+  |---|---|---|
+  | Function | `verb_noun`, snake_case | `check_table_health` |
+  | Class | PascalCase noun | `CheckResult` |
+  | Constant | UPPER_SNAKE_CASE | `MAX_WEIGHT_CV` |
+  | Bronze table | `[tracker]_raw` | `nat_raw` |
+  | Silver table | `[tracker]_respondents` | `nat_respondents` |
+  | Gold table | `[tracker]_metrics` | `nat_metrics` |
+  | Job | `[tracker]_[layer]_pipeline` | `nat_silver_pipeline` |
+
+  A name must match what the function does. `get_` and `check_` promise no side effects. A `get_unprocessed_waves()` that also deletes rows breaks that promise, and the next reader calls it without knowing.
+
+why_it_matters: |
+  A gold notebook holds one 350-line cell: read silver, filter, weight, aggregate, write, log. A change request asks for a new subgroup. The developer edits the aggregation, and a variable named `df` later in the cell now points at the new frame. The write step saves the unfiltered data. Gold publishes reach figures that include out-of-scope respondents for two waves.
+
+  Nobody could test the cell without writing to production tables, so nobody tested it. With `filter_in_scope()` and `aggregate_reach()` as separate functions, a three-row unit test catches the mistake before the merge.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      def process(t, w):
+          df = spark.table(t).filter(F.col("wave_id") == w)
+          df = df.filter(F.col("in_scope") == True)
+          df = df.groupBy("wave_id", "region").agg(F.sum("final_weight").alias("weighted_base"))
+          df.write.mode("overwrite").saveAsTable("research_gold.nat_metrics")
+          print("done", df.count())
+    annotations:
+      - find: "def process(t, w):"
+        note: "The name says nothing, and `t` and `w` hide what the arguments are."
+      - find: 'F.col("in_scope") == True'
+        note: "`== True` trips ruff E712. Filter on the boolean column directly."
+      - find: 'saveAsTable("research_gold.nat_metrics")'
+        note: "The target table is hardcoded inside a function that also reads and transforms."
+      - find: 'print("done", df.count())'
+        note: "Logging by `print`, and a second full scan to count rows."
+  strong:
+    code: |
+      def read_wave(spark: SparkSession, table: str, wave_id: str) -> DataFrame:
+          """Read one wave from a silver table."""
+          return spark.table(table).filter(F.col("wave_id") == wave_id)
+
+
+      def filter_in_scope(df: DataFrame) -> DataFrame:
+          """Keep respondents flagged as in scope."""
+          return df.filter(F.col("in_scope"))
+
+
+      def aggregate_base(df: DataFrame) -> DataFrame:
+          """Weighted base at wave x region grain."""
+          return df.groupBy("wave_id", "region").agg(F.sum("final_weight").alias("weighted_base"))
+
+
+      def run_gold(spark: SparkSession, silver: str, gold: str, wave_id: str) -> None:
+          """Orchestrate: read, filter, aggregate, write."""
+          metrics = aggregate_base(filter_in_scope(read_wave(spark, silver, wave_id)))
+          metrics.write.mode("overwrite").option("replaceWhere", f"wave_id = '{wave_id}'").saveAsTable(gold)
+    annotations:
+      - find: "def read_wave("
+        note: "Read only. The session and the table name come in as parameters."
+      - find: "def filter_in_scope("
+        note: "A pure transform: DataFrame in, DataFrame out. Testable with three rows."
+      - find: 'return df.filter(F.col("in_scope"))'
+        note: "Boolean column used directly."
+      - find: "def run_gold("
+        note: "The orchestrator calls the steps in order and holds no logic of its own."
+      - find: 'option("replaceWhere"'
+        note: "Overwrite only this wave, so a rerun never wipes other waves."
+  takeaway: |
+    Each strong function passes the one-sentence test. The weak one needs "and" four times.
+
+exercises:
+  - id: A1-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You write a function that returns a list of `CheckResult` records for one table. Which name follows the standard?
+    options:
+      - {id: a, text: "`CheckTableHealth`"}
+      - {id: b, text: "`check_table_health`"}
+      - {id: c, text: "`checkTableHealth`"}
+      - {id: d, text: "`CHECK_TABLE_HEALTH`"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Functions use snake_case and start with a verb."}
+      - {id: r2, text: "Shorter names run faster."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "PascalCase marks a class, such as `CheckResult`. A function uses snake_case."
+      - answer: c
+        feedback: "camelCase is the Java and JavaScript convention. PEP 8 and your standard use snake_case for functions."
+      - answer: d
+        feedback: "UPPER_SNAKE_CASE marks a constant, such as `MAX_WEIGHT_CV`."
+      - answer: b|r2
+        feedback: "Right name, wrong reason. Name length has no effect on speed. The convention signals what kind of object it is."
+    hints:
+      - "Look at the naming table in the concept."
+      - "Classes and constants have their own styles."
+      - "Functions: lower case, words joined by underscores, verb first."
+    explanation: |
+      Functions use `verb_noun` in snake_case. PascalCase is for classes and UPPER_SNAKE_CASE for constants, so the style alone tells a reader what kind of object they are looking at.
+
+  - id: A1-L1-E2
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Fill in the object names for tracker `nat`, following the naming standard.
+    template: |
+      BRONZE_TABLE = "research_bronze.[[g1]]"
+      SILVER_TABLE = "research_silver.[[g2]]"
+      GOLD_TABLE = "research_gold.[[g3]]"
+      JOB_NAME = "[[g4]]"
+    gaps:
+      g1: {accepted: [nat_raw]}
+      g2: {accepted: [nat_respondents]}
+      g3: {accepted: [nat_metrics]}
+      g4: {accepted: [nat_silver_pipeline]}
+    wrong_answers:
+      - answer: {g1: nat_bronze}
+        feedback: "The layer is already in the schema name, `research_bronze`. The table name says what it holds: `nat_raw`."
+      - answer: {g4: silver_nat_pipeline}
+        feedback: "Jobs start with the tracker: `[tracker]_[layer]_pipeline`. Notebooks start with the layer."
+      - answer: {g2: nat_silver}
+        feedback: "Silver tables are named after their grain: one row per respondent, so `nat_respondents`."
+    hints:
+      - "Tables follow `[tracker]_[content]`."
+      - "Bronze holds raw deliveries, silver holds respondents, gold holds metrics."
+      - "The job pattern is `[tracker]_[layer]_pipeline`."
+    explanation: |
+      `nat_raw`, `nat_respondents` and `nat_metrics` name what each table holds. The schema carries the layer. Jobs use `nat_silver_pipeline`.
+
+  - id: A1-L1-E3
+    type: spot_bug
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      This function has a name that promises no side effects. One line breaks that promise. Tap it, then fix the function so it only returns the waves.
+    code: |
+      def get_unprocessed_waves(spark: SparkSession, bronze: str, silver: str, tracker_id: str) -> list[str]:
+          """Return wave ids in bronze but not yet in silver for one tracker."""
+          bronze_waves = spark.table(bronze).filter(F.col("tracker_id") == tracker_id).select("wave_id").distinct()
+          silver_waves = spark.table(silver).filter(F.col("tracker_id") == tracker_id).select("wave_id").distinct()
+          waves = [row.wave_id for row in bronze_waves.subtract(silver_waves).collect()]
+          spark.sql(f"DELETE FROM {silver} WHERE wave_id IN ({','.join(repr(w) for w in waves)})")
+          return waves
+    bug_lines: [6]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_sql
+          kind: forbids_call
+          name: sql
+          message: "The function still runs SQL. A `get_` function only reads and returns."
+        - id: no_delete
+          kind: forbids_pattern
+          pattern: "(?i)\\bDELETE\\b"
+          message: "Remove the DELETE. If silver needs cleaning, write a separate function with a name that says so."
+        - id: still_defined
+          kind: requires_function
+          name: get_unprocessed_waves
+          typed: true
+          docstring: true
+          message: "Keep `get_unprocessed_waves` with its type hints and docstring."
+        - id: returns_waves
+          kind: requires_pattern
+          pattern: "return waves"
+          message: "Return the list of waves."
+    fix_solution: |
+      def get_unprocessed_waves(spark: SparkSession, bronze: str, silver: str, tracker_id: str) -> list[str]:
+          """Return wave ids in bronze but not yet in silver for one tracker."""
+          bronze_waves = spark.table(bronze).filter(F.col("tracker_id") == tracker_id).select("wave_id").distinct()
+          silver_waves = spark.table(silver).filter(F.col("tracker_id") == tracker_id).select("wave_id").distinct()
+          waves = [row.wave_id for row in bronze_waves.subtract(silver_waves).collect()]
+          return waves
+    wrong_answers:
+      - lines: [5]
+        feedback: "`collect()` on a short list of wave ids is fine. Look for a line that changes data."
+      - lines: [4]
+        feedback: "Filtering silver by tracker is correct. It fixes a known defect in the reference code."
+    hints:
+      - "What does the word `get` promise the caller?"
+      - "Which line changes a table?"
+      - "Delete line 6. Deleting data belongs in its own, clearly named function."
+    explanation: |
+      Line 6 deletes rows from silver inside a function named `get_`. A caller who only wants the list of waves loses data. Remove the line. If you need that clean-up, give it its own function, such as `delete_waves()`, and call it from the orchestrator.
+
+  - id: A1-L1-E4
+    type: refactor
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Split the transform logic out of `process`. Write two pure functions:
+
+      - `filter_in_scope(df)` keeps rows where `in_scope` is true.
+      - `aggregate_base(df)` returns `wave_id`, `region` and `weighted_base` (sum of `final_weight`).
+
+      Neither function may read or write a table. Add type hints and docstrings.
+    starter: |
+      def process(t, w):
+          df = spark.table(t).filter(F.col("wave_id") == w)
+          df = df.filter(F.col("in_scope") == True)
+          df = df.groupBy("wave_id", "region").agg(F.sum("final_weight").alias("weighted_base"))
+          df.write.mode("overwrite").saveAsTable("research_gold.nat_metrics")
+    checker:
+      kind: python
+      ast_rules:
+        - id: filter_defined
+          kind: requires_function
+          name: filter_in_scope
+          typed: true
+          docstring: true
+          message: "Define `filter_in_scope(df: DataFrame) -> DataFrame` with a docstring."
+        - id: aggregate_defined
+          kind: requires_function
+          name: aggregate_base
+          typed: true
+          docstring: true
+          message: "Define `aggregate_base(df: DataFrame) -> DataFrame` with a docstring."
+        - id: no_read
+          kind: forbids_call
+          name: table
+          message: "A pure transform receives a DataFrame. Do not call `spark.table` inside it."
+        - id: no_write
+          kind: forbids_pattern
+          pattern: "\\.write\\b"
+          message: "A pure transform returns a DataFrame. Leave writing to the orchestrator."
+        - id: no_eq_true
+          kind: forbids_compare_to_bool
+          message: "Filter on `F.col(\"in_scope\")` directly. `== True` trips ruff E712."
+        - id: sums_weight
+          kind: requires_call
+          name: sum
+          message: "Aggregate with `F.sum(\"final_weight\")`."
+    solution: |
+      from pyspark.sql import DataFrame
+      from pyspark.sql import functions as F
+
+
+      def filter_in_scope(df: DataFrame) -> DataFrame:
+          """Keep respondents flagged as in scope."""
+          return df.filter(F.col("in_scope"))
+
+
+      def aggregate_base(df: DataFrame) -> DataFrame:
+          """Weighted base at wave x region grain."""
+          return df.groupBy("wave_id", "region").agg(F.sum("final_weight").alias("weighted_base"))
+    spark_tests: |
+      rows = [("W1", "N", True, 2.0), ("W1", "N", False, 5.0), ("W1", "S", True, 1.0)]
+      df = spark.createDataFrame(rows, "wave_id STRING, region STRING, in_scope BOOLEAN, final_weight DOUBLE")
+      out = {(r.region, r.weighted_base) for r in aggregate_base(filter_in_scope(df)).collect()}
+      assert out == {("N", 2.0), ("S", 1.0)}, out
+    seeded_bugs:
+      - |
+        def filter_in_scope(df: DataFrame) -> DataFrame:
+            """Keep in-scope rows."""
+            return df.filter(F.col("in_scope") == True)
+
+
+        def aggregate_base(df: DataFrame) -> DataFrame:
+            """Weighted base."""
+            return df.groupBy("wave_id", "region").agg(F.sum("final_weight").alias("weighted_base"))
+      - |
+        def filter_in_scope(df: DataFrame) -> DataFrame:
+            """Keep in-scope rows."""
+            return df.filter(F.col("in_scope"))
+
+
+        def aggregate_base(df: DataFrame) -> DataFrame:
+            """Weighted base, and write it."""
+            out = df.groupBy("wave_id", "region").agg(F.sum("final_weight").alias("weighted_base"))
+            out.write.mode("overwrite").saveAsTable("research_gold.nat_metrics")
+            return out
+    wrong_answers:
+      - answer: |
+          def filter_in_scope(df: DataFrame) -> DataFrame:
+              """Keep in-scope rows."""
+              return df.filter(F.col("in_scope") == True)
+
+
+          def aggregate_base(df: DataFrame) -> DataFrame:
+              """Weighted base."""
+              return df.groupBy("wave_id", "region").agg(F.sum("final_weight").alias("weighted_base"))
+        triggers: no_eq_true
+      - answer: |
+          def filter_in_scope(df: DataFrame) -> DataFrame:
+              """Keep in-scope rows."""
+              return df.filter(F.col("in_scope"))
+
+
+          def aggregate_base(df: DataFrame) -> DataFrame:
+              """Weighted base, and write it."""
+              out = df.groupBy("wave_id", "region").agg(F.sum("final_weight").alias("weighted_base"))
+              out.write.mode("overwrite").saveAsTable("research_gold.nat_metrics")
+              return out
+        triggers: no_write
+    hints:
+      - "Each function takes `df: DataFrame` and returns a DataFrame."
+      - "Move line 3 into `filter_in_scope` and line 4 into `aggregate_base`."
+      - "Drop `== True`, and leave `spark.table` and `.write` out of both functions."
+    explanation: |
+      Pure transforms take a DataFrame and return one. Reading and writing stay in the orchestrator, so the transforms run in a unit test with a handful of rows.
+
+  - id: A1-L1-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      You split a gold notebook into functions. Where does each piece of work belong?
+    slots:
+      - id: table_name
+        label: "The name of the gold table for tracker nat"
+        options: &places
+          - {id: config, text: "Config file"}
+          - {id: read, text: "Read function"}
+          - {id: transform, text: "Transform function"}
+          - {id: orchestrator, text: "Orchestrator"}
+        answer: config
+      - id: spark_table
+        label: "`spark.table(silver).filter(wave_id == ...)`"
+        options: *places
+        answer: read
+      - id: weights
+        label: "Summing weights by wave and region"
+        options: *places
+        answer: transform
+      - id: order
+        label: "Calling read, filter, aggregate and write in turn, then logging the run"
+        options: *places
+        answer: orchestrator
+    model_answer: |
+      - Table names are configuration. Load them once and pass them in.
+      - `spark.table(...)` is a read. It takes the session and the table name as parameters.
+      - Summing weights is a pure transform.
+      - The orchestrator calls each step and logs the run. It holds no business logic.
+    wrong_answers:
+      - answer: {table_name: orchestrator}
+        feedback: "A table name typed into the orchestrator is still hardcoded. Put it in config, so dev and prod runs point at different tables."
+      - answer: {weights: orchestrator}
+        feedback: "If the orchestrator holds the aggregation, you cannot test it without running the whole pipeline. Make it a transform."
+      - answer: {spark_table: transform}
+        feedback: "A transform receives a DataFrame. Reading a table needs a session and a catalog, which is the read function's job."
+    hints:
+      - "Values that change between environments are config."
+      - "Anything that touches the catalog is a read or a write."
+      - "The orchestrator only sequences the other functions."
+    explanation: |
+      Config holds names and thresholds. Reads touch the catalog. Transforms turn one DataFrame into another. The orchestrator calls them in order and logs the outcome.
+
+recap:
+  - front: "The five jobs a pipeline function does, one at a time"
+    back: "Read, transform, validate, write, log. An orchestrator calls them in order."
+  - front: "The one-sentence test"
+    back: "Describe the function without using \"and\". If you need \"and\", split it."
+  - front: "Function, class and constant naming"
+    back: "check_table_health, CheckResult, MAX_WEIGHT_CV."
+  - front: "What does a get_ or check_ prefix promise?"
+    back: "No side effects. The function reads and returns. It never writes or deletes."
+
+claims:
+  - claim: "ruff rule E712 flags comparisons to True or False."
+    status: verified
+    source: "Reference README lists it; ruff 0.16.9 flags `x == True` under E712 in this repository."
+  - claim: "replaceWhere overwrites only matching rows in a Delta table."
+    status: verified
+    source: "Run locally on delta-spark 4.0.1 (VERSIONS.md, Track A facts)."

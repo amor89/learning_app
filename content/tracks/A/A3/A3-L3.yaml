@@ -1,0 +1,260 @@
+id: A3-L3
+title: Time travel, RESTORE, OPTIMIZE and VACUUM
+
+concept: |
+  Every Delta write creates a new table **version**. The transaction log keeps the list, and you can read any version still on storage.
+
+  - `DESCRIBE HISTORY t` lists versions with the operation, user and metrics.
+  - `spark.read.option("versionAsOf", 12).table("t")` or `SELECT * FROM t VERSION AS OF 12` reads an old version. `timestampAsOf` and `TIMESTAMP AS OF` work by time.
+  - `RESTORE TABLE t TO VERSION AS OF 12` makes version 12 current again, as a new version. History is kept, so you can undo the restore.
+
+  Time travel is your first response to a bad write: compare the versions, restore, then fix the job.
+
+  Two maintenance commands keep tables fast and storage bounded.
+
+  **OPTIMIZE** compacts many small files into fewer large ones. Frequent small appends leave thousands of tiny files, and every query pays to open them. `OPTIMIZE t ZORDER BY (wave_id)` also co-locates rows by a column. On Unity Catalog managed tables, Databricks recommends liquid clustering (`CLUSTER BY`, or `CLUSTER BY AUTO`) with predictive optimization, which runs OPTIMIZE and VACUUM for you.
+
+  **VACUUM** deletes data files that no current version needs and that are older than the retention window. The window comes from `delta.deletedFileRetentionDuration`, which defaults to 7 days. Delta blocks `VACUUM t RETAIN 0 HOURS` with a safety check, because a running reader or writer might still need those files.
+
+  VACUUM limits time travel. After it runs, versions whose files it removed can no longer be read. The log itself keeps entries for `delta.logRetentionDuration`, 30 days by default. From Databricks Runtime 18.0, time travel beyond `deletedFileRetentionDuration` is blocked outright. If you need 30 days of recoverable history, set both properties to at least 30 days.
+
+why_it_matters: |
+  A developer runs a gold rebuild against the wrong wave filter and overwrites three weeks of metrics. The team wants to restore, but a clean-up job ran `VACUUM ... RETAIN 0 HOURS` nightly, with the retention check switched off "to save storage". The overwritten files are gone. Three weeks of gold are rebuilt from silver overnight, and two client extracts go out late.
+
+  With the default 7-day retention, `RESTORE TABLE research_gold.nat_metrics TO VERSION AS OF` the last good version takes seconds.
+
+worked_example:
+  language: sql
+  weak:
+    code: |
+      SET spark.databricks.delta.retentionDurationCheck.enabled = false;
+      VACUUM research_gold.nat_metrics RETAIN 0 HOURS;
+      -- gold was overwritten by mistake last night; rebuild everything
+      DROP TABLE research_gold.nat_metrics;
+    annotations:
+      - find: "SET spark.databricks.delta.retentionDurationCheck.enabled = false;"
+        note: "Switches off the safety check that exists to stop the next line."
+      - find: "VACUUM research_gold.nat_metrics RETAIN 0 HOURS;"
+        note: "Deletes every unreferenced file now. Time travel and RESTORE no longer work."
+      - find: "DROP TABLE research_gold.nat_metrics;"
+        note: "With history intact, a RESTORE takes seconds. Dropping and rebuilding takes hours."
+  strong:
+    code: |
+      -- 1. Find the last good version.
+      DESCRIBE HISTORY research_gold.nat_metrics;
+
+      -- 2. Compare before you act.
+      SELECT wave_id, SUM(weighted_base) AS base
+      FROM research_gold.nat_metrics VERSION AS OF 41
+      GROUP BY wave_id;
+
+      -- 3. Restore. This writes a new version, so it can be undone.
+      RESTORE TABLE research_gold.nat_metrics TO VERSION AS OF 41;
+
+      -- 4. Keep 30 days recoverable.
+      ALTER TABLE research_gold.nat_metrics SET TBLPROPERTIES (
+        'delta.deletedFileRetentionDuration' = 'interval 30 days',
+        'delta.logRetentionDuration' = 'interval 30 days'
+      );
+    annotations:
+      - find: "DESCRIBE HISTORY research_gold.nat_metrics;"
+        note: "Each version with its operation, user and metrics such as numOutputRows."
+      - find: "FROM research_gold.nat_metrics VERSION AS OF 41"
+        note: "Read the old version side by side with the current one before restoring."
+      - find: "RESTORE TABLE research_gold.nat_metrics TO VERSION AS OF 41;"
+        note: "Restore adds a version. The bad write stays in history for the post-mortem."
+      - find: "'delta.deletedFileRetentionDuration' = 'interval 30 days',"
+        note: "VACUUM keeps unreferenced files for 30 days, so 30 days of versions stay readable."
+  takeaway: |
+    History turns a data incident into a two-minute restore. Keep it long enough to be useful.
+
+exercises:
+  - id: A3-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A job overwrote gold with bad data one hour ago. VACUUM has not run since. What is the fastest safe recovery?
+    options:
+      - {id: a, text: "Drop the table and rebuild it from silver."}
+      - {id: b, text: "`RESTORE TABLE` to the version before the bad write."}
+      - {id: c, text: "Run `VACUUM` to remove the bad files."}
+      - {id: d, text: "Run `OPTIMIZE` to rewrite the table."}
+    answer: b
+    reasons:
+      - {id: r1, text: "The earlier version's files are still on storage, and RESTORE makes that version current again."}
+      - {id: r2, text: "RESTORE deletes the bad version from history."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "It works, but it takes hours. RESTORE takes seconds while the old files still exist."
+      - answer: c
+        feedback: "VACUUM deletes old files, which are the ones you need to recover. It makes things worse."
+      - answer: d
+        feedback: "OPTIMIZE compacts files in the current version. It does not change the data."
+      - answer: b|r2
+        feedback: "Right action, wrong reason. RESTORE writes a new version. The bad write stays in history."
+    hints:
+      - "The old version's files still exist."
+      - "Which command makes an old version current?"
+      - "RESTORE TABLE ... TO VERSION AS OF n."
+    explanation: |
+      RESTORE points the table back at the old version's files, as a new version. History is preserved, so you can inspect the bad write later.
+
+  - id: A3-L3-E2
+    type: fill_gap
+    difficulty: 2
+    language: sql
+    prompt: |
+      Read version 41 of the gold table, then make it current.
+    template: |
+      SELECT * FROM research_gold.nat_metrics [[g1]] 41;
+      [[g2]] TABLE research_gold.nat_metrics TO VERSION AS OF 41;
+    gaps:
+      g1: {accepted: ["VERSION AS OF"], case_sensitive: false}
+      g2: {accepted: [RESTORE], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: "AT VERSION"}
+        feedback: "The Delta syntax is `VERSION AS OF`."
+      - answer: {g2: ROLLBACK}
+        feedback: "ROLLBACK undoes a transaction. Delta's command to make an old version current is RESTORE."
+    hints:
+      - "The time travel clause has three words."
+      - "The same clause appears in the second statement."
+      - "`VERSION AS OF` and `RESTORE`."
+    explanation: |
+      `VERSION AS OF n` reads a past version. `RESTORE TABLE ... TO VERSION AS OF n` makes it current.
+
+  - id: A3-L3-E3
+    type: predict_output
+    difficulty: 3
+    language: sql
+    prompt: |
+      A new Delta table gets these statements in order. What version number does the RESTORE create?
+    code: |
+      CREATE TABLE t (id INT) USING DELTA;           -- version 0
+      INSERT INTO t VALUES (1);                      -- version 1
+      INSERT INTO t VALUES (2);                      -- version 2
+      DELETE FROM t WHERE id = 1;                    -- version 3
+      RESTORE TABLE t TO VERSION AS OF 1;            -- version ?
+    answer: "4"
+    wrong_answers:
+      - answer: "1"
+        feedback: "RESTORE does not rewind the version counter. It writes a new version whose content matches version 1."
+      - answer: "3"
+        feedback: "Version 3 is the DELETE. Every write, RESTORE included, adds a new version."
+    hints:
+      - "Does RESTORE delete history?"
+      - "Every commit adds one version."
+      - "The next version after 3."
+    explanation: |
+      RESTORE is a commit like any other, so it becomes version 4 with the contents of version 1. Versions 2 and 3 remain in history.
+
+  - id: A3-L3-E4
+    type: spot_bug
+    difficulty: 4
+    language: sql
+    prompt: |
+      A nightly maintenance script. After an incident, the team cannot time travel even one day back. Tap the line that causes it, then fix the script.
+    code: |
+      OPTIMIZE research_silver.nat_respondents ZORDER BY (wave_id);
+      SET spark.databricks.delta.retentionDurationCheck.enabled = false;
+      VACUUM research_silver.nat_respondents RETAIN 0 HOURS;
+      ANALYZE TABLE research_silver.nat_respondents COMPUTE STATISTICS;
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: no_zero_retain
+          type: forbidden
+          pattern: "RETAIN\\s+0\\s+HOURS"
+          message: "RETAIN 0 HOURS deletes the files that time travel needs. Use the default retention."
+        - id: no_check_off
+          type: forbidden
+          pattern: "retentionDurationCheck\\.enabled\\s*=\\s*false"
+          message: "Leave the retention safety check on."
+        - id: still_vacuums
+          type: required
+          pattern: "VACUUM\\s+research_silver\\.nat_respondents"
+          message: "Keep a VACUUM: without it, storage grows forever."
+    fix_solution: |
+      OPTIMIZE research_silver.nat_respondents ZORDER BY (wave_id);
+      VACUUM research_silver.nat_respondents;
+      ANALYZE TABLE research_silver.nat_respondents COMPUTE STATISTICS;
+    wrong_answers:
+      - lines: [1]
+        feedback: "OPTIMIZE compacts files and keeps history. It does not block time travel."
+      - lines: [2]
+        feedback: "Line 2 disables the guard, which is bad, but on its own it deletes nothing. The line that removes the files is the problem."
+    hints:
+      - "Which command deletes files?"
+      - "What retention does it use?"
+      - "Line 3. Run VACUUM with the default 7-day retention and drop line 2."
+    explanation: |
+      `RETAIN 0 HOURS` deletes every file no longer in the current version, so no earlier version is readable. Line 2 disables the check that would have blocked it. Run VACUUM with default retention, or set the retention properties to the window you need.
+
+  - id: A3-L3-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      The data governance policy says: "Any silver or gold change must be recoverable for 30 days." Choose the setting for each item.
+    slots:
+      - id: deleted
+        label: "delta.deletedFileRetentionDuration"
+        options: &retention
+          - {id: d7, text: "interval 7 days (default)"}
+          - {id: d30, text: "interval 30 days"}
+          - {id: h0, text: "interval 0 hours"}
+        answer: d30
+      - id: log
+        label: "delta.logRetentionDuration"
+        options: *retention
+        answer: d30
+      - id: vacuum
+        label: "Nightly VACUUM command"
+        options:
+          - {id: default, text: "VACUUM t"}
+          - {id: zero, text: "VACUUM t RETAIN 0 HOURS"}
+          - {id: none, text: "Never run VACUUM"}
+        answer: default
+    model_answer: |
+      - Set both retention properties to 30 days. From Databricks Runtime 18.0, the log retention must be at least the deleted-file retention.
+      - Keep running a plain `VACUUM t`. It respects the 30-day property and stops storage growing without limit.
+    wrong_answers:
+      - answer: {deleted: d7}
+        feedback: "With 7 days, VACUUM removes files after a week, so versions older than 7 days are unreadable. The policy needs 30."
+      - answer: {vacuum: none}
+        feedback: "Without VACUUM, storage grows with every write. Keep it, and let the retention property protect 30 days."
+      - answer: {vacuum: zero}
+        feedback: "RETAIN 0 HOURS overrides the property and deletes history immediately."
+      - answer: {log: d7}
+        feedback: "The log must keep entries at least as long as the data files, or the versions cannot be reconstructed."
+    hints:
+      - "Which property decides how long VACUUM keeps old files?"
+      - "The log must cover the same window."
+      - "VACUUM still runs, with default arguments."
+    explanation: |
+      Both retention properties at 30 days keep every version from the last month readable. A plain VACUUM then cleans up only what is older.
+
+recap:
+  - front: "Read an old Delta version"
+    back: "VERSION AS OF n or TIMESTAMP AS OF ts in SQL; option versionAsOf in PySpark."
+  - front: "What does RESTORE do to history?"
+    back: "Adds a new version with the old content. Nothing is deleted."
+  - front: "Default retention windows"
+    back: "Deleted files 7 days (delta.deletedFileRetentionDuration). Log 30 days (delta.logRetentionDuration)."
+  - front: "Why is VACUUM ... RETAIN 0 HOURS dangerous?"
+    back: "It deletes the files that time travel and RESTORE need, and it breaks readers still using them."
+  - front: "Databricks' recommendation for layout and maintenance on UC managed tables"
+    back: "Liquid clustering (CLUSTER BY or CLUSTER BY AUTO) with predictive optimization."
+
+claims:
+  - claim: "DESCRIBE HISTORY, VERSION AS OF, versionAsOf, RESTORE TABLE and OPTIMIZE ... ZORDER BY work; RESTORE creates a new version; VACUUM RETAIN 0 HOURS fails the safety check."
+    status: verified
+    source: "Run on delta-spark 4.0.1 in this repository."
+  - claim: "deletedFileRetentionDuration defaults to 7 days and logRetentionDuration to 30 days; from Databricks Runtime 18.0 time travel beyond deletedFileRetentionDuration is blocked."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/delta/vacuum and https://docs.databricks.com/aws/en/tables/history"
+  - claim: "Databricks recommends liquid clustering and predictive optimization for Unity Catalog managed tables."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/tables/clustering"

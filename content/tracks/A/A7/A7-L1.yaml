@@ -1,0 +1,395 @@
+id: A7-L1
+title: Structured logging with the logging module, not print
+
+concept: |
+  `print` writes text to standard output, with no level, no source and no context. In a scheduled job, that text lands in a driver log that nobody searches until something breaks.
+
+  Python's standard `logging` module fixes all three problems.
+
+  **One logger per module.** `log = logging.getLogger(__name__)` names the logger after the module, such as `pipelines.silver`. Every line then says where it came from.
+
+  **Levels.** `DEBUG` for detail while developing, `INFO` for normal milestones, `WARNING` for something odd that did not stop the run, `ERROR` for a failure, `CRITICAL` for a failure that stops everything. Loggers pass `WARNING` and above by default, so `log.info(...)` prints nothing until you configure a level.
+
+  **Context on every line.** Include the identifiers you will search for later: `run_id`, `tracker_id`, `wave_id`, `layer`. A `LoggerAdapter` attaches them once, and a format string prints them:
+
+  ```python
+  base = logging.getLogger(__name__)
+  log = logging.LoggerAdapter(base, {"run_id": run_id, "wave_id": wave_id})
+  log.info("merged rows=%d", n)
+  # INFO pipelines.silver run_id=7f3c wave_id=W14 merged rows=1832
+  ```
+
+  Three more rules:
+
+  - Pass values as arguments, `log.info("rows=%d", n)`, not pre-built f-strings. The logger formats them only when the line is actually emitted.
+  - Inside `except`, call `log.exception("...")`. It logs at ERROR and appends the full traceback.
+  - Configure handlers and formats once, in the entry point, never inside library functions.
+
+  Logs are for people reading one run. Metrics you want to compare across runs, such as row counts and statuses, also go to the run log table (lesson A7-L2).
+
+why_it_matters: |
+  A silver job prints "done" at the end of each step. One night it finishes "successfully" with zero rows merged, because an upstream filter used the wrong wave ID. The driver log for that run holds 400 lines of "done" and Spark noise, with no wave ID and no row counts.
+
+  With `log.info("merged rows=%d", n)` and the wave ID on every line, the zero is visible in one search, and a WARNING for an empty merge would have flagged it at 02:00.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def merge_wave(df, wave_id):
+          print("starting")
+          try:
+              n = do_merge(df)
+              print(f"done {n}")
+          except Exception as e:
+              print("error:", e)
+    annotations:
+      - find: 'print("starting")'
+        note: "No level, no module, no wave ID: unsearchable."
+      - find: 'print(f"done {n}")'
+        note: "A count with no label. Zero rows looks the same as a normal run."
+      - find: 'print("error:", e)'
+        note: "Swallows the exception and loses the traceback. The job reports success."
+  strong:
+    code: |
+      import logging
+
+      logger = logging.getLogger(__name__)
+
+
+      def merge_wave(df: DataFrame, run_id: str, wave_id: str) -> int:
+          """MERGE one wave, logging with run and wave context. Re-raises on failure."""
+          log = logging.LoggerAdapter(logger, {"run_id": run_id, "wave_id": wave_id})
+          log.info("merge started")
+          try:
+              rows = do_merge(df)
+          except Exception:
+              log.exception("merge failed")
+              raise
+          if rows == 0:
+              log.warning("merge wrote 0 rows")
+          else:
+              log.info("merge finished rows=%d", rows)
+          return rows
+    annotations:
+      - find: "logger = logging.getLogger(__name__)"
+        note: "One logger per module, named after it."
+      - find: 'log = logging.LoggerAdapter(logger, {"run_id": run_id, "wave_id": wave_id})'
+        note: "Context attached once, printed on every line by the entry point's format."
+      - find: 'log.exception("merge failed")'
+        note: "ERROR level plus the full traceback."
+      - find: "        raise"
+        note: "Re-raise, so the job fails and alerts fire."
+      - find: 'log.warning("merge wrote 0 rows")'
+        note: "A suspicious result gets its own level, not a buried number."
+  takeaway: |
+    Every line says what, where, which run and which wave. Failures keep their traceback and still fail the job.
+
+exercises:
+  - id: A7-L1-E1
+    type: predict_output
+    difficulty: 1
+    language: python
+    prompt: |
+      No logging configuration has run. What appears in the output?
+    code: |
+      import logging
+
+      log = logging.getLogger("silver")
+      log.info("loaded")
+      log.warning("3 unexpected labels")
+    answer: "3 unexpected labels"
+    wrong_answers:
+      - answer: |
+          loaded
+          3 unexpected labels
+        feedback: "Without configuration, loggers pass WARNING and above. The INFO line is dropped."
+      - answer: "WARNING:silver:3 unexpected labels"
+        feedback: "That format comes from `logging.basicConfig()`. Without it, Python's last-resort handler prints the message only."
+    hints:
+      - "What is the default level threshold?"
+      - "Is INFO above or below WARNING?"
+      - "Only the warning appears, as the bare message."
+    explanation: |
+      With no configuration, the effective level is WARNING and Python's last-resort handler prints just the message. Configure a level and format in the entry point to see INFO lines with context.
+
+  - id: A7-L1-E2
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Create a module logger, then log the failure with its traceback and re-raise.
+    template: |
+      logger = logging.getLogger([[g1]])
+
+      try:
+          rows = do_merge(df)
+      except Exception:
+          logger.[[g2]]("merge failed")
+          [[g3]]
+    gaps:
+      g1: {accepted: [__name__]}
+      g2: {accepted: [exception]}
+      g3: {accepted: [raise]}
+    wrong_answers:
+      - answer: {g1: '"root"'}
+        feedback: "A hardcoded name loses the module path. `__name__` names the logger after the module automatically."
+      - answer: {g2: error}
+        feedback: "`error` logs at ERROR but without the traceback, unless you add exc_info=True. `exception` includes it."
+      - answer: {g3: pass}
+        feedback: "`pass` swallows the failure, so the job reports success. Re-raise with a bare `raise`."
+    hints:
+      - "The module's own name is a built-in variable."
+      - "One logger method adds the traceback automatically."
+      - "A bare statement re-raises the current exception."
+    explanation: |
+      `getLogger(__name__)` names the logger after the module. `logger.exception` logs at ERROR with the traceback. A bare `raise` keeps the original exception and fails the job.
+
+  - id: A7-L1-E3
+    type: spot_bug
+    difficulty: 3
+    language: python
+    prompt: |
+      This job failed at the MERGE last night, yet the scheduler marked it as succeeded and nobody was alerted. Tap the line, then fix the function.
+    code: |
+      def merge_wave(df, run_id: str, wave_id: str) -> int:
+          """MERGE one wave. Logs failures."""
+          log = logging.LoggerAdapter(logger, {"run_id": run_id, "wave_id": wave_id})
+          try:
+              return do_merge(df)
+          except Exception:
+              log.exception("merge failed")
+              return 0
+    bug_lines: [8]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: reraises
+          kind: requires_pattern
+          pattern: "log\\.exception\\([^)]*\\)\\s*\\n\\s*raise\\b"
+          message: "After logging, re-raise with a bare `raise` so the job fails."
+        - id: no_return_zero
+          kind: forbids_pattern
+          pattern: "return 0"
+          message: "Returning 0 hides the failure as an empty merge."
+      tests:
+        - id: behaviour
+          code: |
+            import logging
+            logger = logging.getLogger("t")
+            def do_merge(df):
+                raise RuntimeError("boom")
+            try:
+                merge_wave(None, "r", "W1")
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("failure swallowed")
+          message: "The function must re-raise the original exception."
+    fix_solution: |
+      def merge_wave(df, run_id: str, wave_id: str) -> int:
+          """MERGE one wave. Logs failures."""
+          log = logging.LoggerAdapter(logger, {"run_id": run_id, "wave_id": wave_id})
+          try:
+              return do_merge(df)
+          except Exception:
+              log.exception("merge failed")
+              raise
+    wrong_answers:
+      - lines: [7]
+        feedback: "Logging the exception with its traceback is right. The problem is what happens next."
+      - lines: [5]
+        feedback: "The MERGE call is fine. Look at how its failure is handled."
+    hints:
+      - "What does the scheduler see when the function returns normally?"
+      - "Returning 0 looks like an empty but successful merge."
+      - "Replace `return 0` with `raise`."
+    explanation: |
+      Returning 0 converts a failure into an apparently successful empty run. Log it, then `raise`, so the job fails and failure notifications fire.
+
+  - id: A7-L1-E4
+    type: write_function
+    difficulty: 4
+    language: python
+    prompt: |
+      Write `wave_logger(run_id, wave_id)` that returns a `logging.LoggerAdapter` around the module logger `logging.getLogger("pipelines.silver")`, carrying `run_id` and `wave_id`. Then write `log_merge_result(log, rows)`: log at WARNING `"merge wrote 0 rows"` when rows is 0, otherwise at INFO `"merge finished rows=%d"` with the count passed as an argument.
+    starter: |
+      import logging
+
+
+      def wave_logger(run_id: str, wave_id: str) -> logging.LoggerAdapter:
+          ...
+
+
+      def log_merge_result(log: logging.LoggerAdapter, rows: int) -> None:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: logger_typed
+          kind: requires_function
+          name: wave_logger
+          typed: true
+          docstring: true
+          message: "Give `wave_logger` type hints and a docstring."
+        - id: result_typed
+          kind: requires_function
+          name: log_merge_result
+          typed: true
+          docstring: true
+          message: "Give `log_merge_result` type hints and a docstring."
+        - id: no_print
+          kind: forbids_call
+          name: print
+          message: "No print. Use the logger."
+        - id: lazy_args
+          kind: forbids_pattern
+          pattern: "\\.(info|warning)\\(\\s*f[\"']"
+          message: "Pass values as arguments, `log.info(\"rows=%d\", rows)`, not as an f-string."
+      setup: |
+        import io
+        import logging
+        _stream = io.StringIO()
+        _handler = logging.StreamHandler(_stream)
+        _handler.setFormatter(logging.Formatter("%(levelname)s run_id=%(run_id)s wave_id=%(wave_id)s %(message)s"))
+        _base = logging.getLogger("pipelines.silver")
+        _base.handlers = [_handler]
+        _base.setLevel(logging.INFO)
+        _base.propagate = False
+      tests:
+        - id: context
+          code: |
+            log = wave_logger("r1", "W14")
+            log_merge_result(log, 5)
+            assert "INFO run_id=r1 wave_id=W14 merge finished rows=5" in _stream.getvalue(), _stream.getvalue()
+          message: "The INFO line must carry run_id and wave_id and read `merge finished rows=5`."
+        - id: zero_warns
+          code: |
+            log = wave_logger("r2", "W15")
+            log_merge_result(log, 0)
+            assert "WARNING run_id=r2 wave_id=W15 merge wrote 0 rows" in _stream.getvalue(), _stream.getvalue()
+          message: "Zero rows must log at WARNING: `merge wrote 0 rows`."
+        - id: named_logger
+          code: |
+            assert wave_logger("r", "w").logger.name == "pipelines.silver"
+          message: "Wrap the logger named `pipelines.silver`."
+    solution: |
+      import logging
+
+
+      def wave_logger(run_id: str, wave_id: str) -> logging.LoggerAdapter:
+          """Module logger with run and wave context on every line."""
+          return logging.LoggerAdapter(logging.getLogger("pipelines.silver"), {"run_id": run_id, "wave_id": wave_id})
+
+
+      def log_merge_result(log: logging.LoggerAdapter, rows: int) -> None:
+          """INFO for a normal merge, WARNING for an empty one."""
+          if rows == 0:
+              log.warning("merge wrote 0 rows")
+          else:
+              log.info("merge finished rows=%d", rows)
+    seeded_bugs:
+      - |
+        import logging
+
+
+        def wave_logger(run_id: str, wave_id: str) -> logging.LoggerAdapter:
+            """No context."""
+            return logging.LoggerAdapter(logging.getLogger("pipelines.silver"), {})
+
+
+        def log_merge_result(log: logging.LoggerAdapter, rows: int) -> None:
+            """Logs."""
+            log.info("merge finished rows=%d", rows)
+      - |
+        import logging
+
+
+        def wave_logger(run_id: str, wave_id: str) -> logging.LoggerAdapter:
+            """Context."""
+            return logging.LoggerAdapter(logging.getLogger("pipelines.silver"), {"run_id": run_id, "wave_id": wave_id})
+
+
+        def log_merge_result(log: logging.LoggerAdapter, rows: int) -> None:
+            """Zero rows at INFO."""
+            log.info("merge finished rows=%d", rows)
+    wrong_answers:
+      - answer: |
+          import logging
+
+
+          def wave_logger(run_id: str, wave_id: str) -> logging.LoggerAdapter:
+              """Context."""
+              return logging.LoggerAdapter(logging.getLogger("pipelines.silver"), {"run_id": run_id, "wave_id": wave_id})
+
+
+          def log_merge_result(log: logging.LoggerAdapter, rows: int) -> None:
+              """Zero rows at INFO."""
+              log.info("merge finished rows=%d", rows)
+        triggers: zero_warns
+    hints:
+      - "`logging.LoggerAdapter(logger, {...})` attaches context."
+      - "Branch on `rows == 0`."
+      - "`log.warning(\"merge wrote 0 rows\")` and `log.info(\"merge finished rows=%d\", rows)`."
+    explanation: |
+      The adapter puts run and wave IDs on every line without repeating them in each call. A separate WARNING for an empty merge makes the suspicious case stand out.
+
+  - id: A7-L1-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      Choose the level for each event in a silver job.
+    slots:
+      - id: start
+        label: "Run started for wave W14"
+        options: &levels
+          - {id: debug, text: DEBUG}
+          - {id: info, text: INFO}
+          - {id: warning, text: WARNING}
+          - {id: error, text: ERROR}
+        answer: info
+      - id: zero
+        label: "MERGE wrote 0 rows for a wave that should have data"
+        options: *levels
+        answer: warning
+      - id: fail
+        label: "MERGE raised DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE"
+        options: *levels
+        answer: error
+      - id: plan
+        label: "The full query plan of the MERGE source, for troubleshooting"
+        options: *levels
+        answer: debug
+    model_answer: |
+      - Normal milestones: INFO.
+      - A result that is possible but suspicious: WARNING.
+      - A failure, logged with log.exception before re-raising: ERROR.
+      - Bulky diagnostic detail: DEBUG, switched on only when needed.
+    wrong_answers:
+      - answer: {zero: info}
+        feedback: "Zero rows usually means an upstream problem. At INFO it disappears among normal lines."
+      - answer: {fail: warning}
+        feedback: "A failed MERGE stops the run. That is ERROR, with the traceback."
+      - answer: {plan: info}
+        feedback: "A full plan on every run floods the log. Keep it at DEBUG."
+    hints:
+      - "What would you want to see on a normal night?"
+      - "What should stand out without stopping the run?"
+      - "Bulky detail only when debugging."
+    explanation: |
+      Levels let one log serve two audiences: INFO and above for the nightly check, DEBUG for the engineer troubleshooting.
+
+recap:
+  - front: "Create a module logger"
+    back: "logger = logging.getLogger(__name__)"
+  - front: "Default level threshold with no configuration"
+    back: "WARNING. log.info(...) prints nothing until the entry point sets a level."
+  - front: "Attach run_id and wave_id to every line"
+    back: "logging.LoggerAdapter(logger, {\"run_id\": ..., \"wave_id\": ...})"
+  - front: "Inside except"
+    back: "log.exception(\"...\") for ERROR plus traceback, then a bare raise."
+
+claims:
+  - claim: "Without configuration, loggers pass WARNING and above, and the last-resort handler prints only the message; LoggerAdapter adds context; logger.exception includes the traceback."
+    status: verified
+    source: "Run in Python 3.11 in this repository."

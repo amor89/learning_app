@@ -1,0 +1,363 @@
+id: A3-L2
+title: Schema enforcement is on by default. Evolve on purpose.
+
+concept: |
+  A Delta table has a schema, and writes must match it. This is **schema enforcement**, and it is on by default. Tested on delta-spark 4.0.1:
+
+  | Write | Result |
+  |---|---|
+  | Append with an extra column | Fails: schema mismatch |
+  | Append with a column missing | Succeeds: the missing column is NULL |
+  | Append with a clashing type (INT into DOUBLE) | Fails: `DELTA_FAILED_TO_MERGE_FIELDS` |
+  | Overwrite with a different schema | Fails unless `overwriteSchema` is true |
+  | MERGE with `updateAll`/`insertAll` and an extra source column | Succeeds, and **silently drops the extra column** |
+
+  Enforcement is your friend. A failing write is a cheap, early signal that a delivery changed.
+
+  **Schema evolution** changes the table's schema to accept the new shape. Delta offers it per write:
+
+  - Append: `.option("mergeSchema", "true")` adds new columns.
+  - MERGE: `.withSchemaEvolution()` on the merge builder adds new source columns.
+  - Planned change: `ALTER TABLE ... ADD COLUMN (region STRING)` in a reviewed migration.
+
+  Evolve on purpose, never by default. Two habits cause trouble:
+
+  - Leaving `mergeSchema` on every silver write. A supplier typo such as `final_wieght` becomes a new, permanent column, and the real weight is NULL for that wave.
+  - Setting `spark.databricks.delta.schema.autoMerge.enabled` for the session. It turns evolution on for every MERGE in the job, including ones you did not think about.
+
+  The safe pattern: validate the incoming columns against the registry first (lesson A2-L2). If a column is new and expected, add it with `ALTER TABLE` or evolve that one write. If it is unexpected, fail the run and ask the supplier.
+
+  Note the silent MERGE case in the table. Enforcement does not protect you there. Your column check does.
+
+why_it_matters: |
+  A silver job appends with `mergeSchema` always on, "to avoid schema errors". A supplier's export misspells `final_weight` as `final_wieght` for one wave. The append succeeds. Silver gains a permanent `final_wieght` column, and `final_weight` is NULL for 2,000 respondents. Gold sums NULL weights to a smaller base, and weighted reach for that wave is computed on the wrong population.
+
+  Without `mergeSchema`, the append fails with a schema mismatch naming the unexpected column. The fix takes minutes, and silver never holds the bad wave.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
+
+
+      def append_wave(df, table):
+          df.write.format("delta").mode("append").option("mergeSchema", "true").saveAsTable(table)
+    annotations:
+      - find: 'spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")'
+        note: "Turns evolution on for every MERGE in the session, not just the one you meant."
+      - find: '.option("mergeSchema", "true")'
+        note: "Every append may now add columns. A typo in a delivery becomes part of the table."
+  strong:
+    code: |
+      def check_columns_match(df: DataFrame, expected: list[str]) -> None:
+          """Fail when the delivery has unexpected or missing canonical columns."""
+          unexpected = sorted(set(df.columns) - set(expected))
+          missing = sorted(set(expected) - set(df.columns))
+          if unexpected or missing:
+              raise ValueError(f"schema drift: unexpected={unexpected} missing={missing}")
+
+
+      def append_wave(df: DataFrame, table: str, expected: list[str]) -> None:
+          """Append after an explicit column check. Delta enforcement stays on."""
+          check_columns_match(df, expected)
+          df.write.format("delta").mode("append").saveAsTable(table)
+
+
+      def add_planned_column(spark: SparkSession, table: str, column: str, sql_type: str) -> None:
+          """Planned schema change, run from a reviewed migration."""
+          spark.sql(f"ALTER TABLE {table} ADD COLUMN ({column} {sql_type})")
+    annotations:
+      - find: 'raise ValueError(f"schema drift: unexpected={unexpected} missing={missing}")'
+        note: "Both directions checked. A missing column would otherwise land as NULL without an error."
+      - find: 'df.write.format("delta").mode("append").saveAsTable(table)'
+        note: "No mergeSchema. An unexpected shape fails loudly."
+      - find: 'spark.sql(f"ALTER TABLE {table} ADD COLUMN ({column} {sql_type})")'
+        note: "New columns arrive through a reviewed change, not as a side effect of a write."
+  takeaway: |
+    Schema changes become decisions a person reviews, not accidents a delivery causes.
+
+exercises:
+  - id: A3-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Silver has columns `respondent_id`, `wave_id`, `final_weight`. You append a DataFrame with those three columns plus `region`, without any options. What happens on delta-spark 4.0?
+    options:
+      - {id: a, text: "The append succeeds and region is added."}
+      - {id: b, text: "The append succeeds and region is dropped."}
+      - {id: c, text: "The append fails with a schema mismatch."}
+      - {id: d, text: "Region is stored in a hidden rescue column."}
+    answer: c
+    reasons:
+      - {id: r1, text: "Schema enforcement rejects writes with columns the table does not have."}
+      - {id: r2, text: "Delta tables cannot change schema after creation."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That needs `mergeSchema`. Without it, enforcement rejects the new column."
+      - answer: b
+        feedback: "An append does not drop columns. A MERGE with updateAll does, which makes it the dangerous case."
+      - answer: d
+        feedback: "A rescue column is an Auto Loader feature (`_rescued_data`), not a Delta write behaviour."
+      - answer: c|r2
+        feedback: "Right outcome, wrong reason. Delta schemas can change, with mergeSchema, withSchemaEvolution or ALTER TABLE. The default is to enforce."
+    hints:
+      - "Is schema evolution on or off by default?"
+      - "The table has no region column."
+      - "Enforcement rejects the write."
+    explanation: |
+      Enforcement is on by default, so a write with an extra column fails. You opt in to evolution per write, or change the table with `ALTER TABLE`.
+
+  - id: A3-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Silver `s` has columns `id` and `w`. The source has `id`, `w` and `region`. What does the last line print on delta-spark 4.0?
+    code: |
+      (
+          DeltaTable.forName(spark, "s").alias("t")
+          .merge(source.alias("src"), "t.id = src.id")
+          .whenMatchedUpdateAll()
+          .whenNotMatchedInsertAll()
+          .execute()
+      )
+      print(spark.table("s").columns)
+    answer: "['id', 'w']"
+    wrong_answers:
+      - answer: "['id', 'w', 'region']"
+        feedback: "Only with `.withSchemaEvolution()` on the builder. Without it, updateAll and insertAll copy the target's columns and ignore region."
+      - answer: "AnalysisException"
+        feedback: "No error. The MERGE succeeds and the extra source column is silently ignored. That is why this case is dangerous."
+    hints:
+      - "Does a MERGE fail on an extra source column the way an append does?"
+      - "updateAll and insertAll work on the target's columns."
+      - "The extra column is ignored without an error."
+    explanation: |
+      Without schema evolution, `updateAll` and `insertAll` use the target's columns and quietly ignore `region`. Your own column check is the only guard here.
+
+  - id: A3-L2-E3
+    type: fill_gap
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      You reviewed the supplier's new `region` column and want this one MERGE to add it to silver. Complete the builder.
+    template: |
+      (
+          DeltaTable.forName(spark, table).alias("t")
+          .merge(source.alias("s"), condition)
+          .[[g1]]()
+          .whenMatchedUpdateAll()
+          .whenNotMatchedInsertAll()
+          .execute()
+      )
+    gaps:
+      g1: {accepted: [withSchemaEvolution]}
+    wrong_answers:
+      - answer: {g1: mergeSchema}
+        feedback: "`mergeSchema` is a write option for appends and overwrites. The MERGE builder uses `withSchemaEvolution()`."
+      - answer: {g1: option}
+        feedback: "The MERGE builder has no `option` method for this. Call `withSchemaEvolution()`."
+    hints:
+      - "The builder method names what it enables."
+      - "It exists on DeltaMergeBuilder in delta-spark 4.0."
+      - "`withSchemaEvolution`."
+    explanation: |
+      `withSchemaEvolution()` turns evolution on for this MERGE only, which is safer than a session-wide setting.
+
+  - id: A3-L2-E4
+    type: write_function
+    difficulty: 4
+    language: python
+    prompt: |
+      Write `schema_drift(actual, expected)`. It takes two lists of column names and returns a dict with sorted lists under `"unexpected"` (in actual, not expected) and `"missing"` (in expected, not actual). Then write `assert_no_drift(actual, expected)` that raises `ValueError` naming both lists when either is non-empty.
+    starter: |
+      def schema_drift(actual: list[str], expected: list[str]) -> dict[str, list[str]]:
+          ...
+
+
+      def assert_no_drift(actual: list[str], expected: list[str]) -> None:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: drift_typed
+          kind: requires_function
+          name: schema_drift
+          typed: true
+          docstring: true
+          message: "Give `schema_drift` type hints and a docstring."
+        - id: assert_typed
+          kind: requires_function
+          name: assert_no_drift
+          typed: true
+          docstring: true
+          message: "Give `assert_no_drift` type hints and a docstring."
+      tests:
+        - id: clean
+          code: |
+            assert schema_drift(["a", "b"], ["b", "a"]) == {"unexpected": [], "missing": []}
+          message: "Same columns in a different order is no drift."
+        - id: both_ways
+          code: |
+            assert schema_drift(["a", "final_wieght"], ["a", "final_weight"]) == {"unexpected": ["final_wieght"], "missing": ["final_weight"]}
+          message: "Report both directions: the typo is unexpected, and the real column is missing."
+        - id: sorted_lists
+          code: |
+            assert schema_drift(["z", "y", "a"], ["a"])["unexpected"] == ["y", "z"]
+          message: "Return sorted lists, so messages and tests are stable."
+        - id: raises
+          code: |
+            try:
+                assert_no_drift(["a", "x"], ["a"])
+            except ValueError as err:
+                assert "x" in str(err)
+            else:
+                raise AssertionError("no ValueError")
+          message: "`assert_no_drift` must raise ValueError that names the drifted columns."
+        - id: passes_clean
+          code: |
+            assert assert_no_drift(["a"], ["a"]) is None
+          message: "No drift must return None without raising."
+    solution: |
+      def schema_drift(actual: list[str], expected: list[str]) -> dict[str, list[str]]:
+          """Compare delivered columns with the registry.
+
+          Args:
+              actual: Columns in the delivery.
+              expected: Canonical columns from the registry.
+
+          Returns:
+              Sorted unexpected and missing column names.
+          """
+          return {
+              "unexpected": sorted(set(actual) - set(expected)),
+              "missing": sorted(set(expected) - set(actual)),
+          }
+
+
+      def assert_no_drift(actual: list[str], expected: list[str]) -> None:
+          """Raise ValueError when the delivery's columns differ from the registry."""
+          drift = schema_drift(actual, expected)
+          if drift["unexpected"] or drift["missing"]:
+              raise ValueError(f"schema drift: {drift}")
+    seeded_bugs:
+      - |
+        def schema_drift(actual: list[str], expected: list[str]) -> dict[str, list[str]]:
+            """Only looks one way."""
+            return {"unexpected": sorted(set(actual) - set(expected)), "missing": []}
+
+
+        def assert_no_drift(actual: list[str], expected: list[str]) -> None:
+            """Raise on drift."""
+            drift = schema_drift(actual, expected)
+            if drift["unexpected"] or drift["missing"]:
+                raise ValueError(f"schema drift: {drift}")
+      - |
+        def schema_drift(actual: list[str], expected: list[str]) -> dict[str, list[str]]:
+            """Unsorted."""
+            return {"unexpected": list(set(actual) - set(expected)), "missing": list(set(expected) - set(actual))}
+
+
+        def assert_no_drift(actual: list[str], expected: list[str]) -> None:
+            """Only raises on unexpected columns."""
+            if schema_drift(actual, expected)["unexpected"]:
+                raise ValueError("drift")
+    wrong_answers:
+      - answer: |
+          def schema_drift(actual: list[str], expected: list[str]) -> dict[str, list[str]]:
+              """Only looks one way."""
+              return {"unexpected": sorted(set(actual) - set(expected)), "missing": []}
+
+
+          def assert_no_drift(actual: list[str], expected: list[str]) -> None:
+              """Raise on drift."""
+              drift = schema_drift(actual, expected)
+              if drift["unexpected"] or drift["missing"]:
+                  raise ValueError(f"schema drift: {drift}")
+        triggers: both_ways
+    hints:
+      - "Two set differences, one in each direction."
+      - "Wrap each in `sorted()`."
+      - "`assert_no_drift` calls `schema_drift` and raises if either list is non-empty."
+    explanation: |
+      Checking both directions matters because Delta treats them differently: an extra column fails an append, but a missing column lands as NULL without an error.
+
+  - id: A3-L2-E5
+    type: spot_bug
+    difficulty: 5
+    language: pyspark
+    prompt: |
+      This silver job evolved the schema on every run for a month, and silver now has 14 columns nobody asked for. Tap the line that causes it, then fix the function.
+    code: |
+      def upsert_silver(spark: SparkSession, source: DataFrame, table: str, keys: list[str]) -> None:
+          """MERGE a deduplicated source into silver."""
+          spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
+          condition = " AND ".join(f"t.{k} = s.{k}" for k in keys)
+          (
+              DeltaTable.forName(spark, table).alias("t")
+              .merge(source.alias("s"), condition)
+              .whenMatchedUpdateAll()
+              .whenNotMatchedInsertAll()
+              .execute()
+          )
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_automerge
+          kind: forbids_pattern
+          pattern: "autoMerge"
+          message: "The session-wide autoMerge setting is still there. Remove it."
+        - id: no_conf_set
+          kind: forbids_pattern
+          pattern: "conf\\.set"
+          message: "Do not change session settings inside a write function."
+        - id: still_merges
+          kind: requires_call
+          name: whenNotMatchedInsertAll
+          message: "Keep the MERGE itself."
+    fix_solution: |
+      def upsert_silver(spark: SparkSession, source: DataFrame, table: str, keys: list[str]) -> None:
+          """MERGE a deduplicated source into silver."""
+          condition = " AND ".join(f"t.{k} = s.{k}" for k in keys)
+          (
+              DeltaTable.forName(spark, table).alias("t")
+              .merge(source.alias("s"), condition)
+              .whenMatchedUpdateAll()
+              .whenNotMatchedInsertAll()
+              .execute()
+          )
+    wrong_answers:
+      - lines: [8]
+        feedback: "updateAll is fine. It only adds columns when evolution is switched on, and something switched it on."
+      - lines: [4]
+        feedback: "The condition is correct. Look for a setting that changes how every MERGE treats new columns."
+    hints:
+      - "Which line changes a setting?"
+      - "What does that setting do to every MERGE in the session?"
+      - "Remove the conf.set. Evolve deliberately with withSchemaEvolution() when a change is approved."
+    explanation: |
+      Line 3 turns on automatic schema evolution for the whole Spark session, so every MERGE adds any new source column. Remove it. When you approve a new column, use `ALTER TABLE ... ADD COLUMN` or `.withSchemaEvolution()` on that one MERGE.
+
+recap:
+  - front: "Delta append with an extra column, no options"
+    back: "Fails with a schema mismatch. Enforcement is on by default."
+  - front: "MERGE with updateAll and an extra source column, no evolution"
+    back: "Succeeds and silently ignores the extra column. Only your own column check catches it."
+  - front: "Evolve one write on purpose"
+    back: "Append: option mergeSchema. MERGE: .withSchemaEvolution(). Planned: ALTER TABLE ADD COLUMN."
+  - front: "Why not set autoMerge.enabled for the session?"
+    back: "It turns evolution on for every MERGE in the job, including ones you did not intend."
+
+claims:
+  - claim: "Append with an extra column fails; with a missing column fills NULL; with a type clash fails with DELTA_FAILED_TO_MERGE_FIELDS; overwrite with a new schema needs overwriteSchema."
+    status: verified
+    source: "Run on delta-spark 4.0.1 in this repository."
+  - claim: "MERGE with updateAll/insertAll ignores extra source columns without evolution; DeltaMergeBuilder.withSchemaEvolution() adds them."
+    status: verified
+    source: "Run on delta-spark 4.0.1 in this repository."
+  - claim: "spark.databricks.delta.schema.autoMerge.enabled turns on schema evolution for MERGE across the session."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/data-engineering/schema-evolution"

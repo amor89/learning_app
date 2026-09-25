@@ -1,0 +1,311 @@
+id: A5-L1
+title: Lazy evaluation, and why every count() re-runs the plan
+
+concept: |
+  Spark splits DataFrame operations into two kinds.
+
+  - **Transformations** build a plan and return a new DataFrame at once: `filter`, `select`, `withColumn`, `join`, `groupBy().agg()`. Nothing is read yet.
+  - **Actions** run the plan and return a result: `count()`, `collect()`, `show()`, `first()`, `toPandas()`, and every write.
+
+  This is **lazy evaluation**. It lets the optimiser see the whole plan before running it, so it can push filters into the file scan and skip columns you never use.
+
+  The cost is easy to miss: **each action runs the whole plan again**, from the source. Nothing is kept between actions unless you ask for it. A local test shows it plainly: a Python function counted its own calls inside a plan over 1,000 rows. After the first `count()`, it had run 1,000 times. After a second `count()`, 2,000.
+
+  Your reference data-contract validator calls `count()` more than ten times on the same uncached DataFrame: once for the row count, once per mandatory column, once per key and so on. Each call rereads the delivery from storage.
+
+  Three fixes, in order of preference:
+
+  1. **Combine the questions into one action.** One `agg` with many expressions answers them all in a single pass:
+
+     ```python
+     df.agg(
+         F.count("*").alias("rows"),
+         F.count_if(F.col("final_weight").isNull()).alias("null_weights"),
+         F.sum("final_weight").alias("weight_sum"),
+     ).collect()[0]
+     ```
+
+  2. **Materialise** an expensive intermediate result to a Delta table, then read that table for the follow-up actions.
+  3. **Cache** with `df.cache()` on classic clusters only. Serverless compute, which Free Edition uses, does not support cache APIs.
+
+why_it_matters: |
+  A contract validator checks a 40-million-row delivery with 23 separate `count()` calls, one per check. Each call rescans the source files in cloud storage. The validation step takes 38 minutes, longer than the transform it protects, and the team starts skipping it "for small redeliveries". A redelivery with duplicated keys then goes straight to silver.
+
+  Rewritten as one `agg` with 23 expressions, the same checks run in a single scan of about two minutes, and nobody has a reason to skip them.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      def check_delivery(df):
+          results = {}
+          results["rows"] = df.count()
+          results["null_ids"] = df.filter(F.col("respondent_id").isNull()).count()
+          results["null_weights"] = df.filter(F.col("final_weight").isNull()).count()
+          results["distinct_ids"] = df.select("respondent_id").distinct().count()
+          return results
+    annotations:
+      - find: 'results["rows"] = df.count()'
+        note: "Action 1: full scan of the source."
+      - find: 'results["null_ids"] = df.filter(F.col("respondent_id").isNull()).count()'
+        note: "Action 2: a second full scan."
+      - find: 'results["null_weights"] = df.filter(F.col("final_weight").isNull()).count()'
+        note: "Action 3: a third."
+      - find: 'results["distinct_ids"] = df.select("respondent_id").distinct().count()'
+        note: "Action 4: a fourth scan, plus a shuffle."
+  strong:
+    code: |
+      def check_delivery(df: DataFrame) -> dict[str, int]:
+          """Row, null and distinct counts for a delivery in one pass."""
+          row = df.agg(
+              F.count("*").alias("rows"),
+              F.count_if(F.col("respondent_id").isNull()).alias("null_ids"),
+              F.count_if(F.col("final_weight").isNull()).alias("null_weights"),
+              F.count_distinct("respondent_id").alias("distinct_ids"),
+          ).collect()[0]
+          return row.asDict()
+    annotations:
+      - find: "row = df.agg("
+        note: "One action. Spark computes every expression during the same scan."
+      - find: 'F.count_if(F.col("respondent_id").isNull()).alias("null_ids"),'
+        note: "count_if counts rows where a condition holds, inside the aggregation."
+      - find: 'F.count_distinct("respondent_id").alias("distinct_ids"),'
+        note: "Distinct count in the same pass. For very large data, approx_count_distinct is cheaper."
+  takeaway: |
+    Four questions, one scan. The strong version reads the delivery once, however many checks you add.
+
+exercises:
+  - id: A5-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which line starts a Spark job?
+    options:
+      - {id: a, text: '`df2 = df.filter(F.col("in_scope"))`'}
+      - {id: b, text: '`df3 = df2.withColumn("w2", F.col("final_weight") * 2)`'}
+      - {id: c, text: '`n = df3.count()`'}
+      - {id: d, text: '`df4 = df3.groupBy("wave_id").agg(F.sum("w2"))`'}
+    answer: c
+    reasons:
+      - {id: r1, text: "count() is an action. The other lines are transformations that only extend the plan."}
+      - {id: r2, text: "Only the last line of a cell runs."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "filter is a transformation. It returns a new DataFrame without reading any data."
+      - answer: b
+        feedback: "withColumn is a transformation. Nothing runs yet."
+      - answer: d
+        feedback: "groupBy().agg() is still a transformation. It runs only when an action such as show or write asks for the result."
+      - answer: c|r2
+        feedback: "Right line, wrong reason. Every line runs as Python. Only actions make Spark execute the plan."
+    hints:
+      - "Which call returns a plain Python value instead of a DataFrame?"
+      - "Transformations return DataFrames."
+      - "count() returns an int, so it must run the plan."
+    explanation: |
+      `count()` returns a number, so Spark must execute the plan. The other lines return DataFrames and only describe work.
+
+  - id: A5-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      `tag` is a Python UDF that adds 1 to an accumulator each time it runs. `src` has 1,000 rows and is not cached. What does the last line print?
+    code: |
+      df = src.select(tag("id").alias("id")).filter(F.col("id") % 2 == 0)
+      df.count()
+      df.count()
+      print(calls.value)
+    answer: "2000"
+    wrong_answers:
+      - answer: "1000"
+        feedback: "Each action re-runs the whole plan, UDF included. Two counts mean two full evaluations."
+      - answer: "500"
+        feedback: "The filter comes after the UDF, so the UDF runs on all 1,000 rows each time."
+      - answer: "0"
+        feedback: "Defining df runs nothing, but each count() is an action that executes the plan."
+    hints:
+      - "How many actions are there?"
+      - "Does Spark keep results between actions without cache?"
+      - "Two full runs over 1,000 rows."
+    explanation: |
+      Nothing is kept between actions, so each `count()` runs the UDF on all 1,000 rows. This was measured locally on PySpark 4.0.4.
+
+  - id: A5-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Count rows and null weights in a single pass.
+    template: |
+      stats = df.[[g1]](
+          F.count("*").alias("rows"),
+          F.[[g2]](F.col("final_weight").isNull()).alias("null_weights"),
+      ).collect()[0]
+    gaps:
+      g1: {accepted: [agg]}
+      g2: {accepted: [count_if]}
+    wrong_answers:
+      - answer: {g1: select}
+        feedback: "`select` with aggregate functions also works, but `agg` is the idiomatic call for a single aggregated row."
+      - answer: {g2: count}
+        feedback: "`F.count` counts non-null values of an expression, and `isNull()` is never null. Every row would count. Use `count_if`."
+      - answer: {g2: sum}
+        feedback: "`F.sum` of a boolean fails. You would need `.cast(\"int\")` first. `count_if` says what you mean."
+    hints:
+      - "The DataFrame method that takes several aggregate expressions."
+      - "The function that counts rows where a condition is true."
+      - "`agg` and `count_if`."
+    explanation: |
+      `df.agg(...)` evaluates every expression in one pass. `F.count_if(cond)` counts rows where `cond` is true.
+
+  - id: A5-L1-E4
+    type: refactor
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Refactor `table_health` to answer every question in **one** action. Keep the returned keys: `rows`, `null_ids`, `null_weights`, `min_weight`, `max_weight`.
+    starter: |
+      def table_health(df):
+          return {
+              "rows": df.count(),
+              "null_ids": df.filter(F.col("respondent_id").isNull()).count(),
+              "null_weights": df.filter(F.col("final_weight").isNull()).count(),
+              "min_weight": df.agg({"final_weight": "min"}).collect()[0][0],
+              "max_weight": df.agg({"final_weight": "max"}).collect()[0][0],
+          }
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: table_health
+          typed: true
+          docstring: true
+          message: "Add type hints and a docstring to `table_health`."
+        - id: no_count_calls
+          kind: forbids_pattern
+          pattern: "\\.count\\(\\s*\\)"
+          message: "`.count()` is an action. Use `F.count(\"*\")` inside one agg."
+        - id: one_collect
+          kind: max_calls
+          name: collect
+          max: 1
+          message: "Collect once. Each collect() is another scan."
+        - id: uses_agg
+          kind: requires_call
+          name: agg
+          message: "Put every expression in a single `df.agg(...)`."
+        - id: count_if_used
+          kind: requires_call
+          name: count_if
+          message: "Count nulls with `F.count_if(F.col(...).isNull())`."
+    solution: |
+      def table_health(df: DataFrame) -> dict[str, float | int | None]:
+          """Row count, null counts and weight range in one pass over df."""
+          row = df.agg(
+              F.count("*").alias("rows"),
+              F.count_if(F.col("respondent_id").isNull()).alias("null_ids"),
+              F.count_if(F.col("final_weight").isNull()).alias("null_weights"),
+              F.min("final_weight").alias("min_weight"),
+              F.max("final_weight").alias("max_weight"),
+          ).collect()[0]
+          return row.asDict()
+    spark_tests: |
+      df = spark.createDataFrame([("a", 1.0), (None, 2.0), ("c", None)], "respondent_id STRING, final_weight DOUBLE")
+      assert table_health(df) == {"rows": 3, "null_ids": 1, "null_weights": 1, "min_weight": 1.0, "max_weight": 2.0}
+    seeded_bugs:
+      - |
+        def table_health(df: DataFrame) -> dict[str, float | int | None]:
+            """Still several actions."""
+            return {
+                "rows": df.count(),
+                "null_ids": df.filter(F.col("respondent_id").isNull()).count(),
+                "null_weights": df.filter(F.col("final_weight").isNull()).count(),
+                "min_weight": df.agg(F.min("final_weight")).collect()[0][0],
+                "max_weight": df.agg(F.max("final_weight")).collect()[0][0],
+            }
+      - |
+        def table_health(df: DataFrame) -> dict[str, float | int | None]:
+            """One agg for counts, another for the range."""
+            counts = df.agg(F.count("*").alias("rows"), F.count_if(F.col("respondent_id").isNull()).alias("null_ids"), F.count_if(F.col("final_weight").isNull()).alias("null_weights")).collect()[0]
+            limits = df.agg(F.min("final_weight").alias("min_weight"), F.max("final_weight").alias("max_weight")).collect()[0]
+            return {**counts.asDict(), **limits.asDict()}
+    wrong_answers:
+      - answer: |
+          def table_health(df: DataFrame) -> dict[str, float | int | None]:
+              """One agg for counts, another for the range."""
+              counts = df.agg(F.count("*").alias("rows"), F.count_if(F.col("respondent_id").isNull()).alias("null_ids"), F.count_if(F.col("final_weight").isNull()).alias("null_weights")).collect()[0]
+              limits = df.agg(F.min("final_weight").alias("min_weight"), F.max("final_weight").alias("max_weight")).collect()[0]
+              return {**counts.asDict(), **limits.asDict()}
+        triggers: one_collect
+    hints:
+      - "Every value can be an aggregate expression."
+      - "`F.count(\"*\")`, `F.count_if(...)`, `F.min(...)`, `F.max(...)`."
+      - "Put all five in one `df.agg(...)`, collect once, and return `row.asDict()`."
+    explanation: |
+      Five aggregate expressions in one `agg` produce one row in one scan. The original ran five separate jobs over the same data.
+
+  - id: A5-L1-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      You run the silver QA notebook on Databricks Free Edition (serverless). An expensive joined DataFrame feeds six different checks. Choose the approach for each situation.
+    slots:
+      - id: several_counts
+        label: "Four checks are simple counts and sums over the joined data"
+        options: &approaches
+          - {id: agg, text: "Combine them into one agg"}
+          - {id: materialise, text: "Write the joined data to a Delta table and read it back"}
+          - {id: cache, text: "df.cache()"}
+          - {id: repeat, text: "Leave each check as its own action"}
+        answer: agg
+      - id: many_shapes
+        label: "Two checks need different groupings and joins over the same expensive result"
+        options: *approaches
+        answer: materialise
+      - id: cache_serverless
+        label: "A colleague suggests cache() to speed it all up on serverless"
+        options:
+          - {id: avoid, text: "Not supported on serverless: use one agg or a Delta table"}
+          - {id: use, text: "Use cache() and persist() freely"}
+        answer: avoid
+    model_answer: |
+      - Combine every count and sum into one `agg`. One scan answers them all.
+      - For checks that need different shapes, write the expensive result to a Delta table once and read it back.
+      - Serverless compute does not support cache APIs, so `cache()` is not an option there.
+    wrong_answers:
+      - answer: {several_counts: repeat}
+        feedback: "Each action re-runs the join. Four checks would run the expensive join four times."
+      - answer: {many_shapes: cache}
+        feedback: "On serverless compute, cache APIs are not supported. Materialise to a Delta table instead."
+      - answer: {cache_serverless: use}
+        feedback: "Databricks documents that DataFrame and SQL cache APIs are not supported on serverless compute."
+    hints:
+      - "Simple aggregates can share one pass."
+      - "Different shapes need the data stored somewhere reusable."
+      - "Serverless has no cache APIs."
+    explanation: |
+      Combine what you can into one action. Store an expensive result in Delta when several differently shaped queries need it. Keep cache() for classic clusters.
+
+recap:
+  - front: "Transformation or action?"
+    back: "Transformations (filter, select, join, groupBy().agg) build a plan. Actions (count, collect, show, write) run it."
+  - front: "What happens on the second count() of an uncached DataFrame?"
+    back: "The whole plan runs again from the source."
+  - front: "Many checks, one scan"
+    back: "One df.agg(...) with count, count_if, sum, min, max expressions."
+  - front: "Reusing an expensive result on serverless"
+    back: "Write it to a Delta table. cache() is not supported on serverless compute."
+
+claims:
+  - claim: "Each action re-executes the plan: a counting UDF ran 1,000 times after one count and 2,000 after two, on 1,000 rows."
+    status: verified
+    source: "Run on PySpark 4.0.4 in this repository."
+  - claim: "F.count_if and F.count_distinct exist in PySpark 4.0."
+    status: verified
+    source: "Run on PySpark 4.0.4 in this repository."
+  - claim: "Serverless compute does not support DataFrame or SQL cache APIs."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/compute/serverless/limitations"

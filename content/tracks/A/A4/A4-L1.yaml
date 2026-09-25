@@ -1,0 +1,326 @@
+id: A4-L1
+title: The three-level namespace, one catalog per environment
+
+concept: |
+  Unity Catalog names every table with three parts: `catalog.schema.table`.
+
+  ```sql
+  research_prod.research_silver.nat_respondents
+  ```
+
+  Use each level for one purpose:
+
+  - **Catalog = environment** (or a major business domain): `research_dev`, `research_test`, `research_prod`. Permissions and storage attach at this level, so a dev job with no rights on `research_prod` cannot damage it.
+  - **Schema = layer or subject**: `research_bronze`, `research_silver`, `research_gold`, `research_governance`.
+  - **Table = content at a stated grain**: `nat_raw`, `nat_respondents`, `nat_metrics`.
+
+  Always write the full three-part name in pipeline code, built from configuration. A two-part name such as `research_silver.nat_respondents` resolves against the session's **current catalog**. That depends on the workspace default, a `USE CATALOG` somewhere earlier in the notebook, or a job setting. The same code then reads a different table in each place it runs.
+
+  Build names in one function from config, so no code concatenates strings on its own:
+
+  ```python
+  def table_name(catalog: str, layer: str, tracker: str) -> str:
+      suffix = {"bronze": "raw", "silver": "respondents", "gold": "metrics"}[layer]
+      return f"{catalog}.research_{layer}.{tracker}_{suffix}"
+  ```
+
+  In a notebook, `spark.catalog.currentCatalog()` tells you which catalog a two-part name would use. It is useful for checks, never as a substitute for naming the catalog.
+
+  Workspaces created before Unity Catalog also show `hive_metastore`, the legacy two-level store. Treat it as read-only history while you migrate.
+
+why_it_matters: |
+  A shared all-purpose cluster has `research_prod` as its default catalog. A developer tests a silver fix from a notebook that writes to `research_silver.nat_respondents`, a two-part name, believing the notebook "runs in dev". The MERGE lands in production. The fix was only half finished, and 1,400 rows get wrong region codes before anyone notices.
+
+  With a three-part name built from a dev config file, the same notebook writes to `research_dev.research_silver.nat_respondents`. The developer's lack of MODIFY on `research_prod` would also have blocked it.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      spark.sql("USE CATALOG research_prod")
+
+      def load_silver(spark):
+          return spark.table("research_silver.nat_respondents")
+
+      def write_gold(df):
+          df.write.mode("append").saveAsTable("research_gold." + "nat" + "_metrics")
+    annotations:
+      - find: 'spark.sql("USE CATALOG research_prod")'
+        note: "Changes the current catalog for everything after it in the session."
+      - find: 'spark.table("research_silver.nat_respondents")'
+        note: "Two-part name. Which catalog it reads depends on the session, not the code."
+      - find: '"research_gold." + "nat" + "_metrics"'
+        note: "Names glued together in several places. One typo and a new table appears."
+  strong:
+    code: |
+      LAYER_SUFFIX = {"bronze": "raw", "silver": "respondents", "gold": "metrics"}
+
+
+      def table_name(catalog: str, layer: str, tracker: str) -> str:
+          """Three-level table name for a tracker and layer.
+
+          Raises:
+              KeyError: If layer is not bronze, silver or gold.
+          """
+          return f"{catalog}.research_{layer}.{tracker}_{LAYER_SUFFIX[layer]}"
+
+
+      def load_silver(spark: SparkSession, cfg: RunConfig) -> DataFrame:
+          """Read the silver table for the configured environment and tracker."""
+          return spark.table(table_name(cfg.catalog, "silver", cfg.tracker))
+    annotations:
+      - find: 'LAYER_SUFFIX = {"bronze": "raw", "silver": "respondents", "gold": "metrics"}'
+        note: "The naming convention lives in one constant."
+      - find: 'return f"{catalog}.research_{layer}.{tracker}_{LAYER_SUFFIX[layer]}"'
+        note: "Always three parts. An unknown layer raises KeyError instead of inventing a table."
+      - find: "spark.table(table_name(cfg.catalog,"
+        note: "The environment comes from config. The same code reads dev in dev and prod in prod."
+  takeaway: |
+    The strong version reads exactly the table its config names, whatever the session's current catalog is.
+
+exercises:
+  - id: A4-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which level of the Unity Catalog namespace should separate dev from prod?
+    options:
+      - {id: a, text: "Catalog"}
+      - {id: b, text: "Schema"}
+      - {id: c, text: "Table name prefix, such as dev_nat_metrics"}
+      - {id: d, text: "A column called environment"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Permissions and storage attach at catalog level, so dev principals can be kept out of prod entirely."}
+      - {id: r2, text: "Catalog names are shorter."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Schemas are better used for layers. Putting environments there mixes dev and prod under one catalog's permissions."
+      - answer: c
+        feedback: "A prefix is a naming habit, not a boundary. Anyone with rights on the schema can write both."
+      - answer: d
+        feedback: "A column puts dev and prod rows in the same table. One bad filter mixes them."
+      - answer: a|r2
+        feedback: "Right level, wrong reason. The point is isolation: grants on research_prod do not reach research_dev, and the reverse."
+    hints:
+      - "Which level can you lock a whole environment behind?"
+      - "Grants on the top level control everything below it."
+      - "The catalog."
+    explanation: |
+      One catalog per environment gives a hard boundary. A dev job without privileges on `research_prod` cannot read or write it by accident.
+
+  - id: A4-L1-E2
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the fully qualified name of the gold table for tracker `nat` in production.
+    template: |
+      GOLD = "[[g1]].[[g2]].nat_metrics"
+    gaps:
+      g1: {accepted: [research_prod]}
+      g2: {accepted: [research_gold]}
+    wrong_answers:
+      - answer: {g1: research_gold, g2: research_prod}
+        feedback: "Swapped. The catalog comes first and holds the environment. The schema holds the layer."
+      - answer: {g1: hive_metastore}
+        feedback: "hive_metastore is the legacy store. Production tables live in a Unity Catalog catalog such as research_prod."
+    hints:
+      - "catalog.schema.table."
+      - "The environment is the catalog."
+      - "research_prod, then research_gold."
+    explanation: |
+      `research_prod.research_gold.nat_metrics`: environment, layer, table.
+
+  - id: A4-L1-E3
+    type: spot_bug
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      This job runs in the dev workspace, but its writes appear in production. Tap the line, then fix the function.
+    code: |
+      def write_metrics(df: DataFrame, cfg: RunConfig) -> None:
+          """Write gold metrics for the configured environment."""
+          target = f"research_gold.{cfg.tracker}_metrics"
+          df.write.format("delta").mode("append").saveAsTable(target)
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: uses_catalog
+          kind: requires_pattern
+          pattern: "\\{cfg\\.catalog\\}\\.research_gold\\."
+          message: "Put the configured catalog in front: `f\"{cfg.catalog}.research_gold.{cfg.tracker}_metrics\"`."
+    fix_solution: |
+      def write_metrics(df: DataFrame, cfg: RunConfig) -> None:
+          """Write gold metrics for the configured environment."""
+          target = f"{cfg.catalog}.research_gold.{cfg.tracker}_metrics"
+          df.write.format("delta").mode("append").saveAsTable(target)
+    wrong_answers:
+      - lines: [4]
+        feedback: "Append is right for this job. The question is which table it writes to."
+    hints:
+      - "Count the parts in the table name."
+      - "What decides the catalog for a two-part name?"
+      - "Add `cfg.catalog` as the first part."
+    explanation: |
+      A two-part name resolves against the session's current catalog, which here is production. Build a three-part name from `cfg.catalog`.
+
+  - id: A4-L1-E4
+    type: write_function
+    difficulty: 4
+    language: python
+    prompt: |
+      Write `table_name(catalog, layer, tracker)`. It returns `catalog.research_<layer>.<tracker>_<suffix>` where the suffix is `raw`, `respondents` or `metrics` for bronze, silver and gold. Raise `ValueError` naming the layer for any other layer, and raise `ValueError` if `catalog` contains a dot.
+    starter: |
+      def table_name(catalog: str, layer: str, tracker: str) -> str:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: table_name
+          typed: true
+          docstring: true
+          message: "Give `table_name` type hints and a docstring."
+      tests:
+        - id: layers
+          code: |
+            assert table_name("research_dev", "bronze", "nat") == "research_dev.research_bronze.nat_raw"
+            assert table_name("research_dev", "silver", "nat") == "research_dev.research_silver.nat_respondents"
+            assert table_name("research_prod", "gold", "nat") == "research_prod.research_gold.nat_metrics"
+          message: "Build catalog.research_<layer>.<tracker>_<suffix> with raw, respondents and metrics."
+        - id: bad_layer
+          code: |
+            try:
+                table_name("research_dev", "platinum", "nat")
+            except ValueError as err:
+                assert "platinum" in str(err)
+            else:
+                raise AssertionError("no ValueError")
+          message: "An unknown layer must raise ValueError that names it."
+        - id: dotted_catalog
+          code: |
+            try:
+                table_name("research_dev.research_silver", "gold", "nat")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "A catalog containing a dot would produce a four-part name. Raise ValueError."
+    solution: |
+      LAYER_SUFFIX = {"bronze": "raw", "silver": "respondents", "gold": "metrics"}
+
+
+      def table_name(catalog: str, layer: str, tracker: str) -> str:
+          """Three-level Unity Catalog name for a tracker's table in one layer.
+
+          Args:
+              catalog: Environment catalog, for example research_dev.
+              layer: bronze, silver or gold.
+              tracker: Tracker short name, for example nat.
+
+          Returns:
+              The fully qualified table name.
+
+          Raises:
+              ValueError: If the layer is unknown or the catalog contains a dot.
+          """
+          if "." in catalog:
+              raise ValueError(f"catalog must be a single name, got {catalog!r}")
+          if layer not in LAYER_SUFFIX:
+              raise ValueError(f"unknown layer {layer!r}")
+          return f"{catalog}.research_{layer}.{tracker}_{LAYER_SUFFIX[layer]}"
+    seeded_bugs:
+      - |
+        def table_name(catalog: str, layer: str, tracker: str) -> str:
+            """Two-part name."""
+            suffix = {"bronze": "raw", "silver": "respondents", "gold": "metrics"}[layer]
+            return f"research_{layer}.{tracker}_{suffix}"
+      - |
+        def table_name(catalog: str, layer: str, tracker: str) -> str:
+            """Falls back to gold for unknown layers."""
+            suffix = {"bronze": "raw", "silver": "respondents"}.get(layer, "metrics")
+            return f"{catalog}.research_{layer}.{tracker}_{suffix}"
+    wrong_answers:
+      - answer: |
+          def table_name(catalog: str, layer: str, tracker: str) -> str:
+              """Two-part name."""
+              suffix = {"bronze": "raw", "silver": "respondents", "gold": "metrics"}[layer]
+              return f"research_{layer}.{tracker}_{suffix}"
+        triggers: layers
+      - answer: |
+          def table_name(catalog: str, layer: str, tracker: str) -> str:
+              """Falls back to gold for unknown layers."""
+              suffix = {"bronze": "raw", "silver": "respondents"}.get(layer, "metrics")
+              return f"{catalog}.research_{layer}.{tracker}_{suffix}"
+        triggers: bad_layer
+    hints:
+      - "Keep the suffixes in a dict constant."
+      - "Check for a dot in catalog and for an unknown layer before building the name."
+      - "`f\"{catalog}.research_{layer}.{tracker}_{LAYER_SUFFIX[layer]}\"`."
+    explanation: |
+      One function owns the naming convention. It rejects inputs that would produce a wrong name instead of silently creating a new table.
+
+  - id: A4-L1-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      You lay out Unity Catalog for the research programme. Choose the level for each item.
+    slots:
+      - id: env
+        label: "Development versus production"
+        options: &levels
+          - {id: catalog, text: Catalog}
+          - {id: schema, text: Schema}
+          - {id: table, text: Table}
+        answer: catalog
+      - id: layer
+        label: "Bronze, silver and gold"
+        options: *levels
+        answer: schema
+      - id: governance
+        label: "Run log, variable registry and contracts"
+        options: *levels
+        answer: schema
+      - id: tracker
+        label: "One tracker's respondents at respondent x wave grain"
+        options: *levels
+        answer: table
+    model_answer: |
+      - Catalog per environment: `research_dev`, `research_prod`.
+      - Schema per layer, plus `research_governance` for the run log, registry and contracts.
+      - Table per tracker and grain: `nat_respondents`.
+    wrong_answers:
+      - answer: {layer: catalog}
+        feedback: "A catalog per layer multiplies catalogs by environments, and grants must then be repeated everywhere. Use schemas for layers."
+      - answer: {tracker: schema}
+        feedback: "A schema per tracker scatters the layers. Keep layers as schemas, and trackers as tables within them."
+      - answer: {env: schema}
+        feedback: "Schemas under one catalog share its permissions and storage. Environments need the stronger boundary of separate catalogs."
+    hints:
+      - "The strongest boundary goes at the top."
+      - "Layers group tables with the same contract."
+      - "Tables hold one dataset at one grain."
+    explanation: |
+      Environment, layer, table: each level answers one question, and the full name tells a reader all three.
+
+recap:
+  - front: "Unity Catalog name format"
+    back: "catalog.schema.table, for example research_prod.research_silver.nat_respondents."
+  - front: "What does each level hold in this project?"
+    back: "Catalog: environment. Schema: layer or governance. Table: tracker at a grain."
+  - front: "Why never write a two-part table name in pipeline code?"
+    back: "It resolves against the session's current catalog, which varies by cluster, notebook and job."
+  - front: "Where do table names come from?"
+    back: "One function built from config, such as table_name(catalog, layer, tracker)."
+
+claims:
+  - claim: "Unity Catalog uses a three-level namespace, catalog.schema.table, and two-part names resolve against the current catalog."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/"
+  - claim: "spark.catalog.currentCatalog() returns the current catalog (PySpark 3.4 and later)."
+    status: verified
+    source: "Present on PySpark 4.0.4 in this repository."

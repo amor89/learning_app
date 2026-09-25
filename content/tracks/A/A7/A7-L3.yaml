@@ -1,0 +1,372 @@
+id: A7-L3
+title: Alert on failures, and on the silence that hides them
+
+concept: |
+  An alert is useful when it fires for real problems, reaches the person who can act, and says enough to start. Pipelines need two kinds.
+
+  **1. Loud failures: the job fails.** Databricks job notifications send an email or a webhook message when a run fails. In a job definition or bundle:
+
+  ```yaml
+  email_notifications:
+    on_failure:
+      - data-oncall@example.org
+  ```
+
+  These fire only if the job actually fails. Every `except` block that logs and carries on silences them. Log, record the run as FAILED, then re-raise (lesson A7-L2).
+
+  Job-level notifications are not sent when a failed task is retried. If you want a message for every failed attempt, add task-level notifications.
+
+  **2. Silent failures: the job succeeds, but the data is wrong or missing.** A job that never starts, a MERGE that writes 0 rows, a wave with a WARN on every contract check. No job fails, so no notification fires. Detect these with queries on your run log and QA results tables, run on a schedule, for example as Databricks SQL alerts:
+
+  - No SUCCESS run for a pipeline in the last 26 hours (a daily job plus slack).
+  - A run with `rows_processed = 0`.
+  - More WARN results for a wave than the last five waves' average.
+
+  Write each alert query against the exact values your tables hold. A query for `status = 'FAIL'` never fires on a table that stores `FAILED`.
+
+  Send alerts to a group address or channel, never to one person's inbox. Include the pipeline, the wave, the run ID and a link, so the reader can start without searching.
+
+why_it_matters: |
+  A nightly bronze job's schedule is paused during a workspace migration and never resumed. The job does not fail, because it never runs, so no failure email arrives. Silver and gold keep succeeding on the old data. Eleven days later a client asks why the dashboard has not moved.
+
+  A scheduled query, "no SUCCESS for nat_bronze_pipeline in 26 hours", would have alerted the on-call group on the second morning.
+
+worked_example:
+  language: sql
+  weak:
+    code: |
+      -- Alert: failed runs today
+      SELECT COUNT(*) AS failures
+      FROM research_governance.pipeline_run_log
+      WHERE status = 'FAIL'
+        AND run_timestamp >= current_date();
+    annotations:
+      - find: "WHERE status = 'FAIL'"
+        note: "The table stores FAILED. This alert has never fired."
+      - find: "SELECT COUNT(*) AS failures"
+        note: "Counts failures only. A job that stopped running produces no rows and no alert."
+  strong:
+    code: |
+      -- Alert 1: pipelines with no successful run in the last 26 hours.
+      SELECT pipeline_name,
+             max(finished_at) AS last_success
+      FROM research_prod.research_governance.pipeline_run_log
+      WHERE status = 'SUCCESS'
+      GROUP BY pipeline_name
+      HAVING max(finished_at) < current_timestamp() - INTERVAL 26 HOURS;
+
+      -- Alert 2: successful runs that wrote nothing in the last day.
+      SELECT pipeline_name, wave_id, run_id
+      FROM research_prod.research_governance.pipeline_run_log
+      WHERE status = 'SUCCESS'
+        AND rows_processed = 0
+        AND finished_at >= current_timestamp() - INTERVAL 1 DAY;
+    annotations:
+      - find: "HAVING max(finished_at) < current_timestamp() - INTERVAL 26 HOURS;"
+        note: "Detects silence: a pipeline whose last success is too old, whether it failed or never ran."
+      - find: "AND rows_processed = 0"
+        note: "A success that did nothing is a silent failure worth an alert."
+      - find: "SELECT pipeline_name, wave_id, run_id"
+        note: "The alert names what to look at: pipeline, wave and run."
+  takeaway: |
+    Job notifications catch runs that fail. Scheduled queries catch runs that do not happen, or that succeed at doing nothing.
+
+exercises:
+  - id: A7-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A job has `email_notifications.on_failure` configured. Its silver task catches every exception, logs it, and returns normally. The MERGE fails. What arrives in the on-call inbox?
+    options:
+      - {id: a, text: "A failure email."}
+      - {id: b, text: "Nothing."}
+      - {id: c, text: "A warning email."}
+      - {id: d, text: "A success email."}
+    answer: b
+    reasons:
+      - {id: r1, text: "The task returns normally, so the run succeeds and on_failure never fires."}
+      - {id: r2, text: "Notifications only work for SQL tasks."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "on_failure fires when the run fails. Swallowing the exception made the run succeed."
+      - answer: c
+        feedback: "There is no warning notification for a caught exception. The run simply succeeds."
+      - answer: d
+        feedback: "Only if on_success were configured. It is not."
+      - answer: b|r2
+        feedback: "Right outcome, wrong reason. Notifications work for every task type. The run succeeded because the exception was swallowed."
+    hints:
+      - "Does the run fail?"
+      - "When does on_failure send?"
+      - "No failure, no email."
+    explanation: |
+      Catching and not re-raising turns a failure into a success, so the failure notification never fires. Log, record FAILED, then re-raise.
+
+  - id: A7-L3-E2
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the job settings so a failed run emails the on-call group.
+    template: |
+      email_notifications:
+        [[g1]]:
+          - [[g2]]
+    gaps:
+      g1: {accepted: [on_failure]}
+      g2: {accepted: [data-oncall@example.org]}
+    wrong_answers:
+      - answer: {g1: on_error}
+        feedback: "The key is `on_failure`. Other keys include on_start and on_success."
+      - answer: {g2: sam.jones@example.org}
+        feedback: "Send alerts to a group address. One person's inbox goes quiet when they are away."
+    hints:
+      - "The event key names what happened to the run."
+      - "Send to the on-call group address."
+      - "`on_failure` and `data-oncall@example.org`."
+    explanation: |
+      `email_notifications.on_failure` lists the addresses to notify when a run fails. Use a group address so the alert survives holidays and team changes.
+
+  - id: A7-L3-E3
+    type: spot_bug
+    difficulty: 3
+    language: sql
+    prompt: |
+      The run log stores status values `SUCCESS` and `FAILED`. This alert has never fired, even on nights with failures. Tap the line, then fix the query.
+    code: |
+      SELECT pipeline_name, run_id, error_message
+      FROM research_prod.research_governance.pipeline_run_log
+      WHERE status = 'FAIL'
+        AND finished_at >= current_timestamp() - INTERVAL 1 DAY;
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: failed_value
+          type: required
+          pattern: "status\\s*=\\s*'FAILED'"
+          message: "Match the stored value exactly: status = 'FAILED'."
+        - id: no_fail
+          type: forbidden
+          pattern: "status\\s*=\\s*'FAIL'(?!ED)"
+          message: "'FAIL' does not match 'FAILED'."
+        - id: keeps_window
+          type: required
+          pattern: "INTERVAL\\s+1\\s+DAY"
+          message: "Keep the one-day window."
+    fix_solution: |
+      SELECT pipeline_name, run_id, error_message
+      FROM research_prod.research_governance.pipeline_run_log
+      WHERE status = 'FAILED'
+        AND finished_at >= current_timestamp() - INTERVAL 1 DAY;
+    wrong_answers:
+      - lines: [4]
+        feedback: "The one-day window is fine. Compare the status literal with what the table stores."
+    hints:
+      - "Which values does the table hold?"
+      - "Does 'FAIL' equal 'FAILED'?"
+      - "Use status = 'FAILED'."
+    explanation: |
+      String comparison is exact, so `'FAIL'` never matches `'FAILED'`. Typed statuses in the writer (Literal) and a test query against real rows catch this.
+
+  - id: A7-L3-E4
+    type: write_function
+    difficulty: 4
+    language: python
+    prompt: |
+      Write `stale_pipelines(runs, now, max_age_hours=26)`. `runs` is a list of dicts with `pipeline_name`, `status` and `finished_at` (timezone-aware datetime). Return the sorted names of pipelines whose most recent SUCCESS is older than `max_age_hours` before `now`. A pipeline with runs but no SUCCESS at all is stale too.
+    starter: |
+      from datetime import datetime, timedelta
+
+
+      def stale_pipelines(runs: list[dict[str, object]], now: datetime, max_age_hours: int = 26) -> list[str]:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: stale_pipelines
+          typed: true
+          docstring: true
+          message: "Give `stale_pipelines` type hints and a docstring."
+      setup: |
+        from datetime import datetime, timedelta, timezone
+        NOW = datetime(2026, 9, 25, 8, 0, tzinfo=timezone.utc)
+        def run(name, status, hours_ago):
+            return {"pipeline_name": name, "status": status, "finished_at": NOW - timedelta(hours=hours_ago)}
+      tests:
+        - id: fresh
+          code: |
+            assert stale_pipelines([run("nat_silver", "SUCCESS", 5)], NOW) == []
+          message: "A success 5 hours ago is fresh."
+        - id: old_success
+          code: |
+            assert stale_pipelines([run("nat_bronze", "SUCCESS", 30)], NOW) == ["nat_bronze"]
+          message: "A last success 30 hours ago is stale with the 26-hour limit."
+        - id: failures_only
+          code: |
+            assert stale_pipelines([run("nat_gold", "FAILED", 1), run("nat_gold", "FAILED", 25)], NOW) == ["nat_gold"]
+          message: "A pipeline with only FAILED runs has no success at all, so it is stale."
+        - id: latest_counts
+          code: |
+            runs = [run("nat_silver", "SUCCESS", 40), run("nat_silver", "SUCCESS", 2), run("nat_silver", "FAILED", 1)]
+            assert stale_pipelines(runs, NOW) == []
+          message: "Use the most recent SUCCESS. A later FAILED does not make a recent success stale."
+        - id: sorted_limit
+          code: |
+            runs = [run("b", "SUCCESS", 13), run("a", "SUCCESS", 13), run("c", "SUCCESS", 5)]
+            assert stale_pipelines(runs, NOW, max_age_hours=12) == ["a", "b"]
+          message: "Use the max_age_hours argument and return names sorted."
+    solution: |
+      from datetime import datetime, timedelta
+
+
+      def stale_pipelines(runs: list[dict[str, object]], now: datetime, max_age_hours: int = 26) -> list[str]:
+          """Pipelines whose latest SUCCESS is older than max_age_hours, or that never succeeded.
+
+          Args:
+              runs: Run log rows with pipeline_name, status and finished_at.
+              now: Current time, timezone-aware.
+              max_age_hours: Largest acceptable age of the latest success.
+
+          Returns:
+              Sorted pipeline names.
+          """
+          cutoff = now - timedelta(hours=max_age_hours)
+          latest: dict[str, datetime | None] = {}
+          for r in runs:
+              name = str(r["pipeline_name"])
+              latest.setdefault(name, None)
+              finished = r["finished_at"]
+              if r["status"] == "SUCCESS" and isinstance(finished, datetime):
+                  current = latest[name]
+                  if current is None or finished > current:
+                      latest[name] = finished
+          return sorted(name for name, last in latest.items() if last is None or last < cutoff)
+    seeded_bugs:
+      - |
+        from datetime import datetime, timedelta
+
+
+        def stale_pipelines(runs: list[dict[str, object]], now: datetime, max_age_hours: int = 26) -> list[str]:
+            """Only looks at successes, so never-successful pipelines vanish."""
+            cutoff = now - timedelta(hours=max_age_hours)
+            latest: dict[str, datetime] = {}
+            for r in runs:
+                if r["status"] == "SUCCESS":
+                    name = str(r["pipeline_name"])
+                    finished = r["finished_at"]
+                    assert isinstance(finished, datetime)
+                    latest[name] = max(latest.get(name, finished), finished)
+            return sorted(n for n, last in latest.items() if last < cutoff)
+      - |
+        from datetime import datetime, timedelta
+
+
+        def stale_pipelines(runs: list[dict[str, object]], now: datetime, max_age_hours: int = 26) -> list[str]:
+            """Looks at the latest run of any status."""
+            cutoff = now - timedelta(hours=max_age_hours)
+            latest: dict[str, object] = {}
+            for r in sorted(runs, key=lambda r: r["finished_at"]):
+                latest[str(r["pipeline_name"])] = r
+            return sorted(n for n, r in latest.items() if r["status"] != "SUCCESS" or r["finished_at"] < cutoff)
+    wrong_answers:
+      - answer: |
+          from datetime import datetime, timedelta
+
+
+          def stale_pipelines(runs: list[dict[str, object]], now: datetime, max_age_hours: int = 26) -> list[str]:
+              """Only looks at successes, so never-successful pipelines vanish."""
+              cutoff = now - timedelta(hours=max_age_hours)
+              latest: dict[str, datetime] = {}
+              for r in runs:
+                  if r["status"] == "SUCCESS":
+                      name = str(r["pipeline_name"])
+                      finished = r["finished_at"]
+                      assert isinstance(finished, datetime)
+                      latest[name] = max(latest.get(name, finished), finished)
+              return sorted(n for n, last in latest.items() if last < cutoff)
+        triggers: failures_only
+      - answer: |
+          from datetime import datetime, timedelta
+
+
+          def stale_pipelines(runs: list[dict[str, object]], now: datetime, max_age_hours: int = 26) -> list[str]:
+              """Looks at the latest run of any status."""
+              cutoff = now - timedelta(hours=max_age_hours)
+              latest: dict[str, object] = {}
+              for r in sorted(runs, key=lambda r: r["finished_at"]):
+                  latest[str(r["pipeline_name"])] = r
+              return sorted(n for n, r in latest.items() if r["status"] != "SUCCESS" or r["finished_at"] < cutoff)
+        triggers: latest_counts
+    hints:
+      - "Track every pipeline name, starting with no success."
+      - "Keep the latest SUCCESS finished_at per pipeline."
+      - "Stale when there is no success, or the latest is before now - max_age_hours."
+    explanation: |
+      Recording every pipeline first means one that never succeeded still appears. Comparing only the latest success stops a single later failure from raising a false alarm.
+
+  - id: A7-L3-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      Choose how each problem should be detected.
+    slots:
+      - id: merge_error
+        label: "The silver MERGE raises an exception"
+        options: &detect
+          - {id: job, text: "Job failure notification"}
+          - {id: query, text: "Scheduled query on the run log or QA tables"}
+          - {id: none, text: "No alert needed"}
+        answer: job
+      - id: paused
+        label: "The bronze job's schedule was paused and nothing has run for two days"
+        options: *detect
+        answer: query
+      - id: zero_rows
+        label: "Gold succeeds but writes 0 rows for a new wave"
+        options: *detect
+        answer: query
+      - id: slow
+        label: "A run took 9 minutes instead of the usual 8"
+        options: *detect
+        answer: none
+    model_answer: |
+      - Exceptions fail the job: the failure notification handles them, provided nothing swallows them.
+      - A job that never runs cannot fail: detect the missing SUCCESS with a query.
+      - A success that did nothing: query for rows_processed = 0.
+      - Normal variation is not an alert. Alerts that fire on noise get ignored.
+    wrong_answers:
+      - answer: {paused: job}
+        feedback: "A paused job never runs, so it never fails, and the failure notification never fires."
+      - answer: {zero_rows: job}
+        feedback: "The job succeeds, so no failure notification fires. Only a query on the run log sees the zero."
+      - answer: {slow: query}
+        feedback: "A one-minute change is noise. Alerting on it trains people to ignore alerts."
+    hints:
+      - "Which problems make the job fail?"
+      - "Which problems leave the job successful, or never started?"
+      - "Is every change worth waking someone?"
+    explanation: |
+      Failures that raise are covered by job notifications. Silence and empty successes need scheduled queries. Noise needs no alert at all.
+
+recap:
+  - front: "Why must an except block re-raise?"
+    back: "Otherwise the run succeeds and on_failure notifications never fire."
+  - front: "Job-level versus task-level failure notifications"
+    back: "Job-level notifications are not sent for retried task failures. Use task-level ones to hear about every failed attempt."
+  - front: "How do you detect a pipeline that stopped running?"
+    back: "A scheduled query: no SUCCESS in the run log within the expected window."
+  - front: "Where should alerts go?"
+    back: "A group address or channel, with pipeline, wave, run ID and a link."
+
+claims:
+  - claim: "Jobs support email_notifications and webhook_notifications with on_start, on_success and on_failure; job-level notifications are not sent when failed tasks are retried; at most 3 destinations per on_failure."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/jobs/notifications"
+  - claim: "Databricks SQL alerts run a query on a schedule and notify when a condition is met."
+    status: unverified
+    source: "Check https://docs.databricks.com/aws/en/sql/user/alerts/ before relying on alert configuration details."

@@ -67,7 +67,7 @@ def render_exercise(ex: Exercise, hide_key: bool) -> dict[str, Any]:
     Drops seeded bugs and code wrong answers, which only the test suite needs.
     Adds rendered HTML for prompts, hints and explanations.
     """
-    data = ex.model_dump(mode="json", exclude={"seeded_bugs", "fix_seeded_bugs"})
+    data = ex.model_dump(mode="json", exclude={"seeded_bugs", "fix_seeded_bugs", "spark_tests"})
     data["prompt_html"] = md_to_html(ex.prompt)
     data["hints_html"] = [md_inline(h) for h in ex.hints]
     data["explanation_html"] = md_to_html(ex.explanation)

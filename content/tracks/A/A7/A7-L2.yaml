@@ -1,0 +1,420 @@
+id: A7-L2
+title: A pipeline run log table with an explicit schema
+
+concept: |
+  Logs describe one run. A **run log table** lets you compare every run: which waves loaded, how many rows, how long, and which failed. It is a Delta table, append-only, with one row per pipeline run per layer.
+
+  A useful schema:
+
+  | Column | Type | Notes |
+  |---|---|---|
+  | `run_id` | STRING, not null | `str(uuid.uuid4())`, shared by every log line of the run |
+  | `pipeline_name` | STRING, not null | `nat_silver_pipeline` |
+  | `tracker_id`, `wave_id`, `layer` | STRING | what the run touched |
+  | `rows_processed` | BIGINT, not null | from Delta commit metrics |
+  | `status` | STRING, not null | `SUCCESS` or `FAILED` |
+  | `error_message` | STRING, nullable | NULL on success |
+  | `started_at`, `finished_at` | TIMESTAMP, not null | UTC |
+
+  Build the record against an **explicit `StructType`**. Your reference `log_pipeline_run` builds a DataFrame from a dict and lets Spark infer types. That fails on every successful run: `error_message` is `None`, and Spark raises `CANNOT_DETERMINE_TYPE` because it cannot infer a type from a column of only nulls. The explicit schema also rejects a wrong type, such as `"12"` for `rows_processed`, before anything is written.
+
+  Take timestamps with `datetime.now(timezone.utc)`. `datetime.utcnow()` is deprecated from Python 3.12 and returns a naive datetime that carries no timezone.
+
+  Import everything you use. The reference function calls `uuid` and `datetime` without importing them, a `NameError` on its first run. `ruff check` (rule F821) catches it in CI.
+
+  Write the log record in a `finally` block, or in both the success and failure paths, so failed runs are logged too. A run log that only records successes cannot tell you how often the pipeline fails.
+
+why_it_matters: |
+  The reference `log_pipeline_run` has never succeeded. It fails first with `NameError: name 'uuid' is not defined`. Once someone adds the imports, it fails on every successful run with `CANNOT_DETERMINE_TYPE`, because `error_message=None` is the only value in its column. The orchestrator catches that error "so logging never breaks the pipeline". Months later the team wants to show a client every load of 2025. The run log table is empty.
+
+  An explicit schema, imported names and a test that writes one record on a local SparkSession prevent all three problems.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      def log_pipeline_run(pipeline_name, tracker_id, wave_id, layer, rows_processed, status, error_message: str = None):
+          run_record = spark.createDataFrame([{
+              "run_id": str(uuid.uuid4()),
+              "pipeline_name": pipeline_name,
+              "rows_processed": rows_processed,
+              "status": status,
+              "error_message": error_message,
+              "run_timestamp": datetime.utcnow().isoformat(),
+          }])
+          run_record.write.format("delta").mode("append").saveAsTable("research_governance.pipeline_run_log")
+    annotations:
+      - find: "error_message: str = None):"
+        note: "Claims a string, defaults to None (defect 7)."
+      - find: "run_record = spark.createDataFrame([{"
+        note: "Types inferred from one dict. An all-None column raises CANNOT_DETERMINE_TYPE."
+      - find: '"run_id": str(uuid.uuid4()),'
+        note: "uuid is never imported: NameError (defect 1)."
+      - find: '"run_timestamp": datetime.utcnow().isoformat(),'
+        note: "datetime not imported, utcnow deprecated (defect 6), and the timestamp stored as a string."
+  strong:
+    code: |
+      import uuid
+      from datetime import datetime, timezone
+
+      from pyspark.sql import DataFrame, SparkSession
+      from pyspark.sql import types as T
+
+      RUN_LOG_SCHEMA = T.StructType([
+          T.StructField("run_id", T.StringType(), False),
+          T.StructField("pipeline_name", T.StringType(), False),
+          T.StructField("wave_id", T.StringType(), True),
+          T.StructField("rows_processed", T.LongType(), False),
+          T.StructField("status", T.StringType(), False),
+          T.StructField("error_message", T.StringType(), True),
+          T.StructField("started_at", T.TimestampType(), False),
+          T.StructField("finished_at", T.TimestampType(), False),
+      ])
+
+
+      def new_run_id() -> str:
+          """A unique id shared by the log lines and the run log row of one run."""
+          return str(uuid.uuid4())
+
+
+      def run_record(
+          spark: SparkSession,
+          run_id: str,
+          pipeline_name: str,
+          wave_id: str | None,
+          rows_processed: int,
+          status: str,
+          started_at: datetime,
+          error_message: str | None = None,
+      ) -> DataFrame:
+          """One run log row, typed by RUN_LOG_SCHEMA."""
+          finished_at = datetime.now(timezone.utc)
+          row = (run_id, pipeline_name, wave_id, rows_processed, status, error_message, started_at, finished_at)
+          return spark.createDataFrame([row], RUN_LOG_SCHEMA)
+    annotations:
+      - find: "RUN_LOG_SCHEMA = T.StructType(["
+        note: "The schema is declared once. Nothing is inferred."
+      - find: 'T.StructField("error_message", T.StringType(), True),'
+        note: "Nullable string: None is fine, because the type is declared."
+      - find: "finished_at = datetime.now(timezone.utc)"
+        note: "Timezone-aware UTC, stored as a real TIMESTAMP."
+      - find: "return spark.createDataFrame([row], RUN_LOG_SCHEMA)"
+        note: "A wrong type, such as \"12\" for rows_processed, fails here with a clear message."
+  takeaway: |
+    The strong record builds on every run, success or failure, and its types never depend on the values in one row.
+
+exercises:
+  - id: A7-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      `spark.createDataFrame([{"run_id": "r1", "error_message": None}])` runs on PySpark 4.0. What happens?
+    options:
+      - {id: a, text: "error_message becomes a STRING column holding NULL."}
+      - {id: b, text: "It fails with CANNOT_DETERMINE_TYPE."}
+      - {id: c, text: "error_message is dropped from the DataFrame."}
+      - {id: d, text: "error_message becomes a NULL-typed column that Delta accepts."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Spark infers each column's type from the data, and a column holding only None gives it nothing to infer from."}
+      - {id: r2, text: "Spark never allows None in a DataFrame."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Only with an explicit schema. Inference sees only None and cannot choose STRING."
+      - answer: c
+        feedback: "Spark does not drop columns during inference. It raises."
+      - answer: d
+        feedback: "Inference fails before any table is involved."
+      - answer: b|r2
+        feedback: "Right outcome, wrong reason. None is fine when the schema is declared. The problem is inferring a type from nothing but None."
+    hints:
+      - "Where does Spark get the column types here?"
+      - "What type can it infer from None alone?"
+      - "It raises."
+    explanation: |
+      With no schema, Spark infers types from values. A column of only `None` has no type to infer, so it raises `CANNOT_DETERMINE_TYPE`. Declare a `StructType`.
+
+  - id: A7-L2-E2
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the imports and the timestamp so the record code runs on Python 3.12 without deprecation warnings.
+    template: |
+      import [[g1]]
+      from datetime import datetime, [[g2]]
+
+      run_id = str(uuid.uuid4())
+      started_at = datetime.[[g3]](timezone.utc)
+    gaps:
+      g1: {accepted: [uuid]}
+      g2: {accepted: [timezone]}
+      g3: {accepted: [now]}
+    wrong_answers:
+      - answer: {g3: utcnow}
+        feedback: "`datetime.utcnow()` is deprecated from Python 3.12 and returns a naive datetime. Use `datetime.now(timezone.utc)`."
+      - answer: {g2: date}
+        feedback: "You need `timezone`, for `timezone.utc`."
+    hints:
+      - "The module that generates unique ids."
+      - "The class that provides utc."
+      - "`datetime.now(timezone.utc)`."
+    explanation: |
+      `import uuid` and `from datetime import datetime, timezone` supply every name. `datetime.now(timezone.utc)` gives a timezone-aware UTC timestamp.
+
+  - id: A7-L2-E3
+    type: spot_bug
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      This builds a run log row. It fails on every successful run. Tap the line, then fix the function so it declares its schema.
+    code: |
+      def run_record(spark: SparkSession, run_id: str, rows: int, status: str, error_message: str | None) -> DataFrame:
+          """One run log row."""
+          return spark.createDataFrame([{
+              "run_id": run_id,
+              "rows_processed": rows,
+              "status": status,
+              "error_message": error_message,
+          }])
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: struct_type
+          kind: requires_call
+          name: StructType
+          message: "Declare the schema with `T.StructType([...])`."
+        - id: string_error
+          kind: requires_pattern
+          pattern: "StructField\\(\\s*[\"']error_message[\"']\\s*,\\s*T\\.StringType\\(\\)\\s*,\\s*True\\s*\\)"
+          message: "Declare error_message as a nullable string: `T.StructField(\"error_message\", T.StringType(), True)`."
+        - id: passes_schema
+          kind: requires_pattern
+          pattern: "createDataFrame\\(\\s*\\[[^\\]]*\\]\\s*,\\s*\\w+"
+          message: "Pass the schema as the second argument of createDataFrame."
+    fix_solution: |
+      def run_record(spark: SparkSession, run_id: str, rows: int, status: str, error_message: str | None) -> DataFrame:
+          """One run log row."""
+          schema = T.StructType([
+              T.StructField("run_id", T.StringType(), False),
+              T.StructField("rows_processed", T.LongType(), False),
+              T.StructField("status", T.StringType(), False),
+              T.StructField("error_message", T.StringType(), True),
+          ])
+          return spark.createDataFrame([(run_id, rows, status, error_message)], schema)
+    spark_tests: |
+      df = run_record(spark, "r1", 10, "SUCCESS", None)
+      assert df.collect()[0].error_message is None
+      assert df.schema["error_message"].dataType == T.StringType()
+    wrong_answers:
+      - lines: [7]
+        feedback: "Passing None is correct for a success. The problem is how Spark decides the column's type."
+    hints:
+      - "What does Spark infer from a column that holds only None?"
+      - "Where can you tell Spark the types instead?"
+      - "Build a StructType and pass it to createDataFrame with a tuple row."
+    explanation: |
+      Without a schema, the successful case has `error_message=None` only, and inference fails. A `StructType` declares the type, so None is simply NULL.
+
+  - id: A7-L2-E4
+    type: write_function
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Write `run_record(spark, run_id, pipeline_name, rows_processed, status, started_at, error_message=None)` returning a one-row DataFrame typed by a module constant `RUN_LOG_SCHEMA` with columns `run_id`, `pipeline_name`, `rows_processed` (LongType), `status`, `error_message` (nullable), `started_at` and `finished_at` (TimestampType). Set `finished_at` with `datetime.now(timezone.utc)`.
+    starter: |
+      from datetime import datetime, timezone
+
+      from pyspark.sql import DataFrame, SparkSession
+      from pyspark.sql import types as T
+
+      RUN_LOG_SCHEMA = ...
+
+
+      def run_record(spark: SparkSession, run_id: str, pipeline_name: str, rows_processed: int, status: str, started_at: datetime, error_message: str | None = None) -> DataFrame:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: run_record
+          typed: true
+          docstring: true
+          message: "Give `run_record` type hints and a docstring."
+        - id: schema_constant
+          kind: requires_pattern
+          pattern: "RUN_LOG_SCHEMA\\s*=\\s*T\\.StructType\\("
+          message: "Define `RUN_LOG_SCHEMA = T.StructType([...])` at module level."
+        - id: no_utcnow
+          kind: forbids_call
+          name: utcnow
+          message: "`datetime.utcnow()` is deprecated from Python 3.12. Use `datetime.now(timezone.utc)`."
+        - id: tz_now
+          kind: requires_pattern
+          pattern: "datetime\\.now\\(\\s*timezone\\.utc\\s*\\)"
+          message: "Set finished_at with `datetime.now(timezone.utc)`."
+        - id: long_rows
+          kind: requires_pattern
+          pattern: "StructField\\(\\s*[\"']rows_processed[\"']\\s*,\\s*T\\.LongType\\(\\)"
+          message: "rows_processed is `T.LongType()`."
+        - id: uses_schema
+          kind: requires_pattern
+          pattern: "createDataFrame\\([^)]*RUN_LOG_SCHEMA\\s*\\)"
+          message: "Pass `RUN_LOG_SCHEMA` to createDataFrame."
+    solution: |
+      from datetime import datetime, timezone
+
+      from pyspark.sql import DataFrame, SparkSession
+      from pyspark.sql import types as T
+
+      RUN_LOG_SCHEMA = T.StructType([
+          T.StructField("run_id", T.StringType(), False),
+          T.StructField("pipeline_name", T.StringType(), False),
+          T.StructField("rows_processed", T.LongType(), False),
+          T.StructField("status", T.StringType(), False),
+          T.StructField("error_message", T.StringType(), True),
+          T.StructField("started_at", T.TimestampType(), False),
+          T.StructField("finished_at", T.TimestampType(), False),
+      ])
+
+
+      def run_record(spark: SparkSession, run_id: str, pipeline_name: str, rows_processed: int, status: str, started_at: datetime, error_message: str | None = None) -> DataFrame:
+          """One run log row typed by RUN_LOG_SCHEMA.
+
+          Args:
+              spark: Active session.
+              run_id: Unique id of the run.
+              pipeline_name: Job name.
+              rows_processed: Rows written by the run.
+              status: SUCCESS or FAILED.
+              started_at: UTC start time.
+              error_message: Error text for a failed run.
+
+          Returns:
+              A one-row DataFrame ready to append to the run log table.
+          """
+          finished_at = datetime.now(timezone.utc)
+          row = (run_id, pipeline_name, rows_processed, status, error_message, started_at, finished_at)
+          return spark.createDataFrame([row], RUN_LOG_SCHEMA)
+    spark_tests: |
+      from datetime import datetime, timezone
+      df = run_record(spark, "r1", "nat_silver_pipeline", 1832, "SUCCESS", datetime.now(timezone.utc))
+      r = df.collect()[0]
+      assert r.error_message is None and r.rows_processed == 1832 and r.finished_at >= r.started_at
+      failed = run_record(spark, "r2", "nat_silver_pipeline", 0, "FAILED", datetime.now(timezone.utc), "MERGE failed")
+      assert failed.collect()[0].error_message == "MERGE failed"
+    seeded_bugs:
+      - |
+        from datetime import datetime
+
+        from pyspark.sql import DataFrame, SparkSession
+        from pyspark.sql import types as T
+
+        RUN_LOG_SCHEMA = T.StructType([
+            T.StructField("run_id", T.StringType(), False),
+            T.StructField("pipeline_name", T.StringType(), False),
+            T.StructField("rows_processed", T.LongType(), False),
+            T.StructField("status", T.StringType(), False),
+            T.StructField("error_message", T.StringType(), True),
+            T.StructField("started_at", T.TimestampType(), False),
+            T.StructField("finished_at", T.TimestampType(), False),
+        ])
+
+
+        def run_record(spark: SparkSession, run_id: str, pipeline_name: str, rows_processed: int, status: str, started_at: datetime, error_message: str | None = None) -> DataFrame:
+            """Deprecated clock."""
+            row = (run_id, pipeline_name, rows_processed, status, error_message, started_at, datetime.utcnow())
+            return spark.createDataFrame([row], RUN_LOG_SCHEMA)
+      - |
+        from datetime import datetime, timezone
+
+        from pyspark.sql import DataFrame, SparkSession
+
+
+        def run_record(spark: SparkSession, run_id: str, pipeline_name: str, rows_processed: int, status: str, started_at: datetime, error_message: str | None = None) -> DataFrame:
+            """Inferred schema."""
+            return spark.createDataFrame([{"run_id": run_id, "pipeline_name": pipeline_name, "rows_processed": rows_processed, "status": status, "error_message": error_message, "started_at": started_at, "finished_at": datetime.now(timezone.utc)}])
+    wrong_answers:
+      - answer: |
+          from datetime import datetime
+
+          from pyspark.sql import DataFrame, SparkSession
+          from pyspark.sql import types as T
+
+          RUN_LOG_SCHEMA = T.StructType([
+              T.StructField("run_id", T.StringType(), False),
+              T.StructField("pipeline_name", T.StringType(), False),
+              T.StructField("rows_processed", T.LongType(), False),
+              T.StructField("status", T.StringType(), False),
+              T.StructField("error_message", T.StringType(), True),
+              T.StructField("started_at", T.TimestampType(), False),
+              T.StructField("finished_at", T.TimestampType(), False),
+          ])
+
+
+          def run_record(spark: SparkSession, run_id: str, pipeline_name: str, rows_processed: int, status: str, started_at: datetime, error_message: str | None = None) -> DataFrame:
+              """Deprecated clock."""
+              row = (run_id, pipeline_name, rows_processed, status, error_message, started_at, datetime.utcnow())
+              return spark.createDataFrame([row], RUN_LOG_SCHEMA)
+        triggers: no_utcnow
+      - answer: |
+          from datetime import datetime, timezone
+
+          from pyspark.sql import DataFrame, SparkSession
+
+
+          def run_record(spark: SparkSession, run_id: str, pipeline_name: str, rows_processed: int, status: str, started_at: datetime, error_message: str | None = None) -> DataFrame:
+              """Inferred schema."""
+              return spark.createDataFrame([{"run_id": run_id, "pipeline_name": pipeline_name, "rows_processed": rows_processed, "status": status, "error_message": error_message, "started_at": started_at, "finished_at": datetime.now(timezone.utc)}])
+        triggers: schema_constant
+    hints:
+      - "Declare seven StructFields in order, with error_message nullable."
+      - "Build the row as a tuple in the same order."
+      - "`spark.createDataFrame([row], RUN_LOG_SCHEMA)`."
+    explanation: |
+      The module-level schema makes every record the same shape, whatever its values. Tuples in schema order are the simplest row format.
+
+  - id: A7-L2-E5
+    type: order
+    difficulty: 5
+    prompt: |
+      Order the orchestrator's steps so both successful and failed runs are logged, and a failure still fails the job.
+    items:
+      - {id: id, text: "Create run_id and started_at"}
+      - {id: work, text: "try: run the layer and read rows_processed from the commit metrics"}
+      - {id: ok, text: "Set status SUCCESS"}
+      - {id: except, text: "except: set status FAILED and error_message, log.exception, then raise"}
+      - {id: finally, text: "finally: append the run record to the run log table"}
+    answer: [id, work, ok, except, finally]
+    wrong_answers:
+      - answer: [id, work, ok, finally, except]
+        feedback: "The except block belongs before finally in the try statement, and the record must see the FAILED status the except block sets."
+      - answer: [work, id, ok, except, finally]
+        feedback: "Create the run id first, so log lines during the work carry it."
+    hints:
+      - "The id must exist before any work is logged."
+      - "try, except, finally is Python's fixed order."
+      - "finally runs whether the work succeeded or raised."
+    explanation: |
+      `finally` runs after both paths, so every run is recorded with its true status, and the re-raise in `except` still fails the job.
+
+recap:
+  - front: "Why does the reference log_pipeline_run fail on success?"
+    back: "error_message=None is inferred with no type: CANNOT_DETERMINE_TYPE. Declare a StructType."
+  - front: "UTC timestamp in modern Python"
+    back: "datetime.now(timezone.utc). utcnow() is deprecated from 3.12 and naive."
+  - front: "Which ruff rule catches the missing uuid import?"
+    back: "F821, undefined name."
+  - front: "Where do you write the run record so failures are logged too?"
+    back: "In a finally block, after setting status in try and except."
+
+claims:
+  - claim: "createDataFrame from a dict with an all-None column raises CANNOT_DETERMINE_TYPE; an explicit StructType accepts None and rejects '12' for LongType with FIELD_DATA_TYPE_UNACCEPTABLE_WITH_NAME."
+    status: verified
+    source: "Run on PySpark 4.0.4 in this repository."
+  - claim: "datetime.utcnow() is deprecated from Python 3.12."
+    status: verified
+    source: "Python 3.12 release notes (What's New in Python 3.12, deprecated APIs); CLAUDE.md standard."

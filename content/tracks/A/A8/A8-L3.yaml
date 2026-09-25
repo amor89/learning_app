@@ -1,0 +1,349 @@
+id: A8-L3
+title: Change data feed, so downstream layers read only what changed
+
+concept: |
+  When silver changes, gold should reprocess only the rows that changed, not the whole table. **Change data feed** (CDF) makes a Delta table record row-level changes for every write.
+
+  Turn it on per table:
+
+  ```sql
+  ALTER TABLE research_prod.research_silver.nat_respondents
+  SET TBLPROPERTIES (delta.enableChangeDataFeed = true);
+  ```
+
+  Read the changes since a version:
+
+  ```python
+  changes = (
+      spark.read.option("readChangeFeed", "true")
+      .option("startingVersion", last_version + 1)
+      .table("research_prod.research_silver.nat_respondents")
+  )
+  ```
+
+  Each row carries three extra columns:
+
+  - `_change_type`: `insert`, `update_preimage` (the row before an update), `update_postimage` (the row after), or `delete`.
+  - `_commit_version` and `_commit_timestamp`: which commit made the change.
+
+  Two rules make CDF consumers correct:
+
+  1. **Drop `update_preimage` rows** before you use the changes. An update produces two rows, old and new. Keep the old one and every updated respondent is counted twice.
+  2. **Keep one row per key**: the latest by `_commit_version`. A respondent updated in three commits since your last run appears three times.
+
+  Track progress. Either store the last processed version in a state table, or read the feed as a stream (`readStream` with `readChangeFeed`) and let the checkpoint remember it. Change data only exists from the version where you enabled it. Asking for an earlier version fails with `DELTA_MISSING_CHANGE_DATA`. VACUUM also removes old change files after the retention window.
+
+  For gold, collect the waves and subgroups the changes touch, then recompute just those aggregates. Aggregates cannot be patched row by row.
+
+why_it_matters: |
+  A gold job rebuilds weighted metrics for every wave every night: 180 waves, 40 minutes. Most nights, only one wave changed. When a late correction arrives mid-afternoon, the team cannot refresh gold before the client call, because a full rebuild takes too long.
+
+  With CDF on silver, the job reads the day's changes, finds the one wave they touch, and recomputes it in under two minutes. The same job also stops double counting, because it drops `update_preimage` rows before aggregating.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      def changed_rows(spark, table, since):
+          changes = (
+              spark.read.option("readChangeFeed", "true")
+              .option("startingVersion", since)
+              .table(table)
+          )
+          return changes.filter(F.col("_change_type") != "delete")
+    annotations:
+      - find: 'return changes.filter(F.col("_change_type") != "delete")'
+        note: "Keeps update_preimage rows: every updated respondent appears twice, once with old values."
+      - find: '.option("startingVersion", since)'
+        note: "If since is the last processed version, that version is read again."
+      - find: "def changed_rows(spark, table, since):"
+        note: "A respondent updated in several commits still appears once per commit."
+  strong:
+    code: |
+      CURRENT_STATE = ["insert", "update_postimage"]
+
+
+      def read_changes(spark: SparkSession, table: str, last_processed_version: int) -> DataFrame:
+          """Row changes committed after last_processed_version."""
+          return (
+              spark.read.option("readChangeFeed", "true")
+              .option("startingVersion", last_processed_version + 1)
+              .table(table)
+          )
+
+
+      def latest_state(changes: DataFrame, keys: list[str]) -> DataFrame:
+          """One row per key: its newest change, excluding pre-images."""
+          window = Window.partitionBy(*keys).orderBy(F.col("_commit_version").desc())
+          return (
+              changes.filter(F.col("_change_type") != "update_preimage")
+              .withColumn("_rank", F.row_number().over(window))
+              .filter(F.col("_rank") == 1)
+              .drop("_rank")
+          )
+
+
+      def touched_waves(changes: DataFrame) -> list[str]:
+          """Waves with any change: the only gold waves to recompute."""
+          return sorted(r.wave_id for r in changes.select("wave_id").distinct().collect())
+    annotations:
+      - find: '.option("startingVersion", last_processed_version + 1)'
+        note: "Start after the last processed version, so nothing is read twice."
+      - find: 'changes.filter(F.col("_change_type") != "update_preimage")'
+        note: "Pre-images describe old state. Drop them."
+      - find: 'window = Window.partitionBy(*keys).orderBy(F.col("_commit_version").desc())'
+        note: "Several changes to one key since the last run: keep the newest. Deletes stay, so the consumer can remove the key."
+      - find: "def touched_waves(changes: DataFrame) -> list[str]:"
+        note: "Gold recomputes whole aggregates, but only for the waves that changed."
+  takeaway: |
+    Read after the last version, drop pre-images, keep the newest change per key, and recompute only what the changes touch.
+
+exercises:
+  - id: A8-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      An UPDATE changes one respondent's weight. Which change feed row holds the new weight?
+    options:
+      - {id: a, text: "insert"}
+      - {id: b, text: "update_preimage"}
+      - {id: c, text: "update_postimage"}
+      - {id: d, text: "delete"}
+    answer: c
+    reasons:
+      - {id: r1, text: "An update records the row before (pre-image) and after (post-image). The post-image holds the new values."}
+      - {id: r2, text: "Updates are recorded as a delete followed by an insert."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "insert marks a new row. An update of an existing row produces a pre-image and a post-image."
+      - answer: b
+        feedback: "The pre-image is the row before the update, with the old weight."
+      - answer: d
+        feedback: "delete marks a removed row."
+      - answer: c|r2
+        feedback: "Right row type, wrong reason. Updates appear as update_preimage and update_postimage, not delete plus insert."
+    hints:
+      - "An update records two versions of the row."
+      - "Which one comes after the change?"
+      - "post = after."
+    explanation: |
+      An update writes `update_preimage` (old values) and `update_postimage` (new values). Use the post-image, and drop the pre-image.
+
+  - id: A8-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: sql
+    prompt: |
+      CDF is enabled when the table is created. How many rows does the change read return?
+    code: |
+      CREATE TABLE c1 (id INT, v STRING) USING DELTA
+        TBLPROPERTIES (delta.enableChangeDataFeed = true);   -- version 0
+      INSERT INTO c1 VALUES (1, 'a'), (2, 'b');              -- version 1
+      UPDATE c1 SET v = 'z' WHERE id = 1;                    -- version 2
+      DELETE FROM c1 WHERE id = 2;                           -- version 3
+
+      SELECT COUNT(*) FROM table_changes('c1', 2);
+    answer: "3"
+    wrong_answers:
+      - answer: "2"
+        feedback: "The update produces two rows, pre-image and post-image, plus one delete row: three."
+      - answer: "5"
+        feedback: "Version 1's inserts come before the starting version 2, so they are not included."
+    hints:
+      - "Which versions does table_changes('c1', 2) read?"
+      - "How many rows does one updated row produce?"
+      - "Two for the update, one for the delete."
+    explanation: |
+      From version 2: `update_preimage` and `update_postimage` for id 1, and `delete` for id 2. Three rows. This was run on delta-spark 4.0.1.
+
+  - id: A8-L3-E3
+    type: fill_gap
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      Read silver's changes committed after the last processed version.
+    template: |
+      changes = (
+          spark.read.option("[[g1]]", "true")
+          .option("startingVersion", [[g2]])
+          .table(silver)
+      )
+    gaps:
+      g1: {accepted: [readChangeFeed]}
+      g2: {accepted: ["last_processed_version + 1", "last_processed_version+1"]}
+    wrong_answers:
+      - answer: {g2: last_processed_version}
+        feedback: "startingVersion is inclusive. Starting at the last processed version reads its changes twice."
+      - answer: {g1: enableChangeDataFeed}
+        feedback: "`delta.enableChangeDataFeed` is the table property. The read option is `readChangeFeed`."
+      - answer: {g2: "0"}
+        feedback: "Version 0 rereads all history every run, and fails if CDF was enabled later."
+    hints:
+      - "The read option names what you are reading."
+      - "startingVersion is inclusive."
+      - "`readChangeFeed` and `last_processed_version + 1`."
+    explanation: |
+      `readChangeFeed` switches the read to the change feed. Starting at `last_processed_version + 1` reads each change exactly once.
+
+  - id: A8-L3-E4
+    type: write_function
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Write `latest_state(changes, keys)`. From a change feed DataFrame, drop `update_preimage` rows, then keep one row per key: the one with the highest `_commit_version`. Use a window with `row_number`.
+    starter: |
+      from pyspark.sql import DataFrame, Window
+      from pyspark.sql import functions as F
+
+
+      def latest_state(changes: DataFrame, keys: list[str]) -> DataFrame:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: latest_state
+          typed: true
+          docstring: true
+          message: "Give `latest_state` type hints and a docstring."
+        - id: drops_preimage
+          kind: requires_pattern
+          pattern: "update_preimage"
+          message: "Drop rows where _change_type is update_preimage."
+        - id: by_version
+          kind: requires_pattern
+          pattern: "_commit_version[\"']\\s*\\)\\s*\\.desc\\(\\)"
+          message: "Order the window by _commit_version, newest first: `F.col(\"_commit_version\").desc()`."
+        - id: row_number
+          kind: requires_call
+          name: row_number
+          message: "Rank with `F.row_number()` to keep exactly one row per key."
+        - id: no_drop_dup
+          kind: forbids_call
+          name: dropDuplicates
+          message: "dropDuplicates keeps an arbitrary change. Rank by _commit_version."
+    solution: |
+      from pyspark.sql import DataFrame, Window
+      from pyspark.sql import functions as F
+
+
+      def latest_state(changes: DataFrame, keys: list[str]) -> DataFrame:
+          """One row per key: its newest change, excluding update pre-images.
+
+          Args:
+              changes: Rows read with readChangeFeed.
+              keys: Columns identifying one row of the source table.
+
+          Returns:
+              The newest insert, update_postimage or delete per key.
+          """
+          window = Window.partitionBy(*keys).orderBy(F.col("_commit_version").desc())
+          return (
+              changes.filter(F.col("_change_type") != "update_preimage")
+              .withColumn("_rank", F.row_number().over(window))
+              .filter(F.col("_rank") == 1)
+              .drop("_rank")
+          )
+    spark_tests: |
+      schema = "id INT, v STRING, _change_type STRING, _commit_version LONG"
+      rows = [(1, "a", "insert", 1), (1, "a", "update_preimage", 2), (1, "z", "update_postimage", 2), (2, "b", "insert", 1), (2, "b", "delete", 3)]
+      out = {(r.id, r.v, r._change_type) for r in latest_state(spark.createDataFrame(rows, schema), ["id"]).collect()}
+      assert out == {(1, "z", "update_postimage"), (2, "b", "delete")}, out
+    seeded_bugs:
+      - |
+        from pyspark.sql import DataFrame, Window
+        from pyspark.sql import functions as F
+
+
+        def latest_state(changes: DataFrame, keys: list[str]) -> DataFrame:
+            """Keeps pre-images, which can win the ranking."""
+            window = Window.partitionBy(*keys).orderBy(F.col("_commit_version").desc())
+            return changes.withColumn("_rank", F.row_number().over(window)).filter(F.col("_rank") == 1).drop("_rank")
+      - |
+        from pyspark.sql import DataFrame
+        from pyspark.sql import functions as F
+
+
+        def latest_state(changes: DataFrame, keys: list[str]) -> DataFrame:
+            """Arbitrary row per key."""
+            return changes.filter(F.col("_change_type") != "update_preimage").dropDuplicates(keys)
+    wrong_answers:
+      - answer: |
+          from pyspark.sql import DataFrame, Window
+          from pyspark.sql import functions as F
+
+
+          def latest_state(changes: DataFrame, keys: list[str]) -> DataFrame:
+              """Keeps pre-images, which can win the ranking."""
+              window = Window.partitionBy(*keys).orderBy(F.col("_commit_version").desc())
+              return changes.withColumn("_rank", F.row_number().over(window)).filter(F.col("_rank") == 1).drop("_rank")
+        triggers: drops_preimage
+      - answer: |
+          from pyspark.sql import DataFrame
+          from pyspark.sql import functions as F
+
+
+          def latest_state(changes: DataFrame, keys: list[str]) -> DataFrame:
+              """Arbitrary row per key."""
+              return changes.filter(F.col("_change_type") != "update_preimage").dropDuplicates(keys)
+        triggers: by_version
+    hints:
+      - "Filter out update_preimage first."
+      - "Window: partition by keys, order by _commit_version descending."
+      - "Keep row_number 1, drop the helper column."
+    explanation: |
+      Pre-images share a commit version with their post-images, so without the filter a pre-image can win the ranking and bring back old values. Ranking by version keeps the newest change per key.
+
+  - id: A8-L3-E5
+    type: spot_bug
+    difficulty: 5
+    language: pyspark
+    prompt: |
+      After enabling CDF, updated respondents appear twice in the gold input, once with old values. Tap the line, then fix the function.
+    code: |
+      def current_rows(spark: SparkSession, table: str, last_processed_version: int) -> DataFrame:
+          """Inserted and updated rows since the last run, with their new values."""
+          changes = spark.read.option("readChangeFeed", "true").option("startingVersion", last_processed_version + 1).table(table)
+          return changes.filter(F.col("_change_type") != "delete")
+    bug_lines: [4]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: keeps_current
+          kind: requires_pattern
+          pattern: "isin\\(\\s*\\[?\\s*[\"']insert[\"']\\s*,\\s*[\"']update_postimage[\"']"
+          message: "Keep only insert and update_postimage rows: `F.col(\"_change_type\").isin([\"insert\", \"update_postimage\"])`."
+    fix_solution: |
+      def current_rows(spark: SparkSession, table: str, last_processed_version: int) -> DataFrame:
+          """Inserted and updated rows since the last run, with their new values."""
+          changes = spark.read.option("readChangeFeed", "true").option("startingVersion", last_processed_version + 1).table(table)
+          return changes.filter(F.col("_change_type").isin(["insert", "update_postimage"]))
+    wrong_answers:
+      - lines: [3]
+        feedback: "The read starts after the last processed version, which is correct."
+    hints:
+      - "Which change types are not deletes?"
+      - "One of them holds the old values."
+      - "Keep insert and update_postimage only."
+    explanation: |
+      Excluding only deletes still keeps `update_preimage`, the old version of each updated row. Name the change types you want: `insert` and `update_postimage`.
+
+recap:
+  - front: "Turn on change data feed"
+    back: "ALTER TABLE t SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
+  - front: "The four _change_type values"
+    back: "insert, update_preimage (old), update_postimage (new), delete."
+  - front: "Two rules for consuming CDF"
+    back: "Drop update_preimage. Keep the newest change per key by _commit_version."
+  - front: "Where does the next run start?"
+    back: "startingVersion = last processed version + 1 (it is inclusive), or a streaming checkpoint."
+
+claims:
+  - claim: "CDF read semantics, the four change types, table_changes, and DELTA_MISSING_CHANGE_DATA for versions before CDF was enabled."
+    status: verified
+    source: "Run on delta-spark 4.0.1 in this repository."
+  - claim: "CDF on Databricks: delta.enableChangeDataFeed, readChangeFeed, startingVersion, table_changes."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/tables/features/change-data-feed"
