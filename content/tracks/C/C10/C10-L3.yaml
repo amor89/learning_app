@@ -1,0 +1,326 @@
+id: C10-L3
+title: Capacity, smoothing and throttling
+
+concept: |
+  Every Fabric operation draws capacity units (CUs) from its workspace's capacity (lesson C1-L1). Fabric lets operations **burst** above the capacity's size, then **smooths** the cost over future time (Microsoft Learn, checked September 2026).
+
+  **Smoothing.** Fabric measures usage in 30-second **timepoints**, 2,880 per day.
+
+  - **Interactive** operations, such as report queries, are smoothed over at least 5 minutes and up to 64 minutes.
+  - **Background** operations, such as scheduled Spark jobs, pipeline runs and model refreshes, are smoothed over **24 hours**.
+
+  Example: an F2 has 2 CUs, or 48 CU hours per day. A background job that uses 1 CU hour adds 1 / 48, about 2.1%, to every timepoint for the next 24 hours.
+
+  **Throttling** starts when smoothed usage borrows too much future capacity:
+
+  | Future capacity already used | What happens |
+  | --- | --- |
+  | Up to 10 minutes | Overage protection: no throttling |
+  | Over 10, up to 60 minutes | Interactive jobs are delayed by 20 seconds |
+  | Over 60 minutes, up to 24 hours | Interactive jobs are rejected |
+  | Over 24 hours | All requests are rejected, background too |
+
+  Background jobs keep running well after users feel the delay. A capacity deep in debt takes hours to recover, because only idle capacity pays it back.
+
+  **Surge protection** lets capacity admins reject background jobs earlier, before the capacity reaches deep throttling. At workspace level, it caps a workspace's share of CU use over a rolling 24 hours, unless you tag the workspace **Mission Critical**.
+
+  **The Capacity Metrics app** shows what happened. A capacity admin installs it and shares it. The **Health** page flags throttling and rejections across your capacities. The **Compute** page gives 14 days of utilisation by item and operation.
+
+  Practical rules: schedule heavy background jobs away from business hours, keep production on its own capacity, and check the Compute page before you buy a larger SKU.
+
+why_it_matters: |
+  A team scheduled a full rebuild of 40 gold tables at 08:00 on an F16. By 09:30 the capacity had borrowed more than an hour of future use, and Power BI reports started failing for every user. The rebuild itself kept running. Moving it to 02:00, and making it incremental, kept the morning reports responsive without a larger SKU.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Capacity: F16, shared by production reports and data science experiments
+      Schedule: full rebuild of gold tables at 08:00 on weekdays
+      Monitoring: users report slow dashboards
+    annotations:
+      - find: "Capacity: F16, shared by production reports and data science experiments"
+        note: "Experiments draw from the same CUs as production."
+      - find: "Schedule: full rebuild of gold tables at 08:00 on weekdays"
+        note: "Heavy background work just before peak interactive use."
+      - find: "Monitoring: users report slow dashboards"
+        note: "You find out from users, after throttling has started."
+  strong:
+    code: |
+      Capacity: F16 for production only. Experiments on a separate F4
+      Schedule: incremental gold build at 02:00
+      Surge protection: background rejection threshold set on the F16
+      Monitoring: Capacity Metrics app Health page checked daily, Compute page reviewed weekly
+    annotations:
+      - find: "Schedule: incremental gold build at 02:00"
+        note: "Less work, smoothed over hours when few users are active."
+      - find: "Surge protection: background rejection threshold set on the F16"
+        note: "Background jobs are stopped before users are rejected."
+      - find: "Monitoring: Capacity Metrics app Health page checked daily, Compute page reviewed weekly"
+        note: "You see throttling in the data before users feel it."
+  takeaway: |
+    Know which of your jobs are background, run them off-peak, protect production with surge protection, and read the Metrics app before you resize.
+
+exercises:
+  - id: C10-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Over what period does Fabric smooth the CU cost of a background Spark job?
+    options:
+      - {id: a, text: "24 hours"}
+      - {id: b, text: "5 minutes"}
+      - {id: c, text: "The job's own duration"}
+      - {id: d, text: "It is not smoothed"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Microsoft Learn: background operations are smoothed over a 24-hour period."}
+      - {id: r2, text: "Spark jobs run for exactly 24 hours."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Five minutes is the minimum for interactive operations."
+      - answer: c
+        feedback: "Smoothing spreads cost beyond the job's run time."
+      - answer: d
+        feedback: "Background operations are smoothed, over 24 hours."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. The smoothing window is fixed. It does not depend on job length."
+    hints:
+      - "Background or interactive?"
+      - "Background jobs are long and heavy."
+      - "24 hours."
+    explanation: |
+      Background work is spread over a day, so one heavy job raises every timepoint a little.
+
+  - id: C10-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A capacity has used 90 minutes of future capacity. What happens to a user opening a Power BI report, and to a scheduled pipeline?
+    options:
+      - {id: a, text: "The report is rejected. The pipeline still runs"}
+      - {id: b, text: "Both run with a 20-second delay"}
+      - {id: c, text: "Both are rejected"}
+      - {id: d, text: "Both run normally"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Between 60 minutes and 24 hours, interactive jobs are rejected. Background rejection starts only above 24 hours."}
+      - {id: r2, text: "Pipelines always have priority."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The 20-second delay applies between 10 and 60 minutes."
+      - answer: c
+        feedback: "Background jobs are rejected only above 24 hours of future use."
+      - answer: d
+        feedback: "Above 60 minutes, interactive jobs are rejected."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Background jobs have a later threshold, not priority."
+    hints:
+      - "Which band is 90 minutes in?"
+      - "60 minutes to 24 hours."
+      - "Interactive rejection."
+    explanation: |
+      Users feel throttling first. Background jobs, often the cause, keep running.
+
+  - id: C10-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      A background job uses 2 CU hours on an F4. Complete the smoothing calculation.
+    template: |
+      F4 capacity per day: 4 CUs x 24 hours = [[g1]] CU hours
+      Share of every timepoint for 24 hours: 2 / [[g1]] = about [[g2]]%
+    gaps:
+      g1: {accepted: ["96"]}
+      g2: {accepted: ["2.1", "2.08", "2"]}
+    wrong_answers:
+      - answer: {g1: "4"}
+        feedback: "Multiply CUs by 24 hours for the daily CU hours."
+    hints:
+      - "CUs times hours in a day."
+      - "Divide the job by the daily total."
+      - "96 CU hours, about 2.1%."
+    explanation: |
+      2 / 96 is about 2.1%, the same share as the F2 example with half the job.
+
+  - id: C10-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `throttle_stage(future_minutes: float) -> str` returning the throttling stage for minutes of future capacity already used: `"none"` up to 10, `"interactive_delay"` above 10 up to 60, `"interactive_rejection"` above 60 up to 1,440 (24 hours), and `"background_rejection"` above that. Raise `ValueError` for negative input. Keep the limits in constants.
+    starter: |
+      def throttle_stage(future_minutes):
+          if future_minutes < 10:
+              return "none"
+          if future_minutes < 60:
+              return "interactive_delay"
+          return "interactive_rejection"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: throttle_stage
+          typed: true
+          docstring: true
+          message: "Give `throttle_stage` type hints and a docstring."
+      tests:
+        - id: bands
+          code: |
+            assert throttle_stage(5) == "none"
+            assert throttle_stage(30) == "interactive_delay"
+            assert throttle_stage(90) == "interactive_rejection"
+            assert throttle_stage(2000) == "background_rejection"
+          message: "Four bands: 10 minutes, 60 minutes, 24 hours."
+        - id: boundaries
+          code: |
+            assert throttle_stage(10) == "none"
+            assert throttle_stage(60) == "interactive_delay"
+            assert throttle_stage(1440) == "interactive_rejection"
+          message: "Each limit is inclusive: exactly 10 minutes is still overage protection."
+        - id: negative
+          code: |
+            try:
+                throttle_stage(-1)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no error")
+          message: "Negative usage is invalid."
+    solution: |
+      OVERAGE_PROTECTION_MINUTES = 10
+      INTERACTIVE_DELAY_MINUTES = 60
+      INTERACTIVE_REJECTION_MINUTES = 24 * 60
+
+
+      def throttle_stage(future_minutes: float) -> str:
+          """Fabric throttling stage for the future capacity already consumed.
+
+          Args:
+              future_minutes: Minutes of future capacity used by smoothed operations.
+
+          Returns:
+              "none", "interactive_delay", "interactive_rejection" or "background_rejection".
+
+          Raises:
+              ValueError: If future_minutes is negative.
+          """
+          if future_minutes < 0:
+              raise ValueError("future_minutes must not be negative")
+          if future_minutes <= OVERAGE_PROTECTION_MINUTES:
+              return "none"
+          if future_minutes <= INTERACTIVE_DELAY_MINUTES:
+              return "interactive_delay"
+          if future_minutes <= INTERACTIVE_REJECTION_MINUTES:
+              return "interactive_rejection"
+          return "background_rejection"
+    seeded_bugs:
+      - |
+        def throttle_stage(future_minutes: float) -> str:
+            """Exclusive limits."""
+            if future_minutes < 0:
+                raise ValueError("negative")
+            if future_minutes < 10:
+                return "none"
+            if future_minutes < 60:
+                return "interactive_delay"
+            if future_minutes < 1440:
+                return "interactive_rejection"
+            return "background_rejection"
+      - |
+        def throttle_stage(future_minutes: float) -> str:
+            """No background rejection band."""
+            if future_minutes < 0:
+                raise ValueError("negative")
+            if future_minutes <= 10:
+                return "none"
+            if future_minutes <= 60:
+                return "interactive_delay"
+            return "interactive_rejection"
+    wrong_answers:
+      - answer: |
+          def throttle_stage(future_minutes: float) -> str:
+              """Exclusive limits."""
+              if future_minutes < 0:
+                  raise ValueError("negative")
+              if future_minutes < 10:
+                  return "none"
+              if future_minutes < 60:
+                  return "interactive_delay"
+              if future_minutes < 1440:
+                  return "interactive_rejection"
+              return "background_rejection"
+        triggers: boundaries
+    hints:
+      - "Three constants: 10, 60 and 1,440 minutes."
+      - "Use `<=` for each limit."
+      - "Validate first."
+    explanation: |
+      Boundaries are where bugs hide. Test each limit exactly.
+
+  - id: C10-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Your F32 throttles every weekday between 08:30 and 10:00. The Compute page shows a 06:00 full refresh of a large semantic model and data science notebooks running all day on the same capacity.
+    slots:
+      - id: refresh
+        label: "The 06:00 full refresh"
+        options:
+          - {id: incremental, text: "Make it incremental and move it to 01:00"}
+          - {id: keep, text: "Keep it: refreshes are background and smoothed"}
+        answer: incremental
+      - id: ds
+        label: "Data science notebooks"
+        options:
+          - {id: separate, text: "Move them to a separate capacity"}
+          - {id: same, text: "Keep them on the F32"}
+        answer: separate
+      - id: protect
+        label: "Protection for report users"
+        options:
+          - {id: surge, text: "Capacity surge protection with a background rejection threshold"}
+          - {id: resize, text: "Buy an F64 immediately"}
+        answer: surge
+    model_answer: |
+      - Smoothing spreads a 06:00 job over the next 24 hours, including the morning peak. Less work, earlier, helps.
+      - Separate capacities stop experiments from consuming production CUs.
+      - Surge protection rejects background work before users are rejected. Resize only if the Compute page still shows a shortfall.
+    wrong_answers:
+      - answer: {refresh: keep}
+        feedback: "Smoothing does not remove cost. It spreads it across the morning peak."
+      - answer: {ds: same}
+        feedback: "All-day notebooks add to every timepoint on the production capacity."
+      - answer: {protect: resize}
+        feedback: "Fix the workload first. A larger SKU doubles the bill and hides the cause."
+    hints:
+      - "Where does a 06:00 job's cost land?"
+      - "Who shares the capacity?"
+      - "Which setting protects interactive users?"
+    explanation: |
+      Reduce and move background work, isolate experiments, then protect users with surge protection.
+
+recap:
+  - front: "Smoothing windows"
+    back: "Interactive: 5 to 64 minutes. Background: 24 hours. Timepoints are 30 seconds, 2,880 a day."
+  - front: "Throttling stages"
+    back: "Up to 10 min: none. 10 to 60: 20 s interactive delay. 60 min to 24 h: interactive rejection. Over 24 h: all rejected."
+  - front: "Surge protection"
+    back: "Capacity level: earlier background rejection. Workspace level: cap a workspace's CU share over 24 hours, except Mission Critical."
+  - front: "Capacity Metrics app"
+    back: "Installed by a capacity admin. Health page for throttling. Compute page for 14 days of usage."
+
+claims:
+  - claim: "Timepoints 30 s, 2,880 per day; interactive smoothed 5 to 64 minutes; background 24 hours; F2 1 CU hour example ~2.1%; throttling stages at 10 min, 60 min, 24 h with 20 s interactive delay."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/enterprise/throttling (updated 2026-08-14)"
+  - claim: "Surge protection: capacity-level background rejection threshold; workspace-level CU cap over rolling 24 h with Mission Critical exclusion."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/enterprise/surge-protection (updated 2026-05-27)"
+  - claim: "Capacity Metrics app installed by capacity admin; Health page; Compute page 14-day view."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/enterprise/metrics-app (updated 2026-01-14)"

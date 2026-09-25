@@ -1,0 +1,313 @@
+id: C10-L2
+title: Deployment pipelines, dev to test to production
+
+concept: |
+  Git integration (lesson C10-L1) versions your items. **Deployment pipelines** move them between environments. A pipeline has **2 to 10 stages**, with Development, Test and Production as the default three. Each stage is a workspace (Microsoft Learn, checked September 2026).
+
+  **What a deployment copies.** When you deploy from one stage to the next, Fabric copies item content and metadata to the target stage. It does not copy **data**. After deploying a semantic model, you refresh it in the target stage. After deploying a lakehouse, you load its tables there.
+
+  **Overwrite, not replace.** If the item already exists in the target stage, Fabric overwrites its content. The item's **ID, URL and permissions stay the same**, so reports and links in production keep working.
+
+  **Deployment rules** give each stage its own settings:
+
+  - **Data source rules**: point a semantic model at the production database, not the test one.
+  - **Parameter rules**: set a parameter's value per stage.
+  - **Default lakehouse rules**: attach a notebook to the stage's own lakehouse.
+
+  You define a rule in the **target** stage, on the item. It applies from the next deployment into that stage.
+
+  **Autobinding.** If a deployed item depends on another item, such as a report on a semantic model, and the linked item exists in the target stage, Fabric binds to the target copy automatically.
+
+  **Compare** shows which items differ between two stages before you deploy. Use it every time. The deployment pipelines REST APIs automate the same steps from a build system.
+
+  Many teams combine the tools. Developers work in Git-connected workspaces and merge through pull requests. The merged branch updates the Development stage, and deployment pipelines promote tested content to Test and Production. Microsoft's CI/CD guidance also describes Git-only release options, so pick one and document it.
+
+why_it_matters: |
+  A team deployed a notebook from Test to Production. It still pointed at the test lakehouse, so for a week the production job wrote its gold tables into Test. The dashboard in Production read stale tables and nobody noticed. A default lakehouse rule on the notebook in the Production stage would have attached it to the production lakehouse on every deployment.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Stages: Development, Production
+      Notebook nb_gold: default lakehouse lh_test (hard-coded)
+      Semantic model sales_model: data source test SQL database
+      Before deploying: nothing
+    annotations:
+      - find: "Notebook nb_gold: default lakehouse lh_test (hard-coded)"
+        note: "Production runs against test data."
+      - find: "Before deploying: nothing"
+        note: "No compare step: you learn what changed after it breaks."
+  strong:
+    code: |
+      Stages: Development, Test, Production
+      Rule in Production on nb_gold: default lakehouse = lh_prod
+      Rule in Production on sales_model: data source = production SQL database
+      Before deploying: compare Test with Production, review the differing items
+      After deploying: refresh sales_model, run the load pipeline
+    annotations:
+      - find: "Rule in Production on nb_gold: default lakehouse = lh_prod"
+        note: "Rules live in the target stage and apply on every deployment."
+      - find: "Before deploying: compare Test with Production, review the differing items"
+        note: "Know what changes before it changes."
+      - find: "After deploying: refresh sales_model, run the load pipeline"
+        note: "Deployment copies items, not data."
+  takeaway: |
+    Stage-specific settings belong in deployment rules. Compare before you deploy. Reload data after, because deployments copy items, not data.
+
+exercises:
+  - id: C10-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You deploy a semantic model from Test to Production for the first time. What must you do next?
+    options:
+      - {id: a, text: "Nothing: the data is copied with it"}
+      - {id: b, text: "Refresh the model in Production, because data is not copied between stages"}
+      - {id: c, text: "Recreate the report permissions"}
+      - {id: d, text: "Reconnect the workspace to Git"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Microsoft Learn: a semantic model refresh is required because data isn't copied from one stage to another."}
+      - {id: r2, text: "Deployment pipelines always clear data in Production."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Data is not copied between stages."
+      - answer: c
+        feedback: "Deployment does not touch permissions. On later deployments, IDs, URLs and permissions stay the same."
+      - answer: d
+        feedback: "Deployment pipelines and Git connections are separate."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Deployment does not clear data. It never copied any."
+    hints:
+      - "What does a deployment copy?"
+      - "Items and metadata."
+      - "Not data."
+    explanation: |
+      Deploy, then refresh or reload in the target stage.
+
+  - id: C10-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Where do you define a rule that points a notebook at `lh_prod` in the Production stage?
+    options:
+      - {id: a, text: "In the Production stage, on the notebook, as a default lakehouse rule"}
+      - {id: b, text: "In the Development stage, on the notebook"}
+      - {id: c, text: "In the notebook's code, with an if statement on the workspace name"}
+      - {id: d, text: "In the Git repository"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Rules are defined in the target stage on the item, and apply from the next deployment into that stage."}
+      - {id: r2, text: "Rules are global to the pipeline."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Rules belong to the target stage."
+      - answer: c
+        feedback: "Branching on workspace names hard-codes environments into code. Use a deployment rule."
+      - answer: d
+        feedback: "Deployment rules are pipeline configuration, set per stage."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Rules are per stage and per item, not global."
+    hints:
+      - "Which stage needs the different value?"
+      - "The target."
+      - "Default lakehouse rule."
+    explanation: |
+      The target stage owns its settings.
+
+  - id: C10-L2-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order a release from Test to Production.
+    items:
+      - {id: rules, text: "Check the deployment rules in the Production stage"}
+      - {id: compare, text: "Compare Test with Production and review differences"}
+      - {id: deploy, text: "Deploy Test to Production"}
+      - {id: reload, text: "Refresh semantic models and run load pipelines in Production"}
+      - {id: verify, text: "Check row counts and a known report figure in Production"}
+    answer: [rules, compare, deploy, reload, verify]
+    wrong_answers:
+      - answer: [compare, deploy, rules, reload, verify]
+        feedback: "Rules apply at deployment. Check them before you deploy."
+      - answer: [rules, compare, deploy, verify, reload]
+        feedback: "Verify after the data is loaded, or you check an empty model."
+    hints:
+      - "Rules must exist before deployment."
+      - "Compare before deploy."
+      - "Data after deploy, checks last."
+    explanation: |
+      Rules, compare, deploy, reload, verify.
+
+  - id: C10-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Model deployment rules. Write `deployed_settings(source: dict[str, str], rules: dict[str, dict[str, str]], stage: str) -> dict[str, str]`. `source` holds an item's settings in the source stage. `rules` maps a stage name to the settings its rules override. Return the settings in `stage`: the source values, with that stage's rules applied. Do not modify `source`. Raise `ValueError` if a rule names a setting the item does not have.
+    starter: |
+      def deployed_settings(source, rules, stage):
+          source.update(rules[stage])
+          return source
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: deployed_settings
+          typed: true
+          docstring: true
+          message: "Give `deployed_settings` type hints and a docstring."
+      tests:
+        - id: override
+          code: |
+            src = {"default_lakehouse": "lh_test", "env": "test"}
+            rules = {"Production": {"default_lakehouse": "lh_prod"}}
+            assert deployed_settings(src, rules, "Production") == {"default_lakehouse": "lh_prod", "env": "test"}
+          message: "Apply the target stage's rules over the source values."
+        - id: no_rules
+          code: |
+            src = {"default_lakehouse": "lh_dev"}
+            assert deployed_settings(src, {"Production": {"default_lakehouse": "lh_prod"}}, "Test") == {"default_lakehouse": "lh_dev"}
+          message: "A stage without rules keeps the source values."
+        - id: no_mutation
+          code: |
+            src = {"default_lakehouse": "lh_test"}
+            deployed_settings(src, {"Production": {"default_lakehouse": "lh_prod"}}, "Production")
+            assert src == {"default_lakehouse": "lh_test"}
+          message: "Do not modify the source settings: return a new dict."
+        - id: unknown_setting
+          code: |
+            try:
+                deployed_settings({"a": "1"}, {"Production": {"b": "2"}}, "Production")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no error")
+          message: "A rule for a setting the item lacks is a configuration error."
+    solution: |
+      def deployed_settings(
+          source: dict[str, str], rules: dict[str, dict[str, str]], stage: str
+      ) -> dict[str, str]:
+          """Item settings in a target stage after its deployment rules apply.
+
+          Args:
+              source: Settings in the source stage.
+              rules: Stage name to the settings its rules override.
+              stage: Target stage.
+
+          Returns:
+              A new dict of settings for the target stage.
+
+          Raises:
+              ValueError: If a rule names a setting the item does not have.
+          """
+          stage_rules = rules.get(stage, {})
+          unknown = set(stage_rules) - set(source)
+          if unknown:
+              raise ValueError(f"rules for unknown settings: {sorted(unknown)}")
+          return {**source, **stage_rules}
+    seeded_bugs:
+      - |
+        def deployed_settings(
+            source: dict[str, str], rules: dict[str, dict[str, str]], stage: str
+        ) -> dict[str, str]:
+            """Mutates the source."""
+            stage_rules = rules.get(stage, {})
+            if set(stage_rules) - set(source):
+                raise ValueError("unknown")
+            source.update(stage_rules)
+            return source
+      - |
+        def deployed_settings(
+            source: dict[str, str], rules: dict[str, dict[str, str]], stage: str
+        ) -> dict[str, str]:
+            """Accepts rules for settings that do not exist."""
+            return {**source, **rules.get(stage, {})}
+    wrong_answers:
+      - answer: |
+          def deployed_settings(
+              source: dict[str, str], rules: dict[str, dict[str, str]], stage: str
+          ) -> dict[str, str]:
+              """Mutates the source."""
+              stage_rules = rules.get(stage, {})
+              if set(stage_rules) - set(source):
+                  raise ValueError("unknown")
+              source.update(stage_rules)
+              return source
+        triggers: no_mutation
+    hints:
+      - "`rules.get(stage, {})` handles stages without rules."
+      - "Compare rule keys with source keys."
+      - "`{**source, **stage_rules}` builds a new dict."
+    explanation: |
+      Settings per stage, validated, with the source left intact: the same contract deployment rules give you.
+
+  - id: C10-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Design the release process for a team that uses Git integration and wants a Test stage signed off before Production.
+    slots:
+      - id: dev
+        label: "Development stage"
+        options:
+          - {id: git, text: "Workspace connected to main, updated from Git after each merged pull request"}
+          - {id: edits, text: "Engineers edit directly in the Development stage workspace"}
+        answer: git
+      - id: promote
+        label: "Promotion to Test and Production"
+        options:
+          - {id: pipeline, text: "Deployment pipeline with rules in Test and Production"}
+          - {id: copy, text: "Export and import items by hand"}
+        answer: pipeline
+      - id: post
+        label: "After each Production deployment"
+        options:
+          - {id: reload_check, text: "Refresh models, run load pipelines, check known figures"}
+          - {id: done, text: "Nothing, the deployment copied everything"}
+        answer: reload_check
+    model_answer: |
+      - Git and pull requests control what reaches Development.
+      - Deployment pipelines promote with per-stage rules and a compare step.
+      - Deployments copy items, not data, so reload and check.
+    wrong_answers:
+      - answer: {dev: edits}
+        feedback: "Direct edits skip review and conflict with Git updates."
+      - answer: {promote: copy}
+        feedback: "Manual copies lose rules, compare and autobinding, and produce new IDs and URLs."
+      - answer: {post: done}
+        feedback: "Data is not copied between stages."
+    hints:
+      - "How do changes reach Development?"
+      - "Which tool keeps IDs and applies rules?"
+      - "What does a deployment not copy?"
+    explanation: |
+      Git for development, deployment pipelines for promotion, and a reload and check after each release.
+
+recap:
+  - front: "Deployment pipeline stages"
+    back: "2 to 10 stages, default Development, Test, Production. One workspace per stage."
+  - front: "What a deployment copies"
+    back: "Item content and metadata. Not data: refresh models and reload tables after."
+  - front: "Deployment rule types"
+    back: "Data source, parameter, default lakehouse. Defined in the target stage on the item."
+  - front: "Deploying over an existing item"
+    back: "Content is overwritten. ID, URL and permissions stay the same."
+
+claims:
+  - claim: "Deployment pipelines have 2 to 10 stages, default three."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines (updated 2026-07-17)"
+  - claim: "Data isn't copied between stages, semantic model refresh required; existing items overwritten with ID, URL and permissions unchanged; autobinding to linked items in the target stage; REST APIs available."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/cicd/deployment-pipelines/understand-the-deployment-process (updated 2025-12-15)"
+  - claim: "Rule types: data source, parameter, default lakehouse; defined in the target stage; apply from the next deployment."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/cicd/deployment-pipelines/create-rules (updated 2025-12-15)"
+  - claim: "CI/CD options include Git-based release options and deployment pipelines; many organisations use a hybrid."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/cicd/manage-deployment (updated 2026-03-18)"

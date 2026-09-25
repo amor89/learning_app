@@ -1,0 +1,340 @@
+id: C10-L1
+title: Git integration for Fabric workspaces
+
+concept: |
+  **Git integration** connects a Fabric workspace to a branch and folder in a Git repository. Supported providers are Azure DevOps, GitHub and GitHub Enterprise, all cloud-based only. Some item types are still in preview, so check the supported-items list for each one you use (Microsoft Learn, checked September 2026).
+
+  **What Git holds.** Item definitions, not data. Each item gets its own folder of definition files. For a lakehouse, Git tracks metadata only: its name, shortcuts and OneLake security roles. Tables and files are not tracked, and Git operations never overwrite them. Rebuilding a workspace from Git gives you empty lakehouses. Your pipelines must reload the data.
+
+  **Two directions:**
+
+  - **Commit** exports workspace changes to the branch.
+  - **Update** imports branch changes into the workspace and overwrites the workspace version.
+
+  The source control panel shows each item's state. If an item changed in both places, you have a **conflict** to resolve before you continue.
+
+  **Who does what.** Only a workspace **Admin** connects or disconnects the workspace. Members and Contributors commit and update, limited by their permissions in the Git repository. Viewers see no Git information.
+
+  **One workspace, one branch.** A workspace is a shared runtime. Anything one person changes there affects everyone using it. Microsoft's recommended pattern is a **separate workspace per developer**, each connected to its own feature branch. You develop in your workspace, commit to your branch, and open a pull request into the main branch. The shared workspace connected to main then updates from Git.
+
+  Alternatively, develop in client tools such as VS Code for notebooks or Power BI Desktop for reports, and push to your branch.
+
+  Keep notebooks small and parameterised, and keep configuration in files your pipeline reads. Reviewers read diffs. A 900-line notebook with hard-coded paths produces diffs nobody can review.
+
+why_it_matters: |
+  Three engineers shared one development workspace connected to main. One of them updated from Git while another had an hour of uncommitted notebook edits. The update overwrote the workspace version, and the edits were lost. With a workspace and branch per developer, each person's work stays isolated until it merges.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Workspace: sales_dev, connected to main, used by 3 engineers
+      Process: edit in sales_dev, commit to main when it works
+      Recovery plan: restore the lakehouse from Git
+    annotations:
+      - find: "Workspace: sales_dev, connected to main, used by 3 engineers"
+        note: "A shared runtime: one person's update overwrites another's work."
+      - find: "Process: edit in sales_dev, commit to main when it works"
+        note: "No review before main."
+      - find: "Recovery plan: restore the lakehouse from Git"
+        note: "Git holds lakehouse metadata only. Tables and files are not in Git."
+  strong:
+    code: |
+      Workspaces: sales_dev_ana (branch feature/ana-dedupe), sales_dev_raj (branch feature/raj-gold)
+      Process: commit to your feature branch, pull request into main, review, merge
+      Shared: sales_integration connected to main, updated from Git after each merge
+      Recovery plan: redeploy items from Git, then rerun ingestion pipelines to reload data
+    annotations:
+      - find: "Workspaces: sales_dev_ana (branch feature/ana-dedupe), sales_dev_raj (branch feature/raj-gold)"
+        note: "One workspace per developer, one branch per workspace."
+      - find: "Process: commit to your feature branch, pull request into main, review, merge"
+        note: "Changes reach main through review."
+      - find: "Recovery plan: redeploy items from Git, then rerun ingestion pipelines to reload data"
+        note: "Items come from Git. Data comes from pipelines."
+  takeaway: |
+    One workspace per developer on its own branch, pull requests into main, and a data reload plan, because Git holds definitions, not data.
+
+exercises:
+  - id: C10-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A lakehouse is connected to Git. What does the repository hold for it?
+    options:
+      - {id: a, text: "The Delta tables and files"}
+      - {id: b, text: "Metadata only, such as its name, shortcuts and OneLake security roles"}
+      - {id: c, text: "Nothing: lakehouses are not supported"}
+      - {id: d, text: "A full backup, restorable to any commit"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Microsoft Learn: only lakehouse metadata is tracked. Git operations never overwrite table or file data."}
+      - {id: r2, text: "Git has a size limit that excludes tables."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Tables and files are not tracked in Git."
+      - answer: c
+        feedback: "Lakehouses are supported. Only their metadata is tracked."
+      - answer: d
+        feedback: "Git is not a data backup. Plan data recovery separately."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Git integration tracks item definitions by design, not data."
+    hints:
+      - "Does Git store data or definitions?"
+      - "Definitions."
+      - "Tables are not tracked."
+    explanation: |
+      Git versions your items. Pipelines rebuild your data.
+
+  - id: C10-L1-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      You click **Update** in a workspace. A notebook has an uncommitted edit in the workspace and a different change in Git. What does Fabric report?
+    options:
+      - {id: a, text: "A conflict you must resolve"}
+      - {id: b, text: "Nothing: Git wins silently"}
+      - {id: c, text: "Nothing: the workspace wins silently"}
+      - {id: d, text: "The two versions merge automatically"}
+    answer: a
+    reasons:
+      - {id: r1, text: "An item changed in both the workspace and the branch is a conflict, shown in the source control panel."}
+      - {id: r2, text: "Fabric merges notebooks cell by cell."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Changes on both sides are flagged as a conflict first."
+      - answer: c
+        feedback: "The workspace does not win by default."
+      - answer: d
+        feedback: "There is no automatic merge. You resolve the conflict."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Fabric does not merge notebooks. You choose how to resolve."
+    hints:
+      - "Both sides changed."
+      - "What does the source control panel show then?"
+      - "A conflict."
+    explanation: |
+      Commit often, and work in your own workspace, so conflicts stay rare.
+
+  - id: C10-L1-E3
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Which workspace role connects a workspace to a Git repository?
+    options:
+      - {id: a, text: "Admin"}
+      - {id: b, text: "Member"}
+      - {id: c, text: "Contributor"}
+      - {id: d, text: "Viewer"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Connect and disconnect are Admin operations. Members and Contributors commit and update."}
+      - {id: r2, text: "Only Admins have Git accounts."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Members commit and update. Connecting is for Admins (lesson C1-L3)."
+      - answer: c
+        feedback: "Contributors commit and update. Connecting is for Admins."
+      - answer: d
+        feedback: "Viewers see no Git information."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Git permissions matter for everyone. The workspace role decides who connects."
+    hints:
+      - "Connecting changes the workspace itself."
+      - "Lesson C1-L3."
+      - "Admin."
+    explanation: |
+      Admins connect. Members and Contributors commit and update, within their Git permissions.
+
+  - id: C10-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Your team's rule for the source control panel: resolve conflicts first, then commit your changes, then update from Git. Write `next_step(statuses: dict[str, str]) -> str`. Values are `"synced"`, `"uncommitted"`, `"update_required"` or `"conflict"`. Return `"resolve"` if any item is in conflict, else `"commit"` if any is uncommitted, else `"update"` if any needs an update, else `"none"`. Raise `ValueError` for an unknown status. Use a constant for the allowed statuses.
+    starter: |
+      def next_step(statuses):
+          if "uncommitted" in statuses.values():
+              return "commit"
+          return "update"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: next_step
+          typed: true
+          docstring: true
+          message: "Give `next_step` type hints and a docstring."
+      tests:
+        - id: conflict_first
+          code: |
+            assert next_step({"nb_a": "uncommitted", "nb_b": "conflict"}) == "resolve"
+          message: "Conflicts come before everything else."
+        - id: commit_before_update
+          code: |
+            assert next_step({"nb_a": "update_required", "nb_b": "uncommitted"}) == "commit"
+          message: "Commit your changes before you update, or the update overwrites them."
+        - id: update_and_none
+          code: |
+            assert next_step({"nb_a": "update_required", "nb_b": "synced"}) == "update"
+            assert next_step({"nb_a": "synced"}) == "none"
+            assert next_step({}) == "none"
+          message: "Update when only Git changed. Nothing to do when everything is synced."
+        - id: unknown
+          code: |
+            try:
+                next_step({"nb_a": "dirty"})
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no error")
+          message: "Unknown statuses raise ValueError."
+    solution: |
+      ALLOWED_STATUSES = frozenset({"synced", "uncommitted", "update_required", "conflict"})
+
+
+      def next_step(statuses: dict[str, str]) -> str:
+          """Next source control action for a workspace.
+
+          Args:
+              statuses: Item name to source control status.
+
+          Returns:
+              "resolve", "commit", "update" or "none".
+
+          Raises:
+              ValueError: If a status is not recognised.
+          """
+          present = set(statuses.values())
+          unknown = present - ALLOWED_STATUSES
+          if unknown:
+              raise ValueError(f"unknown statuses: {sorted(unknown)}")
+          if "conflict" in present:
+              return "resolve"
+          if "uncommitted" in present:
+              return "commit"
+          if "update_required" in present:
+              return "update"
+          return "none"
+    seeded_bugs:
+      - |
+        ALLOWED_STATUSES = frozenset({"synced", "uncommitted", "update_required", "conflict"})
+
+
+        def next_step(statuses: dict[str, str]) -> str:
+            """Updates before committing."""
+            present = set(statuses.values())
+            if present - ALLOWED_STATUSES:
+                raise ValueError("unknown")
+            if "conflict" in present:
+                return "resolve"
+            if "update_required" in present:
+                return "update"
+            if "uncommitted" in present:
+                return "commit"
+            return "none"
+      - |
+        def next_step(statuses: dict[str, str]) -> str:
+            """Ignores conflicts."""
+            present = set(statuses.values())
+            if "uncommitted" in present:
+                return "commit"
+            if "update_required" in present:
+                return "update"
+            return "none"
+    wrong_answers:
+      - answer: |
+          ALLOWED_STATUSES = frozenset({"synced", "uncommitted", "update_required", "conflict"})
+
+
+          def next_step(statuses: dict[str, str]) -> str:
+              """Updates before committing."""
+              present = set(statuses.values())
+              if present - ALLOWED_STATUSES:
+                  raise ValueError("unknown")
+              if "conflict" in present:
+                  return "resolve"
+              if "update_required" in present:
+                  return "update"
+              if "uncommitted" in present:
+                  return "commit"
+              return "none"
+        triggers: commit_before_update
+    hints:
+      - "Collect the set of statuses present."
+      - "Validate against the constant first."
+      - "Check in priority order: conflict, uncommitted, update_required."
+    explanation: |
+      Priority order encodes the safe sequence: never let an update overwrite work you have not committed.
+
+  - id: C10-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Set up source control for a team of four engineers building notebooks and pipelines in Fabric.
+    slots:
+      - id: workspaces
+        label: "Development workspaces"
+        options:
+          - {id: per_dev, text: "One workspace per engineer, each on its own feature branch"}
+          - {id: shared, text: "One shared dev workspace connected to main"}
+        answer: per_dev
+      - id: merge
+        label: "Path to main"
+        options:
+          - {id: pr, text: "Pull request with review"}
+          - {id: direct, text: "Commit directly to main from the workspace"}
+        answer: pr
+      - id: data
+        label: "After a workspace is rebuilt from Git"
+        options:
+          - {id: reload, text: "Run the ingestion pipelines to reload lakehouse data"}
+          - {id: nothing, text: "Nothing: Git restores the tables"}
+        answer: reload
+    model_answer: |
+      - One workspace and branch per engineer isolates work in progress.
+      - Pull requests put a review between each change and main.
+      - Git holds lakehouse metadata only, so data comes back through pipelines.
+    wrong_answers:
+      - answer: {workspaces: shared}
+        feedback: "A shared workspace is a shared runtime. One person's update overwrites another's uncommitted work."
+      - answer: {merge: direct}
+        feedback: "Direct commits skip review."
+      - answer: {data: nothing}
+        feedback: "Tables and files are not tracked in Git."
+    hints:
+      - "Where does work in progress live?"
+      - "How do changes reach main?"
+      - "What does Git hold for a lakehouse?"
+    explanation: |
+      Isolated workspaces, reviewed merges, and pipelines that rebuild data.
+
+recap:
+  - front: "What Git integration stores for a lakehouse"
+    back: "Metadata only: name, shortcuts, OneLake security roles. Not tables or files."
+  - front: "Commit vs Update"
+    back: "Commit exports workspace changes to Git. Update imports Git changes and overwrites the workspace version."
+  - front: "Who connects a workspace to Git?"
+    back: "Admin only. Members and Contributors commit and update. Viewers see no Git information."
+  - front: "Recommended development process"
+    back: "One workspace per developer on its own branch. Pull requests into main."
+
+claims:
+  - claim: "Providers Azure DevOps, GitHub, GitHub Enterprise (cloud only); some item types preview; workspace structure and subfolders preserved."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/cicd/git-integration/intro-to-git-integration (updated 2026-07-21)"
+  - claim: "Commit exports and overwrites Git content; update overwrites workspace content; Admin connects; Member/Contributor commit and update per Git role; Viewer sees no Git info."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/cicd/git-integration/git-integration-process (updated 2026-06-15)"
+  - claim: "A workspace connects to a single branch; recommended separate workspace per developer (branched workspace) or client tools."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/cicd/git-integration/manage-branches (updated 2026-06-15)"
+  - claim: "Lakehouse Git tracks metadata only (name, shortcuts, data access roles); tables and files not tracked and never overwritten."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/lakehouse-git-deployment-pipelines (updated 2026-05-08)"
+  - claim: "A conflict occurs when the same item changes in both the workspace and the repository; Commit is disabled until it is resolved."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/cicd/git-integration/conflict-resolution (updated 2026-06-15)"
