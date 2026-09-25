@@ -17,7 +17,7 @@ MIN_EXERCISES = 5
 MIN_EXERCISE_TYPES = 3
 HINT_TIERS = 3
 
-Language = Literal["python", "pyspark", "sql", "tsql", "kql", "dax", "text"]
+Language = Literal["python", "pyspark", "sql", "tsql", "kql", "dax", "yaml", "text"]
 CommentStyle = Literal["sql", "dax", "kql", "none"]
 
 

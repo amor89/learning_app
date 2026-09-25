@@ -1,0 +1,265 @@
+id: A10-L1
+title: Git folders, one branch per change, and no secrets in the repository
+
+concept: |
+  Production pipeline code lives in Git, not in someone's workspace folder. Databricks **Git folders** connect a workspace folder to a remote repository, so you can edit, commit, pull and switch branches from the workspace.
+
+  The workflow Databricks documents:
+
+  - Each developer clones the repository into their own Git folder under `/Workspace/Users/<email>/` and works on their own branch.
+  - Use a **trunk-based** strategy: short-lived feature branches off `main`, merged through a pull request with review and CI checks.
+  - **Production Git folders** are different. An admin creates them outside user folders. They hold a deployment branch, and only automation updates them, after a pull request merges. Nobody edits code there by hand.
+  - For deploying jobs and their configuration together, Databricks recommends Declarative Automation Bundles (lesson A10-L2).
+
+  Store notebooks as source files (`.py` with `# Databricks notebook source` headers, or `.ipynb`). Put reusable functions in plain Python modules that notebooks import, so tests can import them too.
+
+  **Secrets never go into the repository.** Not in code, not in config files, not in notebook outputs. Git keeps every version forever, and removing a token in a later commit does not remove it from history. Rotate any secret that was ever committed.
+
+  In Databricks, read secrets at run time:
+
+  ```python
+  api_key = dbutils.secrets.get(scope="research", key="supplier_api_key")
+  ```
+
+  Databricks redacts secret values read this way, showing `[REDACTED]` if you print them. Redaction does not stop deliberate transformations, so never try to display a secret. In CI, secrets come from the CI system's secret store as environment variables.
+
+  Add a `.gitignore` for local files (`.venv/`, `__pycache__/`, `.env`), so credentials and environments never get staged by accident.
+
+why_it_matters: |
+  A developer tests a supplier API from a notebook with a hardcoded token, then commits the notebook to share the code. A week later they replace the token with a secret lookup in a new commit, believing the problem is fixed. The repository is later mirrored to a partner, and the token is still in the history. The supplier revokes the key after detecting unusual use, and every ingestion job that depends on it fails for two days.
+
+  With `dbutils.secrets.get` from the first line, there is nothing to leak.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      # silver_nat_transform (edited directly in the production folder)
+      SUPPLIER_TOKEN = "example-token-not-real-1234"
+      CATALOG = "research_prod"
+
+      def fetch_deliveries():
+          return requests.get(URL, headers={"Authorization": f"Bearer {SUPPLIER_TOKEN}"})
+    annotations:
+      - find: "# silver_nat_transform (edited directly in the production folder)"
+        note: "Hand edits in production skip review and CI, and drift from Git."
+      - find: 'SUPPLIER_TOKEN = "example-token-not-real-1234"'
+        note: "A token in code. Once committed, it stays in Git history for good."
+      - find: 'CATALOG = "research_prod"'
+        note: "Environment hardcoded, so the same code cannot run in dev."
+  strong:
+    code: |
+      # Databricks notebook source
+      # silver_nat_transform: edited on a feature branch, deployed by CI after review.
+      from pipelines.config import load_run_config
+      from pipelines.supplier import fetch_deliveries
+
+      cfg = load_run_config(dbutils.widgets.get("config_path"))
+      token = dbutils.secrets.get(scope="research", key="supplier_api_key")
+      deliveries = fetch_deliveries(cfg.supplier_url, token)
+    annotations:
+      - find: "# silver_nat_transform: edited on a feature branch, deployed by CI after review."
+        note: "Changes reach production only through a reviewed, tested merge."
+      - find: "from pipelines.supplier import fetch_deliveries"
+        note: "Logic lives in importable modules that unit tests can reach."
+      - find: 'token = dbutils.secrets.get(scope="research", key="supplier_api_key")'
+        note: "Read at run time from a secret scope. Nothing sensitive in the repository."
+      - find: 'cfg = load_run_config(dbutils.widgets.get("config_path"))'
+        note: "The environment comes from a job parameter, not from the code."
+  takeaway: |
+    Code flows from a branch, through review and CI, to production. Secrets flow from a secret store at run time, never through Git.
+
+exercises:
+  - id: A10-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Who should update the production Git folder?
+    options:
+      - {id: a, text: "Any developer, after testing their change"}
+      - {id: b, text: "Automation, after a pull request merges into the deployment branch"}
+      - {id: c, text: "The team lead, by editing notebooks there directly"}
+      - {id: d, text: "Nobody: production reads from developers' user folders"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Production changes must pass review and CI, and automation makes that the only path."}
+      - {id: r2, text: "Git folders cannot be edited by people."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "A developer's own testing skips review and CI. Production should only change through a merge."
+      - answer: c
+        feedback: "Direct edits in production drift from Git and bypass every check."
+      - answer: d
+        feedback: "User folders hold work in progress on personal branches. Production needs a stable deployment branch."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. People can edit Git folders. The rule is that production ones change only through automation."
+    hints:
+      - "Which path includes review and tests?"
+      - "What should be the only way into production?"
+      - "A merge, then automation."
+    explanation: |
+      Production Git folders hold the deployment branch and are updated only by automation after a merge, so every production change was reviewed and tested.
+
+  - id: A10-L1-E2
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Read the supplier API key from the `research` secret scope at run time.
+    template: |
+      token = dbutils.[[g1]].get(scope="research", key="[[g2]]")
+    gaps:
+      g1: {accepted: [secrets]}
+      g2: {accepted: [supplier_api_key]}
+    wrong_answers:
+      - answer: {g1: widgets}
+        feedback: "Widgets hold job parameters, which appear in the job UI and run history. Secrets come from `dbutils.secrets`."
+      - answer: {g1: fs}
+        feedback: "`dbutils.fs` reads files. Reading a key from a file puts it back on storage in plain text."
+    hints:
+      - "The dbutils module named after what it stores."
+      - "The key names the secret inside the scope."
+      - "`secrets` and `supplier_api_key`."
+    explanation: |
+      `dbutils.secrets.get(scope=..., key=...)` reads the secret at run time, and Databricks redacts it in notebook output.
+
+  - id: A10-L1-E3
+    type: spot_bug
+    difficulty: 3
+    language: python
+    prompt: |
+      A reviewer blocks this pull request. Tap the line that must never be committed, then rewrite the module.
+    code: |
+      import requests
+
+      SUPPLIER_URL = "https://supplier.example.org/api/deliveries"
+      SUPPLIER_TOKEN = "example-token-not-real-5678"
+
+
+      def fetch_deliveries() -> requests.Response:
+          """Fetch the delivery list from the supplier API."""
+          return requests.get(SUPPLIER_URL, headers={"Authorization": f"Bearer {SUPPLIER_TOKEN}"}, timeout=30)
+    bug_lines: [4]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_token_literal
+          kind: forbids_pattern
+          pattern: "SUPPLIER_TOKEN\\s*=\\s*[\"']"
+          message: "A token is still in the code."
+        - id: token_param
+          kind: requires_pattern
+          pattern: "def fetch_deliveries\\([^)]*token:\\s*str"
+          message: "Pass the token in as a parameter: `fetch_deliveries(token: str)`. The caller reads it with dbutils.secrets.get."
+    fix_solution: |
+      import requests
+
+      SUPPLIER_URL = "https://supplier.example.org/api/deliveries"
+
+
+      def fetch_deliveries(token: str) -> requests.Response:
+          """Fetch the delivery list. token comes from dbutils.secrets.get at run time."""
+          return requests.get(SUPPLIER_URL, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    wrong_answers:
+      - lines: [3]
+        feedback: "A public API URL is not a secret. It could even move to config, but it is not what blocks the review."
+      - lines: [9]
+        feedback: "Line 9 uses the token. The leak is where the token is written."
+    hints:
+      - "Which line holds a credential?"
+      - "Where should the credential come from instead?"
+      - "Delete it and take the token as a parameter."
+    explanation: |
+      Line 4 commits a credential. Make the function take `token: str` and have the notebook read it with `dbutils.secrets.get`. Rotate the leaked token, because Git history keeps it.
+
+  - id: A10-L1-E4
+    type: order
+    difficulty: 4
+    prompt: |
+      Order the steps for one change to the silver pipeline.
+    items:
+      - {id: branch, text: "Create a feature branch from main in your Git folder"}
+      - {id: change, text: "Change the code and add or update tests"}
+      - {id: pr, text: "Push and open a pull request"}
+      - {id: ci, text: "CI runs lint, type checks and tests"}
+      - {id: review, text: "A colleague reviews and approves"}
+      - {id: deploy, text: "Merge to main; automation deploys to production"}
+    answer: [branch, change, pr, ci, review, deploy]
+    wrong_answers:
+      - answer: [branch, change, deploy, pr, ci, review]
+        feedback: "Deploying before review and CI means production runs unchecked code."
+      - answer: [change, branch, pr, ci, review, deploy]
+        feedback: "Create the branch first, so your changes never touch main directly."
+    hints:
+      - "Nothing reaches main without review."
+      - "CI runs on the pull request."
+      - "Deployment is the last step, done by automation."
+    explanation: |
+      Branch, change, pull request, CI, review, merge and automatic deployment. Every production change passes the same gates.
+
+  - id: A10-L1-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      Decide where each item lives.
+    slots:
+      - id: token
+        label: "The supplier API token"
+        options: &places
+          - {id: secret, text: "Secret scope, read at run time"}
+          - {id: repo, text: "Git repository"}
+          - {id: param, text: "Job parameter"}
+        answer: secret
+      - id: functions
+        label: "The functions that clean and merge silver"
+        options: *places
+        answer: repo
+      - id: catalog
+        label: "Which catalog a run writes to (research_dev or research_prod)"
+        options: *places
+        answer: param
+      - id: env
+        label: "Your local .venv folder"
+        options:
+          - {id: ignore, text: "Listed in .gitignore, never committed"}
+          - {id: commit, text: "Committed, so others get the same packages"}
+        answer: ignore
+    model_answer: |
+      - Credentials: a secret scope, read with dbutils.secrets.get.
+      - Code: Git, reviewed and tested.
+      - Environment choice: a job parameter or target setting, so the same code deploys to dev and prod.
+      - Local environments: ignored by Git. Pin dependencies in pyproject.toml instead.
+    wrong_answers:
+      - answer: {token: param}
+        feedback: "Job parameters show in the job definition and run history. Credentials belong in a secret scope."
+      - answer: {token: repo}
+        feedback: "Git history keeps every committed secret for good."
+      - answer: {catalog: repo}
+        feedback: "Hardcoding the catalog in code means dev runs write to prod. Pass it in per environment."
+      - answer: {env: commit}
+        feedback: "A virtual environment is machine-specific and large. Commit the pinned dependency list instead."
+    hints:
+      - "What must stay out of logs and history?"
+      - "What changes per environment?"
+      - "What is specific to one machine?"
+    explanation: |
+      Secrets in a secret scope, code in Git, environment choice as a parameter, local environments ignored.
+
+recap:
+  - front: "Where do developers work in Databricks Git folders?"
+    back: "Their own clone under /Workspace/Users/<email>/, on their own branch."
+  - front: "Who updates production Git folders?"
+    back: "Only automation, after a pull request merges into the deployment branch."
+  - front: "Read a secret in a notebook"
+    back: "dbutils.secrets.get(scope=\"...\", key=\"...\"). Output shows [REDACTED]."
+  - front: "A token was committed, then removed. Is it safe?"
+    back: "No. Git history keeps it. Rotate the token."
+
+claims:
+  - claim: "Git folders: per-user branches under /Workspace/Users/, trunk-based strategy, production Git folders updated only by automation, bundles recommended for deployment."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/repos/ci-cd"
+  - claim: "dbutils.secrets.get(scope, key) reads a secret; values are shown as [REDACTED]; redaction does not prevent deliberate transformations."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/security/secrets/"

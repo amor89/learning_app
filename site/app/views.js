@@ -4,6 +4,7 @@ import * as store from "./store.js";
 import {
   codeBlock,
   downloadButtons,
+  fill,
   h,
   notesList,
   pct,
@@ -214,19 +215,19 @@ export async function lessonView(app, lessonId) {
       for (const module of store.awardBadges(app.state, app.index)) app.toast(`Badge earned: ${module.id} ${module.title}`);
       app.save();
     }
-    dots.replaceChildren(
+    fill(dots, 
       ...exercises.map((e, i) => {
         const s = app.state.ex[e.id];
         const cls = ["dot", i === current && "current", s?.passed && "passed", !s?.passed && s?.solution && "seen"].filter(Boolean).join(" ");
         return h("li", {}, h("button", { type: "button", class: cls, "aria-label": `Exercise ${i + 1}`, "aria-current": i === current ? "step" : null, onclick: () => show(i) }, i + 1));
       }),
     );
-    recapHolder.replaceChildren(recapSection(app, lesson, meta));
+    fill(recapHolder, recapSection(app, lesson, meta));
   };
 
   const show = (i) => {
     current = i;
-    stage.replaceChildren(
+    fill(stage, 
       renderExercise(app, exercises[i], i + 1, exercises.length, refresh),
       h("div", { class: "pager" },
         h("button", { type: "button", class: "btn secondary", disabled: i === 0, onclick: () => show(i - 1) }, "Previous"),
@@ -280,7 +281,7 @@ export async function reviewView(app) {
   const box = h("div", {});
   const paint = () => {
     if (i >= cards.length) {
-      box.replaceChildren(h("p", { class: "ok-text" }, `Done. You reviewed ${cards.length} card${cards.length > 1 ? "s" : ""}.`), h("a", { class: "btn", href: "#/" }, "Back to dashboard"));
+      fill(box, h("p", { class: "ok-text" }, `Done. You reviewed ${cards.length} card${cards.length > 1 ? "s" : ""}.`), h("a", { class: "btn", href: "#/" }, "Back to dashboard"));
       return;
     }
     const { id, lesson, card } = cards[i];
@@ -298,7 +299,7 @@ export async function reviewView(app) {
       }),
     );
     const reveal = h("button", { type: "button", class: "btn", onclick: () => { back.hidden = false; grades.hidden = false; reveal.hidden = true; grades.querySelector("button")?.focus(); } }, "Show answer");
-    box.replaceChildren(
+    fill(box, 
       h("p", { class: "muted small" }, `Card ${i + 1} of ${cards.length} · ${lesson.title}`),
       h("div", { class: "flashcard" }, h("p", { class: "front", html: card.front }), back),
       h("div", { class: "actions" }, reveal),

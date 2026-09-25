@@ -6,6 +6,8 @@ the same way.
 
 from __future__ import annotations
 
+import re
+
 import markdown
 from pygments import highlight
 from pygments.formatters import HtmlFormatter
@@ -18,19 +20,62 @@ LEXERS = {
     "tsql": "tsql",
     "kql": "kql",
     "dax": "dax",
+    "yaml": "yaml",
     "text": "text",
 }
 CSS_CLASS = "hl"
 
 
+ALLOWED_TAGS = frozenset(
+    {
+        "p",
+        "ul",
+        "ol",
+        "li",
+        "a",
+        "code",
+        "div",
+        "pre",
+        "span",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "td",
+        "th",
+        "strong",
+        "em",
+        "br",
+        "blockquote",
+        "hr",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+    }
+)
+_TAG = re.compile(r"<([a-zA-Z][\w-]*)")
+
+
 def md_to_html(text: str) -> str:
-    """Render lesson Markdown (paragraphs, lists, tables, fenced code) to HTML."""
-    return markdown.markdown(
-        text,
+    """Render lesson Markdown (paragraphs, lists, tables, fenced code) to HTML.
+
+    Raw HTML in the source is escaped, not passed through: text such as
+    `/Workspace/Users/<email>/` must show as written.
+    """
+    md = markdown.Markdown(
         extensions=["fenced_code", "codehilite", "tables", "sane_lists"],
         extension_configs={"codehilite": {"css_class": CSS_CLASS, "guess_lang": False}},
         output_format="html",
     )
+    md.preprocessors.deregister("html_block")
+    md.inlinePatterns.deregister("html")
+    return md.convert(text)
+
+
+def unknown_tags(html: str) -> set[str]:
+    """Tag names in rendered HTML that lesson content should never produce."""
+    return {t.lower() for t in _TAG.findall(html)} - ALLOWED_TAGS
 
 
 def md_inline(text: str) -> str:

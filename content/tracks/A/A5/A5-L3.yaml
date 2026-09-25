@@ -337,3 +337,31 @@ claims:
   - claim: "Databricks recommends liquid clustering over partitioning for UC managed tables; serverless does not support cache APIs."
     status: search-only
     source: "https://docs.databricks.com/aws/en/tables/clustering and https://docs.databricks.com/aws/en/compute/serverless/limitations"
+
+practical:
+  platform: databricks
+  title: "Read the plan: sort-merge join versus broadcast join"
+  intro: |
+    Run this in Databricks Free Edition. It builds a fact table and a small lookup, then prints the physical plan with and without a broadcast hint, so you can find `SortMergeJoin`, `BroadcastHashJoin` and `Exchange` yourself. On serverless, Spark settings you can change are limited, so the notebook compares plans rather than timings.
+  cells:
+    - kind: code
+      source: |
+        from pyspark.sql import functions as F
+
+        fact = spark.range(2_000_000).withColumn("region_code", (F.col("id") % 200).cast("string"))
+        regions = spark.createDataFrame([(str(i), f"Region {i}") for i in range(200)], "region_code STRING, region STRING")
+    - kind: markdown
+      source: "Plain join. Spark or AQE may still choose a broadcast, because the lookup is tiny. Note which join node you see."
+    - kind: code
+      source: |
+        fact.join(regions, "region_code", "left").explain(mode="formatted")
+    - kind: markdown
+      source: "Forced broadcast. Look for `BroadcastHashJoin` and check that the fact side has no `Exchange`."
+    - kind: code
+      source: |
+        enriched = fact.join(F.broadcast(regions), "region_code", "left")
+        enriched.explain(mode="formatted")
+    - kind: code
+      source: |
+        unmatched = enriched.agg(F.count_if(F.col("region").isNull()).alias("unmatched")).collect()[0]["unmatched"]
+        print(f"rows without a region: {unmatched}")

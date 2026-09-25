@@ -1,0 +1,357 @@
+id: A9-L3
+title: Compare DataFrames properly, and test that MERGE is idempotent
+
+concept: |
+  Comparing DataFrames by hand is harder than it looks. `actual.collect() == expected.collect()` fails when the rows come back in a different order, which Spark never guarantees. It also fails when a float is `0.30000000000000004` instead of `0.3`. Sorting both sides fixes the order but not the floats, and neither checks the schema.
+
+  `pyspark.testing` (PySpark 3.5 and later) handles all of this:
+
+  ```python
+  from pyspark.testing import assertDataFrameEqual, assertSchemaEqual
+
+  assertDataFrameEqual(actual, expected)
+  ```
+
+  Tested on PySpark 4.0.4:
+
+  - Row order is ignored by default. Pass `checkRowOrder=True` when order is the point, as in a top-10 list.
+  - Floats compare with a tolerance (`rtol=1e-5`, `atol=1e-8` by default).
+  - Schemas must match: INT against BIGINT fails with `DIFFERENT_SCHEMA`.
+  - Duplicates count: two identical rows do not equal one.
+  - `expected` can be a list of `Row` objects, which is handy for snapshots.
+  - Failures raise `PySparkAssertionError`, a subclass of `AssertionError`, so pytest reports them as ordinary test failures, with a diff.
+
+  `assertSchemaEqual(actual.schema, expected.schema)` checks only the structure.
+
+  **Testing MERGE.** The property that matters is idempotence. The test:
+
+  1. Create an empty Delta table with the target schema.
+  2. Run the load once, and take a snapshot: `first = spark.table(t).collect()`.
+  3. Run the same load again.
+  4. `assertDataFrameEqual(spark.table(t), first)`.
+
+  Add cases for the failures you fear: a repeated key in the source, a redelivery with a newer version, and the same respondent in two waves. Each one takes a few rows and a second or two.
+
+  In the practice harness, PySpark 4.0.4 needs pandas 2.x. With pandas 3.x, `assertDataFrameEqual` fails to import.
+
+why_it_matters: |
+  A silver test compares `actual.collect() == expected.collect()`. It passes on a developer's laptop and fails one CI run in five, because the order of rows varies with partitioning. The team marks it flaky and skips it. A month later a real regression in the MERGE, duplicate rows after a retry, ships untested.
+
+  `assertDataFrameEqual` ignores order, so the test is stable, and an idempotence test that runs the load twice catches the regression.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      def test_silver_load(spark):
+          upsert_silver(spark, source, "silver", ["respondent_id", "wave_id"], "delivery_version")
+          assert spark.table("silver").collect() == expected.collect()
+    annotations:
+      - find: 'assert spark.table("silver").collect() == expected.collect()'
+        note: "Order-dependent and exact on floats: flaky, and a failure shows no useful diff."
+      - find: 'upsert_silver(spark, source, "silver", ["respondent_id", "wave_id"], "delivery_version")'
+        note: "One run only. It never checks what a retry does."
+  strong:
+    code: |
+      from pyspark.testing import assertDataFrameEqual
+
+      KEYS = ["respondent_id", "wave_id"]
+      SCHEMA = "respondent_id STRING, wave_id STRING, final_weight DOUBLE, delivery_version INT"
+
+
+      def test_silver_load_is_idempotent(spark: SparkSession, empty_silver: str) -> None:
+          source = spark.createDataFrame(
+              [("R1", "W1", 1.2, 1), ("R1", "W1", 1.5, 2), ("R2", "W1", 0.8, 1)], SCHEMA
+          )
+          upsert_silver(spark, source, empty_silver, KEYS, "delivery_version")
+          first = spark.table(empty_silver).collect()
+
+          upsert_silver(spark, source, empty_silver, KEYS, "delivery_version")
+
+          assertDataFrameEqual(spark.table(empty_silver), first)
+          expected = spark.createDataFrame([("R1", "W1", 1.5, 2), ("R2", "W1", 0.8, 1)], SCHEMA)
+          assertDataFrameEqual(spark.table(empty_silver), expected)
+    annotations:
+      - find: '[("R1", "W1", 1.2, 1), ("R1", "W1", 1.5, 2), ("R2", "W1", 0.8, 1)], SCHEMA'
+        note: "The source includes a repeated key, the case that breaks a naive MERGE."
+      - find: "first = spark.table(empty_silver).collect()"
+        note: "A snapshot of the table after one run, as a list of Rows."
+      - find: "assertDataFrameEqual(spark.table(empty_silver), first)"
+        note: "Second run leaves the table unchanged: idempotence, order-independent."
+      - find: "assertDataFrameEqual(spark.table(empty_silver), expected)"
+        note: "And the content is right: the newest version of R1 won."
+  takeaway: |
+    One helper compares DataFrames the right way, and one small test proves a MERGE survives a retry and a repeated key.
+
+exercises:
+  - id: A9-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      `actual` holds rows (1, 0.3) and (2, 1.0). `expected` holds (2, 1.0) and (1, 0.1 + 0.2). Both have the schema `id INT, w DOUBLE`. What does `assertDataFrameEqual(actual, expected)` do on PySpark 4.0?
+    options:
+      - {id: a, text: "Passes"}
+      - {id: b, text: "Fails because the rows are in a different order"}
+      - {id: c, text: "Fails because 0.1 + 0.2 is not exactly 0.3"}
+      - {id: d, text: "Fails because it needs checkRowOrder=True"}
+    answer: a
+    reasons:
+      - {id: r1, text: "It ignores row order by default and compares floats with a relative tolerance."}
+      - {id: r2, text: "It only compares schemas."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "checkRowOrder is False by default, so order is ignored."
+      - answer: c
+        feedback: "Floats compare with rtol=1e-5 by default, so 0.30000000000000004 equals 0.3."
+      - answer: d
+        feedback: "checkRowOrder=True would make it stricter. The default ignores order."
+      - answer: a|r2
+        feedback: "Right outcome, wrong reason. It compares rows too. assertSchemaEqual compares only schemas."
+    hints:
+      - "What is the default for checkRowOrder?"
+      - "How are floats compared?"
+      - "Both differences are tolerated."
+    explanation: |
+      `assertDataFrameEqual` ignores row order unless you set `checkRowOrder=True`, and compares floats within `rtol=1e-5`. Tested on PySpark 4.0.4.
+
+  - id: A9-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      A hand-written comparison sorts both sides first. What does it print?
+    code: |
+      actual = [(1, 0.1 + 0.2), (2, 1.0)]
+      expected = [(2, 1.0), (1, 0.3)]
+      print(sorted(actual) == sorted(expected))
+    answer: "False"
+    wrong_answers:
+      - answer: "True"
+        feedback: "Sorting fixes the order, but 0.1 + 0.2 is 0.30000000000000004, so the tuples differ."
+    hints:
+      - "Sorting handles the order."
+      - "What is 0.1 + 0.2 exactly?"
+      - "Exact equality on floats."
+    explanation: |
+      Sorting fixes the order but not floating-point rounding. That is why a helper with tolerances beats hand-written comparisons.
+
+  - id: A9-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Import the helpers, then check that the top-10 regions come back in the right order.
+    template: |
+      from pyspark.[[g1]] import assertDataFrameEqual, assertSchemaEqual
+
+      assertDataFrameEqual(top_regions, expected, [[g2]]=True)
+    gaps:
+      g1: {accepted: [testing]}
+      g2: {accepted: [checkRowOrder]}
+    wrong_answers:
+      - answer: {g1: sql}
+        feedback: "The test helpers live in `pyspark.testing`."
+      - answer: {g2: ordered}
+        feedback: "The parameter is `checkRowOrder`."
+    hints:
+      - "The module name says what it is for."
+      - "The parameter name says what it checks."
+      - "`testing` and `checkRowOrder`."
+    explanation: |
+      `pyspark.testing` provides the helpers. `checkRowOrder=True` makes order part of the comparison, which matters for ranked output.
+
+  - id: A9-L3-E4
+    type: write_function
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Write `check_idempotent(spark, load, table)`. `load` is a function that takes no arguments and loads a fixed source into `table`. Run it once, snapshot the table with `collect()`, run it again, and assert the table still equals the snapshot with `assertDataFrameEqual`.
+    starter: |
+      from collections.abc import Callable
+
+      from pyspark.sql import SparkSession
+      from pyspark.testing import assertDataFrameEqual
+
+
+      def check_idempotent(spark: SparkSession, load: Callable[[], None], table: str) -> None:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: check_idempotent
+          typed: true
+          docstring: true
+          message: "Give `check_idempotent` type hints and a docstring."
+        - id: runs_twice
+          kind: requires_call
+          name: load
+          min: 2
+          message: "Call `load()` twice."
+        - id: snapshot
+          kind: requires_pattern
+          pattern: "=\\s*spark\\.table\\(\\s*table\\s*\\)\\.collect\\(\\)"
+          message: "Snapshot the table after the first run: `first = spark.table(table).collect()`."
+        - id: uses_helper
+          kind: requires_call
+          name: assertDataFrameEqual
+          message: "Compare with `assertDataFrameEqual`."
+        - id: no_manual_compare
+          kind: forbids_pattern
+          pattern: "\\.collect\\(\\)\\s*=="
+          message: "Do not compare collect() results with ==. Use assertDataFrameEqual."
+    solution: |
+      from collections.abc import Callable
+
+      from pyspark.sql import SparkSession
+      from pyspark.testing import assertDataFrameEqual
+
+
+      def check_idempotent(spark: SparkSession, load: Callable[[], None], table: str) -> None:
+          """Assert that running load twice leaves table as one run did.
+
+          Raises:
+              AssertionError: If the second run changed the table.
+          """
+          load()
+          first = spark.table(table).collect()
+          load()
+          assertDataFrameEqual(spark.table(table), first)
+    spark_tests: |
+      schema = "respondent_id STRING, wave_id STRING, final_weight DOUBLE"
+      source = spark.createDataFrame([("R1", "W1", 1.2), ("R2", "W1", 0.8)], schema)
+      spark.sql("DROP TABLE IF EXISTS a9_idem")
+      spark.sql(f"CREATE TABLE a9_idem ({schema}) USING DELTA")
+
+      def merge_load() -> None:
+          (DeltaTable.forName(spark, "a9_idem").alias("t")
+           .merge(source.alias("s"), "t.respondent_id = s.respondent_id AND t.wave_id = s.wave_id")
+           .whenMatchedUpdateAll().whenNotMatchedInsertAll().execute())
+
+      def append_load() -> None:
+          source.write.format("delta").mode("append").saveAsTable("a9_idem")
+
+      check_idempotent(spark, merge_load, "a9_idem")
+      try:
+          check_idempotent(spark, append_load, "a9_idem")
+      except AssertionError:
+          pass
+      else:
+          raise AssertionError("append load was not caught")
+      spark.sql("DROP TABLE a9_idem")
+    seeded_bugs:
+      - |
+        from collections.abc import Callable
+
+        from pyspark.sql import SparkSession
+        from pyspark.testing import assertDataFrameEqual
+
+
+        def check_idempotent(spark: SparkSession, load: Callable[[], None], table: str) -> None:
+            """Only runs once."""
+            load()
+            assertDataFrameEqual(spark.table(table), spark.table(table))
+      - |
+        from collections.abc import Callable
+
+        from pyspark.sql import SparkSession
+
+
+        def check_idempotent(spark: SparkSession, load: Callable[[], None], table: str) -> None:
+            """Order-dependent comparison."""
+            load()
+            first = spark.table(table).collect()
+            load()
+            assert spark.table(table).collect() == first
+    wrong_answers:
+      - answer: |
+          from collections.abc import Callable
+
+          from pyspark.sql import SparkSession
+          from pyspark.testing import assertDataFrameEqual
+
+
+          def check_idempotent(spark: SparkSession, load: Callable[[], None], table: str) -> None:
+              """Only runs once."""
+              load()
+              assertDataFrameEqual(spark.table(table), spark.table(table))
+        triggers: runs_twice
+      - answer: |
+          from collections.abc import Callable
+
+          from pyspark.sql import SparkSession
+
+
+          def check_idempotent(spark: SparkSession, load: Callable[[], None], table: str) -> None:
+              """Order-dependent comparison."""
+              load()
+              first = spark.table(table).collect()
+              load()
+              assert spark.table(table).collect() == first
+        triggers: uses_helper
+    hints:
+      - "load(), snapshot, load() again."
+      - "The snapshot must be materialised with collect(), or it re-reads the changed table."
+      - "`assertDataFrameEqual(spark.table(table), first)`."
+    explanation: |
+      `collect()` freezes the first state. A DataFrame would be lazy and re-read the table after the second run, so the comparison would always pass. `assertDataFrameEqual` then compares without caring about order.
+
+  - id: A9-L3-E5
+    type: spot_bug
+    difficulty: 5
+    language: pyspark
+    prompt: |
+      This test fails about one CI run in five, though the code under test is correct. Tap the line, then fix the test.
+    code: |
+      def test_gold_metrics(spark: SparkSession) -> None:
+          silver = spark.createDataFrame([("R1", "W1", "N", 1.0), ("R2", "W1", "S", 1.0)], "respondent_id STRING, wave_id STRING, region STRING, final_weight DOUBLE")
+          expected = spark.createDataFrame([("N", 1.0), ("S", 1.0)], "region STRING, weighted_base DOUBLE")
+          actual = aggregate_base(silver).select("region", "weighted_base")
+          assert actual.collect() == expected.collect()
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: uses_helper
+          kind: requires_call
+          name: assertDataFrameEqual
+          message: "Compare with `assertDataFrameEqual(actual, expected)`."
+        - id: no_collect_eq
+          kind: forbids_pattern
+          pattern: "\\.collect\\(\\)\\s*=="
+          message: "The order-dependent collect() comparison is still there."
+    fix_solution: |
+      def test_gold_metrics(spark: SparkSession) -> None:
+          silver = spark.createDataFrame([("R1", "W1", "N", 1.0), ("R2", "W1", "S", 1.0)], "respondent_id STRING, wave_id STRING, region STRING, final_weight DOUBLE")
+          expected = spark.createDataFrame([("N", 1.0), ("S", 1.0)], "region STRING, weighted_base DOUBLE")
+          actual = aggregate_base(silver).select("region", "weighted_base")
+          assertDataFrameEqual(actual, expected)
+    wrong_answers:
+      - lines: [4]
+        feedback: "Selecting the columns to compare is fine. The flakiness comes from how they are compared."
+    hints:
+      - "Does a groupBy return rows in a fixed order?"
+      - "collect() lists keep that order."
+      - "Use assertDataFrameEqual, which ignores order."
+    explanation: |
+      Aggregation output has no guaranteed order, so the two lists match only when the partitions happen to line up. `assertDataFrameEqual` compares the rows as a multiset.
+
+recap:
+  - front: "Compare two DataFrames in a test"
+    back: "pyspark.testing.assertDataFrameEqual(actual, expected). Ignores order, tolerates float rounding, checks schema."
+  - front: "When should row order matter?"
+    back: "Only for ranked output. Pass checkRowOrder=True."
+  - front: "Idempotence test for a MERGE"
+    back: "Load, snapshot with collect(), load again, assertDataFrameEqual(table, snapshot)."
+  - front: "Why collect() for the snapshot?"
+    back: "A DataFrame is lazy and would re-read the table after the second run."
+
+claims:
+  - claim: "assertDataFrameEqual ignores row order by default, uses rtol=1e-5 and atol=1e-8, fails on schema differences and duplicates, accepts a list of Rows as expected, and raises PySparkAssertionError (a subclass of AssertionError)."
+    status: verified
+    source: "Run on PySpark 4.0.4 with pandas 2.3.3 in this repository."
+  - claim: "PySpark 4.0.4 fails to import assertDataFrameEqual with pandas 3.x."
+    status: verified
+    source: "ImportError: cannot import name '_builtin_table' from 'pandas.core.common', reproduced with pandas 3.0.6."

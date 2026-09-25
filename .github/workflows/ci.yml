@@ -51,7 +51,27 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - name: Install Spark harness
-        run: pip install -e . --group spark --group dev
-      - name: Reference solutions pass the practice tests
+      - name: Install Spark harness (pandas 2.x, separate from the dev group)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . --group spark
+      - name: Reference solutions and lesson PySpark solutions pass on local Spark
         run: pytest practice --solutions
+
+  browser:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Playwright and Chromium
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Serve the site
+        run: python3 -m http.server 8000 --directory site &
+      - name: Every lesson fits 390px, with no console errors
+        run: node tests/app/all_lessons.mjs http://localhost:8000/
+      - name: Smoke test (Pyodide steps skipped without a local Pyodide copy)
+        run: node tests/app/smoke.mjs http://localhost:8000/

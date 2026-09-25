@@ -21,6 +21,14 @@ function append(el, children) {
   }
 }
 
+// Replace an element's children. Skips null, undefined and false, which
+// replaceChildren would otherwise insert as the text "null".
+export function fill(el, ...children) {
+  el.replaceChildren();
+  append(el, children);
+  return el;
+}
+
 export function clear(el) {
   el.replaceChildren();
   return el;

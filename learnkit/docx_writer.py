@@ -238,7 +238,7 @@ def render_docx(blocks: list[Block], title: str, path: str) -> None:
         elif isinstance(block, Code):
             add_code(document, block.code, numbered=True, notes=block.notes)
         elif isinstance(block, Items):
-            style = "List Number" if block.ordered else "List Bullet"
+            style = None if block.checklist else "List Number" if block.ordered else "List Bullet"
             for item in block.items:
                 add_inline(document.add_paragraph(style=style), item)
         elif isinstance(block, PageBreak):

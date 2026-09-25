@@ -347,3 +347,45 @@ claims:
   - claim: "CDF on Databricks: delta.enableChangeDataFeed, readChangeFeed, startingVersion, table_changes."
     status: search-only
     source: "https://docs.databricks.com/aws/en/tables/features/change-data-feed"
+
+practical:
+  platform: databricks
+  title: "Read a change data feed and keep the latest state"
+  intro: |
+    Run this in Databricks Free Edition. It enables change data feed on a small silver table, applies an insert, an update and a delete, then reads the changes and reduces them to the latest state per respondent.
+  cells:
+    - kind: code
+      source: |
+        from pyspark.sql import DataFrame, Window
+        from pyspark.sql import functions as F
+
+        CATALOG = spark.catalog.currentCatalog()
+        SCHEMA = f"{CATALOG}.learning_a8"
+        TABLE = f"{SCHEMA}.nat_respondents"
+        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
+        spark.sql(f"DROP TABLE IF EXISTS {TABLE}")
+        spark.sql(f"CREATE TABLE {TABLE} (respondent_id STRING, wave_id STRING, final_weight DOUBLE) TBLPROPERTIES (delta.enableChangeDataFeed = true)")
+        spark.sql(f"INSERT INTO {TABLE} VALUES ('R1', 'W1', 1.0), ('R2', 'W1', 0.5)")
+        spark.sql(f"UPDATE {TABLE} SET final_weight = 1.4 WHERE respondent_id = 'R1'")
+        spark.sql(f"DELETE FROM {TABLE} WHERE respondent_id = 'R2'")
+        display(spark.sql(f"DESCRIBE HISTORY {TABLE}").select("version", "operation"))
+    - kind: code
+      source: |
+        changes = spark.read.option("readChangeFeed", "true").option("startingVersion", 1).table(TABLE)
+        display(changes.orderBy("_commit_version", "respondent_id", "_change_type"))
+    - kind: code
+      source: |
+        def latest_state(changes: DataFrame, keys: list[str]) -> DataFrame:
+            """One row per key: its newest change, excluding update pre-images."""
+            window = Window.partitionBy(*keys).orderBy(F.col("_commit_version").desc())
+            return (
+                changes.filter(F.col("_change_type") != "update_preimage")
+                .withColumn("_rank", F.row_number().over(window))
+                .filter(F.col("_rank") == 1)
+                .drop("_rank")
+            )
+
+
+        display(latest_state(changes, ["respondent_id", "wave_id"]))
+    - kind: markdown
+      source: "R1 appears once, as an update_postimage with weight 1.4. R2 appears as a delete, which tells the consumer to remove it."

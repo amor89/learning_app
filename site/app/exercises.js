@@ -12,7 +12,7 @@ import {
 } from "./checkers.js";
 import { checkPython, isWarm } from "./pyrunner.js";
 import * as store from "./store.js";
-import { codeBlock, editor, h, plainCode } from "./ui.js";
+import { codeBlock, editor, fill, h, plainCode } from "./ui.js";
 
 const TYPE_LABELS = {
   mcq: "Multiple choice",
@@ -164,7 +164,7 @@ const BUILDERS = {
       list.querySelectorAll("li")[target]?.querySelector(delta < 0 ? ".up" : ".down")?.focus();
     };
     const paint = () =>
-      list.replaceChildren(
+      fill(list, 
         ...draft.order.map((id, i) =>
           h(
             "li",
@@ -228,7 +228,7 @@ function spotBugBuilder(ex, draft, frame) {
   draft.linesOk ??= false;
   const holder = h("div", {});
   const paint = () => {
-    holder.replaceChildren(
+    fill(holder, 
       h("p", { class: "muted small" }, "Tap a line to mark it. Tap again to clear it."),
       codeBlock(ex.code_lines, {
         selected: draft.lines,
@@ -286,14 +286,14 @@ export function renderExercise(app, ex, position, total, onChange) {
 
   const paintHints = () => {
     const shown = status().hints;
-    hints.replaceChildren(...ex.hints_html.slice(0, shown).map((html, i) => h("li", {}, h("span", { class: "tier" }, `Hint ${i + 1}. `), h("span", { html }))));
+    fill(hints, ...ex.hints_html.slice(0, shown).map((html, i) => h("li", {}, h("span", { class: "tier" }, `Hint ${i + 1}. `), h("span", { html }))));
     hintBtn.textContent = shown >= 3 ? "No more hints" : `Hint ${shown + 1} of 3`;
     hintBtn.disabled = shown >= 3;
   };
 
   const showSolution = () => {
     const full = unseal(ex);
-    solutionBox.replaceChildren(h("h4", {}, "Solution"), builder.solution(full), h("div", { class: "explanation", html: full.explanation_html }));
+    fill(solutionBox, h("h4", {}, "Solution"), builder.solution(full), h("div", { class: "explanation", html: full.explanation_html }));
     solutionBox.hidden = false;
   };
 
@@ -306,7 +306,7 @@ export function renderExercise(app, ex, position, total, onChange) {
 
   const setFeedback = (result) => {
     feedback.className = `feedback ${result.passed ? "ok" : result.partial ? "info" : "bad"}`;
-    feedback.replaceChildren(h("p", {}, result.feedback));
+    fill(feedback, h("p", {}, result.feedback));
     if (result.stdout) feedback.append(h("details", {}, h("summary", {}, "Output"), plainCode(result.stdout)));
   };
 

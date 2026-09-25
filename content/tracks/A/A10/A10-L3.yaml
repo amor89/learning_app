@@ -1,0 +1,322 @@
+id: A10-L3
+title: "CI: lint, type-check, test and validate on every pull request"
+
+concept: |
+  Continuous integration (CI) runs the same checks on every change, before a human reviews it. For a Databricks pipeline repository, run four checks on each pull request:
+
+  1. **Lint and format**: `ruff check .` and `ruff format --check .`
+  2. **Type-check**: `mypy`
+  3. **Unit tests**: `pytest`, with a local SparkSession (lesson A9-L2). Install Java in the CI runner first.
+  4. **Bundle validation**: `databricks bundle validate -t dev`. It catches YAML errors and broken references before anything is deployed.
+
+  On merge to `main`, a separate job deploys: `databricks bundle deploy -t prod`. Only CI deploys to production, and it does so as a **service principal**, never as a person.
+
+  **Authenticating CI.** Databricks recommends OAuth machine-to-machine authentication for a service principal. The CLI reads the workspace and credentials from environment variables, filled from the CI system's secret store:
+
+  ```yaml
+  env:
+    DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+    DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+    DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+  ```
+
+  Workload identity federation goes a step further: with `DATABRICKS_AUTH_TYPE: github-oidc`, GitHub proves the workflow's identity, and no client secret is stored at all. Prefer it where your workspace supports it.
+
+  Two rules keep CI trustworthy:
+
+  - **CI must be able to fail.** A test step with `continue-on-error: true`, or a `|| true` after a command, reports success whatever happens.
+  - **Protect `main`.** Require the CI checks to pass before a pull request can merge. Otherwise CI only reports problems, and nothing stops them.
+
+  Install the CLI with the `databricks/setup-cli` action, and pin its version so a CLI release cannot change your pipeline's behaviour overnight.
+
+why_it_matters: |
+  A team adds CI but marks the test step `continue-on-error: true` "until the flaky tests are fixed". Six weeks later, every pull request shows a green tick. A change that breaks the silver MERGE key merges on a Friday. The failing test had run and failed, but the step's failure no longer failed the job. Production double-counts a wave over the weekend.
+
+  With the test step allowed to fail and `main` protected by required checks, the pull request could not have merged.
+
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      on: push
+      jobs:
+        ci:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v4
+            - run: pip install -r requirements.txt
+            - run: pytest
+              continue-on-error: true
+            - run: databricks bundle deploy -t prod
+              env:
+                DATABRICKS_TOKEN: dapi-REDACTED-EXAMPLE
+    annotations:
+      - find: "continue-on-error: true"
+        note: "Failing tests no longer fail the job."
+      - find: "- run: databricks bundle deploy -t prod"
+        note: "Deploys every push, on every branch, straight to production."
+      - find: "DATABRICKS_TOKEN: dapi-REDACTED-EXAMPLE"
+        note: "A credential written into the workflow file: committed to Git."
+  strong:
+    code: |
+      name: CI
+      on:
+        pull_request:
+        push:
+          branches: [main]
+
+      jobs:
+        checks:
+          runs-on: ubuntu-24.04
+          steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-python@v5
+              with:
+                python-version: "3.12"
+            - uses: actions/setup-java@v4
+              with:
+                distribution: temurin
+                java-version: "21"
+            - run: pip install -e . --group test
+            - run: ruff check . && ruff format --check .
+            - run: mypy
+            - run: pytest
+            - uses: databricks/setup-cli@main
+              with:
+                version: 0.270.0
+            - run: databricks bundle validate -t dev
+              env:
+                DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+                DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+                DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+
+        deploy:
+          if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+          needs: checks
+          runs-on: ubuntu-24.04
+          steps:
+            - uses: actions/checkout@v4
+            - uses: databricks/setup-cli@main
+              with:
+                version: 0.270.0
+            - run: databricks bundle deploy -t prod
+              env:
+                DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+                DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+                DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    annotations:
+      - find: "- run: ruff check . && ruff format --check ."
+        note: "Every check can fail the job. Nothing is marked continue-on-error."
+      - find: "- run: databricks bundle validate -t dev"
+        note: "Validates the bundle on every pull request, before review."
+      - find: "if: github.event_name == 'push' && github.ref == 'refs/heads/main'"
+        note: "Deploys only after a merge to main."
+      - find: "needs: checks"
+        note: "Deployment waits for every check to pass."
+      - find: "- run: databricks bundle deploy -t prod"
+        note: "Deploys as the service principal, with credentials from the CI secret store."
+  takeaway: |
+    Every pull request is linted, typed, tested and validated. Only a merge to main deploys, as a service principal, with nothing secret in the file. The CLI version shown is an example: pin the version you tested.
+
+exercises:
+  - id: A10-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which identity should CI use to run `databricks bundle deploy -t prod`?
+    options:
+      - {id: a, text: "The personal access token of the most senior engineer"}
+      - {id: b, text: "A service principal, authenticated with OAuth M2M or workload identity federation"}
+      - {id: c, text: "Whoever opened the pull request"}
+      - {id: d, text: "An anonymous connection"}
+    answer: b
+    reasons:
+      - {id: r1, text: "A service principal is not tied to a person, and its access can be scoped to exactly what deployment needs."}
+      - {id: r2, text: "Personal tokens cannot deploy bundles."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "A personal token stops working when that person leaves, and it carries all their access."
+      - answer: c
+        feedback: "Pull request authors should not need production rights. The deploy runs after merge, as automation."
+      - answer: d
+        feedback: "Databricks requires authentication for every API call."
+      - answer: b|r2
+        feedback: "Right identity, wrong reason. Personal tokens can technically deploy. The problem is who owns the access."
+    hints:
+      - "Who should own production deployments?"
+      - "What identity is not a person?"
+      - "A service principal."
+    explanation: |
+      A service principal gives automation its own identity with only the rights it needs. Databricks recommends OAuth M2M for it, or workload identity federation with no stored secret.
+
+  - id: A10-L3-E2
+    type: fill_gap
+    difficulty: 2
+    language: yaml
+    prompt: |
+      Complete the environment for the bundle deploy step, using OAuth M2M with values from the CI secret store.
+    template: |
+      env:
+        DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+        DATABRICKS_[[g1]]: ${{ secrets.DATABRICKS_CLIENT_ID }}
+        DATABRICKS_[[g2]]: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    gaps:
+      g1: {accepted: [CLIENT_ID]}
+      g2: {accepted: [CLIENT_SECRET]}
+    wrong_answers:
+      - answer: {g1: TOKEN}
+        feedback: "DATABRICKS_TOKEN is for personal access tokens. OAuth M2M uses the client ID and secret."
+      - answer: {g2: PASSWORD}
+        feedback: "Service principals authenticate with a client secret, not a password."
+    hints:
+      - "OAuth client credentials have two parts."
+      - "They match the secret names on the right."
+      - "`CLIENT_ID` and `CLIENT_SECRET`."
+    explanation: |
+      `DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET`, with `DATABRICKS_HOST`, let the CLI authenticate as the service principal.
+
+  - id: A10-L3-E3
+    type: spot_bug
+    difficulty: 3
+    language: yaml
+    prompt: |
+      Every pull request shows a green tick, including ones that broke the MERGE. Tap the line, then fix the step.
+    code: |
+      steps:
+        - uses: actions/checkout@v4
+        - run: pip install -e . --group dev
+        - run: ruff check .
+        - run: pytest
+          continue-on-error: true
+    bug_lines: [6]
+    fix_checker:
+      kind: text
+      comments: none
+      rules:
+        - id: no_continue
+          type: forbidden
+          pattern: "continue-on-error:\\s*true"
+          message: "The test step still cannot fail the job."
+        - id: no_or_true
+          type: forbidden
+          pattern: "\\|\\|\\s*true"
+          message: "`|| true` hides failures just like continue-on-error."
+        - id: runs_pytest
+          type: required
+          pattern: "run:\\s*pytest"
+          message: "Keep the pytest step."
+    fix_solution: |
+      steps:
+        - uses: actions/checkout@v4
+        - run: pip install -e . --group dev
+        - run: ruff check .
+        - run: pytest
+    wrong_answers:
+      - lines: [5]
+        feedback: "Running pytest is right. The line after it changes what a failure means."
+      - lines: [4]
+        feedback: "The lint step is fine and can fail the job."
+    hints:
+      - "Which setting stops a failing step from failing the job?"
+      - "It sits under the pytest step."
+      - "Remove `continue-on-error: true`."
+    explanation: |
+      `continue-on-error: true` makes the step pass whatever pytest returns. Remove it. If tests are flaky, fix or quarantine them in code, and keep CI honest.
+
+  - id: A10-L3-E4
+    type: order
+    difficulty: 4
+    prompt: |
+      Order the checks in the pull request job, cheapest and fastest first.
+    items:
+      - {id: lint, text: "ruff check . and ruff format --check ."}
+      - {id: types, text: "mypy"}
+      - {id: tests, text: "pytest with a local SparkSession"}
+      - {id: validate, text: "databricks bundle validate -t dev"}
+    answer: [lint, types, tests, validate]
+    wrong_answers:
+      - answer: [tests, lint, types, validate]
+        feedback: "Spark tests take the longest. Run the seconds-long checks first, so a typo fails the job quickly."
+      - answer: [validate, lint, types, tests]
+        feedback: "Validation needs workspace credentials and a network call. Run the local checks first."
+    hints:
+      - "Which checks take seconds?"
+      - "Which starts a JVM?"
+      - "Which talks to the workspace?"
+    explanation: |
+      Lint and types take seconds, tests take a minute or two with Spark, and validation needs the workspace. Failing fast saves CI time and gives quicker feedback.
+
+  - id: A10-L3-E5
+    type: design
+    difficulty: 5
+    prompt: |
+      Configure the repository and workflow. Choose each setting.
+    slots:
+      - id: trigger_checks
+        label: "When do lint, types, tests and validation run?"
+        options:
+          - {id: pr, text: "On every pull request, and on push to main"}
+          - {id: nightly, text: "Nightly"}
+          - {id: manual, text: "When someone remembers"}
+        answer: pr
+      - id: trigger_deploy
+        label: "When does the prod deployment run?"
+        options:
+          - {id: merge, text: "After a merge to main, once the checks pass"}
+          - {id: every_push, text: "On every push to any branch"}
+          - {id: pr_open, text: "When a pull request is opened"}
+        answer: merge
+      - id: branch_protection
+        label: "Branch protection on main"
+        options:
+          - {id: required, text: "Require the CI checks to pass before merging"}
+          - {id: none, text: "No protection, so urgent fixes are faster"}
+        answer: required
+      - id: auth
+        label: "CI authentication"
+        options:
+          - {id: federation, text: "Workload identity federation, or OAuth M2M with secrets in the CI store"}
+          - {id: pat, text: "A personal access token in the workflow file"}
+        answer: federation
+    model_answer: |
+      - Checks on every pull request and on main.
+      - Deploy to prod only after a merge, needing the checks.
+      - Protect main with required checks.
+      - Authenticate as a service principal: federation first, OAuth M2M second, secrets never in files.
+    wrong_answers:
+      - answer: {trigger_deploy: every_push}
+        feedback: "Deploying every branch push puts unreviewed code in production."
+      - answer: {branch_protection: none}
+        feedback: "Without required checks, CI reports problems but cannot stop a merge."
+      - answer: {auth: pat}
+        feedback: "A token in a workflow file is committed to Git, and ties deployment to one person."
+      - answer: {trigger_checks: nightly}
+        feedback: "Nightly checks find problems after they merge. Run them on the pull request."
+    hints:
+      - "Checks belong before review and merge."
+      - "Production changes only after a merge."
+      - "Credentials never live in files."
+    explanation: |
+      Checks gate every pull request, protection makes them binding, deployment follows a merge, and CI authenticates as a service principal without secrets in the repository.
+
+recap:
+  - front: "Four CI checks for a pipeline repository"
+    back: "ruff (lint and format), mypy, pytest with local Spark, databricks bundle validate."
+  - front: "Who deploys to production?"
+    back: "CI, after a merge to main, as a service principal."
+  - front: "OAuth M2M environment variables"
+    back: "DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET from the CI secret store."
+  - front: "Two ways CI lies"
+    back: "continue-on-error: true, and command || true. Both turn failures green."
+
+claims:
+  - claim: "Databricks recommends OAuth M2M for service principals in CI; environment variables DATABRICKS_HOST, DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET; github-oidc workload identity federation needs no client secret."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/dev-tools/auth/oauth-m2m and https://docs.databricks.com/aws/en/dev-tools/bundles/authentication"
+  - claim: "databricks/setup-cli installs the Databricks CLI in GitHub Actions and accepts a version input."
+    status: search-only
+    source: "https://github.com/databricks/setup-cli"
+  - claim: "CLI version 0.270.0 in the example is illustrative, not a verified current release."
+    status: unverified
+    source: "Pin the version you have tested; check https://github.com/databricks/cli/releases."

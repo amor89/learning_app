@@ -1,0 +1,403 @@
+id: A10-L2
+title: Declarative Automation Bundles and parameterised jobs
+
+concept: |
+  A job built by clicking in the UI exists only in one workspace, with no history and no review. **Declarative Automation Bundles** describe jobs, their tasks, parameters and notifications as YAML files in your repository. Databricks renamed them from Databricks Asset Bundles on 16 March 2026. The `databricks bundle` commands and `databricks.yml` did not change.
+
+  A bundle has one `databricks.yml` at its root:
+
+  ```yaml
+  bundle:
+    name: research_pipelines
+
+  variables:
+    catalog:
+      description: Catalog the pipelines write to.
+
+  resources:
+    jobs:
+      nat_silver_pipeline:
+        name: nat_silver_pipeline
+        parameters:
+          - name: catalog
+            default: ${var.catalog}
+        tasks:
+          - task_key: silver
+            notebook_task:
+              notebook_path: ./notebooks/silver_nat_transform.py
+
+  targets:
+    dev:
+      mode: development
+      default: true
+      variables:
+        catalog: research_dev
+    prod:
+      mode: production
+      variables:
+        catalog: research_prod
+  ```
+
+  - **Targets** are environments. One code base deploys to each with different values.
+  - **Variables** hold what differs per target. They resolve from `--var`, then `BUNDLE_VAR_` environment variables, then target mappings, then defaults.
+  - **Job parameters** reach notebook tasks, which read them with `dbutils.widgets.get("catalog")`. Dynamic references such as `{{job.run_id}}` fill in values at run time.
+  - **`mode: development`** prefixes job names with `[dev <your name>]` and pauses schedules, so your test deployment never runs on the production timetable.
+
+  The commands:
+
+  ```bash
+  databricks bundle validate -t dev
+  databricks bundle deploy -t dev
+  databricks bundle run -t dev nat_silver_pipeline
+  ```
+
+  Deploy to `prod` only from CI, as a service principal (lesson A10-L3).
+
+why_it_matters: |
+  A team manages its jobs in the UI. Someone changes the production silver job's notebook path to test a branch, meaning to change it back. They forget. For a week, production runs a half-finished branch. Nobody can say what changed or when, because the UI keeps no diff and nothing was reviewed.
+
+  With the job in a bundle, the path is a line in `databricks.yml`. Changing it needs a pull request, CI validates it, and Git shows exactly what changed.
+
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      resources:
+        jobs:
+          nat_silver_pipeline:
+            name: nat_silver_pipeline
+            tasks:
+              - task_key: silver
+                notebook_task:
+                  notebook_path: /Workspace/Users/sam.jones@example.org/silver_nat_transform
+                  base_parameters:
+                    catalog: research_prod
+    annotations:
+      - find: "notebook_path: /Workspace/Users/sam.jones@example.org/silver_nat_transform"
+        note: "Points at one person's folder: unreviewed code, and it breaks when they leave."
+      - find: "catalog: research_prod"
+        note: "Production hardcoded: every deployment of this bundle writes to prod."
+      - find: "resources:"
+        note: "No targets: there is no way to deploy the same job to dev."
+  strong:
+    code: |
+      bundle:
+        name: research_pipelines
+
+      variables:
+        catalog:
+          description: Catalog the pipelines write to.
+
+      resources:
+        jobs:
+          nat_silver_pipeline:
+            name: nat_silver_pipeline
+            parameters:
+              - name: catalog
+                default: ${var.catalog}
+            tasks:
+              - task_key: silver
+                notebook_task:
+                  notebook_path: ./notebooks/silver_nat_transform.py
+            email_notifications:
+              on_failure:
+                - data-oncall@example.org
+
+      targets:
+        dev:
+          mode: development
+          default: true
+          variables:
+            catalog: research_dev
+        prod:
+          mode: production
+          variables:
+            catalog: research_prod
+    annotations:
+      - find: "default: ${var.catalog}"
+        note: "The job parameter takes its value from the target's variable."
+      - find: "notebook_path: ./notebooks/silver_nat_transform.py"
+        note: "A path inside the bundle, deployed from the reviewed commit."
+      - find: "mode: development"
+        note: "Dev deployments get a [dev name] prefix and paused schedules."
+      - find: "catalog: research_prod"
+        note: "Production values live only in the prod target."
+  takeaway: |
+    One reviewed file describes the job for every environment. The target decides where it writes.
+
+exercises:
+  - id: A10-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      What changed when Databricks Asset Bundles became Declarative Automation Bundles on 16 March 2026?
+    options:
+      - {id: a, text: "The CLI command changed from `databricks bundle` to `databricks dab`."}
+      - {id: b, text: "The name. The `databricks bundle` CLI and existing configuration keep working unchanged."}
+      - {id: c, text: "`databricks.yml` was renamed `automation.yml`."}
+      - {id: d, text: "Targets were removed in favour of workspaces."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Databricks describes the rename as non-breaking."}
+      - {id: r2, text: "Bundles were replaced by a new product."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The CLI command group is still `databricks bundle`."
+      - answer: c
+        feedback: "The configuration file is still `databricks.yml`."
+      - answer: d
+        feedback: "Targets are unchanged and remain the way to describe environments."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. It is the same product under a new name."
+    hints:
+      - "Was the rename breaking?"
+      - "Did you need to change your files?"
+      - "Only the name changed."
+    explanation: |
+      The rename is non-breaking. The CLI, `databricks.yml` and all existing configuration work as before.
+
+  - id: A10-L2-E2
+    type: fill_gap
+    difficulty: 2
+    language: yaml
+    prompt: |
+      Complete the targets so dev deployments are prefixed and paused, and each target sets its own catalog.
+    template: |
+      targets:
+        dev:
+          mode: [[g1]]
+          default: true
+          variables:
+            catalog: research_dev
+        prod:
+          mode: [[g2]]
+          variables:
+            [[g3]]: research_prod
+    gaps:
+      g1: {accepted: [development]}
+      g2: {accepted: [production]}
+      g3: {accepted: [catalog]}
+    wrong_answers:
+      - answer: {g1: dev}
+        feedback: "The mode values are `development` and `production`. `dev` is only the target's name."
+      - answer: {g3: catalog_name}
+        feedback: "The variable is declared as `catalog`. A different name here sets nothing, and prod falls back to the default."
+    hints:
+      - "The mode values are full words."
+      - "The prod target sets the same variable as dev."
+      - "`development`, `production` and `catalog`."
+    explanation: |
+      `mode: development` prefixes names and pauses schedules. `mode: production` adds production checks. Each target sets the same variable to its own value.
+
+  - id: A10-L2-E3
+    type: spot_bug
+    difficulty: 3
+    language: yaml
+    prompt: |
+      A developer runs `databricks bundle deploy -t dev`, and the next morning production data has changed. Tap the line, then fix the job so the catalog comes from the target.
+    code: |
+      resources:
+        jobs:
+          nat_silver_pipeline:
+            name: nat_silver_pipeline
+            parameters:
+              - name: catalog
+                default: research_prod
+            tasks:
+              - task_key: silver
+                notebook_task:
+                  notebook_path: ./notebooks/silver_nat_transform.py
+    bug_lines: [7]
+    fix_checker:
+      kind: text
+      comments: none
+      rules:
+        - id: uses_var
+          type: required
+          pattern: "default:\\s*\\$\\{var\\.catalog\\}"
+          message: "Take the catalog from the target: `default: ${var.catalog}`."
+        - id: no_prod_literal
+          type: forbidden
+          pattern: "default:\\s*research_prod"
+          message: "The job still defaults to research_prod in every target."
+    fix_solution: |
+      resources:
+        jobs:
+          nat_silver_pipeline:
+            name: nat_silver_pipeline
+            parameters:
+              - name: catalog
+                default: ${var.catalog}
+            tasks:
+              - task_key: silver
+                notebook_task:
+                  notebook_path: ./notebooks/silver_nat_transform.py
+    wrong_answers:
+      - lines: [11]
+        feedback: "A relative notebook path inside the bundle is correct."
+      - lines: [6]
+        feedback: "Declaring a catalog parameter is right. Its default value is the problem."
+    hints:
+      - "Which value is the same in every target?"
+      - "Where should environment-specific values come from?"
+      - "Use `${var.catalog}`."
+    explanation: |
+      A literal default of `research_prod` applies to every target, dev included. `${var.catalog}` takes the value each target sets.
+
+  - id: A10-L2-E4
+    type: write_function
+    difficulty: 4
+    language: python
+    prompt: |
+      The notebook for this job must read its `catalog` and `wave_id` job parameters. Write `read_job_parameters(widgets)`: `widgets` behaves like `dbutils.widgets` (it has `.get(name)`). Return a dict with both values. Raise `ValueError` when `catalog` is not `research_dev` or `research_prod`, or when `wave_id` is empty.
+    starter: |
+      def read_job_parameters(widgets: object) -> dict[str, str]:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: read_job_parameters
+          typed: true
+          docstring: true
+          message: "Give `read_job_parameters` type hints and a docstring."
+      setup: |
+        class FakeWidgets:
+            def __init__(self, values):
+                self.values = values
+            def get(self, name):
+                return self.values[name]
+      tests:
+        - id: reads
+          code: |
+            assert read_job_parameters(FakeWidgets({"catalog": "research_dev", "wave_id": "W14"})) == {"catalog": "research_dev", "wave_id": "W14"}
+          message: "Return both parameters as read from widgets.get."
+        - id: bad_catalog
+          code: |
+            try:
+                read_job_parameters(FakeWidgets({"catalog": "hive_metastore", "wave_id": "W14"}))
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "An unexpected catalog must raise ValueError before any data moves."
+        - id: empty_wave
+          code: |
+            try:
+                read_job_parameters(FakeWidgets({"catalog": "research_dev", "wave_id": ""}))
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "An empty wave_id must raise ValueError."
+    solution: |
+      ALLOWED_CATALOGS = {"research_dev", "research_prod"}
+
+
+      def read_job_parameters(widgets: object) -> dict[str, str]:
+          """Read and validate the job parameters passed to this notebook.
+
+          Args:
+              widgets: dbutils.widgets, or any object with get(name).
+
+          Returns:
+              catalog and wave_id.
+
+          Raises:
+              ValueError: If the catalog is not allowed or wave_id is empty.
+          """
+          get = getattr(widgets, "get")
+          catalog = str(get("catalog"))
+          wave_id = str(get("wave_id")).strip()
+          if catalog not in ALLOWED_CATALOGS:
+              raise ValueError(f"catalog {catalog!r} is not one of {sorted(ALLOWED_CATALOGS)}")
+          if not wave_id:
+              raise ValueError("wave_id is empty")
+          return {"catalog": catalog, "wave_id": wave_id}
+    seeded_bugs:
+      - |
+        def read_job_parameters(widgets: object) -> dict[str, str]:
+            """No validation."""
+            get = getattr(widgets, "get")
+            return {"catalog": get("catalog"), "wave_id": get("wave_id")}
+      - |
+        def read_job_parameters(widgets: object) -> dict[str, str]:
+            """A default hides a missing wave."""
+            get = getattr(widgets, "get")
+            catalog = get("catalog")
+            if catalog not in {"research_dev", "research_prod"}:
+                raise ValueError(catalog)
+            wave_id = get("wave_id") or "W01"
+            return {"catalog": catalog, "wave_id": wave_id}
+    wrong_answers:
+      - answer: |
+          def read_job_parameters(widgets: object) -> dict[str, str]:
+              """No validation."""
+              get = getattr(widgets, "get")
+              return {"catalog": get("catalog"), "wave_id": get("wave_id")}
+        triggers: bad_catalog
+      - answer: |
+          def read_job_parameters(widgets: object) -> dict[str, str]:
+              """A default hides a missing wave."""
+              get = getattr(widgets, "get")
+              catalog = get("catalog")
+              if catalog not in {"research_dev", "research_prod"}:
+                  raise ValueError(catalog)
+              wave_id = get("wave_id") or "W01"
+              return {"catalog": catalog, "wave_id": wave_id}
+        triggers: empty_wave
+    hints:
+      - "Call `widgets.get(\"catalog\")` and `widgets.get(\"wave_id\")`."
+      - "Check the catalog against an allowed set."
+      - "Raise ValueError for a bad catalog or an empty wave_id. Never fill in a default."
+    explanation: |
+      Parameters arrive as strings from outside the code. Validating them at the start turns a mistyped catalog into a clear failure, instead of a run against the wrong environment.
+
+  - id: A10-L2-E5
+    type: order
+    difficulty: 5
+    prompt: |
+      Order the commands to try a bundle change in dev.
+    items:
+      - {id: validate, text: "databricks bundle validate -t dev"}
+      - {id: deploy, text: "databricks bundle deploy -t dev"}
+      - {id: run, text: "databricks bundle run -t dev nat_silver_pipeline"}
+      - {id: check, text: "Check the run log and QA results for the dev run"}
+    answer: [validate, deploy, run, check]
+    wrong_answers:
+      - answer: [deploy, validate, run, check]
+        feedback: "Validate first. It catches YAML and reference errors before anything is deployed."
+      - answer: [validate, run, deploy, check]
+        feedback: "run starts the deployed job. Deploy the change first, or you run the old version."
+    hints:
+      - "Catch configuration errors first."
+      - "You can only run what is deployed."
+      - "Then look at the results."
+    explanation: |
+      Validate, deploy, run, then check the evidence. The same sequence runs in CI for prod, without the manual run.
+
+recap:
+  - front: "What are Declarative Automation Bundles?"
+    back: "Jobs and their settings as YAML in Git (formerly Databricks Asset Bundles). Same CLI: databricks bundle."
+  - front: "Targets and variables"
+    back: "Targets are environments. Variables hold what differs, such as the catalog, set per target."
+  - front: "What does mode: development do?"
+    back: "Prefixes resources with [dev <user>] and pauses schedules and triggers."
+  - front: "Read a job parameter in a notebook"
+    back: "dbutils.widgets.get(\"name\"). Validate it before using it."
+
+claims:
+  - claim: "Databricks Asset Bundles were renamed Declarative Automation Bundles on 16 March 2026; the change is non-breaking."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/release-notes/dev-tools/bundles"
+  - claim: "databricks.yml structure: bundle, variables, resources.jobs with parameters and tasks, targets with mode; variable resolution order."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/dev-tools/bundles/settings and https://docs.databricks.com/aws/en/dev-tools/bundles/variables"
+  - claim: "Development mode prefixes resources with [dev ${workspace.current_user.short_name}] and pauses schedules and triggers."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/dev-tools/bundles/deployment-modes"
+  - claim: "Notebook tasks read job parameters with dbutils.widgets.get."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/jobs/parameter-use"

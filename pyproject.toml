@@ -29,9 +29,14 @@ dev = [
     "types-Markdown",
     "types-Pygments",
 ]
+# Separate environment: PySpark 4.0.4 fails to import pandas-on-Spark with pandas 3.x,
+# so the Spark harness pins pandas 2.x and cannot share an environment with `dev`.
 spark = [
     "pyspark==4.0.4",
     "delta-spark==4.0.1",
+    "pandas>=2.2,<3",
+    "pyarrow>=15",
+    "pytest>=9,<10",
 ]
 
 [tool.setuptools]

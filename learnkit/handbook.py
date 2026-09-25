@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import random
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -24,7 +25,7 @@ from learnkit.models import (
     SpotBugExercise,
     Track,
 )
-from learnkit.render import code_lines, md_inline, md_to_html
+from learnkit.render import LEXERS, code_lines, md_inline, md_to_html
 
 TYPE_LABELS = {
     "mcq": "Multiple choice",
@@ -69,6 +70,7 @@ class Code:
 class Items:
     items: list[str]
     ordered: bool = False
+    checklist: bool = False
     kind: Literal["items"] = "items"
 
 
@@ -115,6 +117,30 @@ def scopes(course: Course) -> list[Scope]:
             result.append(Scope(f"handbook-{module.meta.id}", title, [(track, [module])]))
     result.insert(0, Scope("handbook-full", "Full handbook", full_parts))
     return result
+
+
+_FENCE = re.compile(r"^```(\w*)\n(.*?)^```\s*$", re.DOTALL | re.MULTILINE)
+
+
+def prose_blocks(text: str) -> list[Block]:
+    """Split Markdown into prose and code blocks.
+
+    Fenced code becomes a Code block, so the handbook numbers its lines and wraps
+    long lines with a hanging indent, like the worked examples.
+    """
+    blocks: list[Block] = []
+    pos = 0
+    for match in _FENCE.finditer(text):
+        before = text[pos : match.start()].strip()
+        if before:
+            blocks.append(Markdown(before))
+        language = match.group(1) if match.group(1) in LEXERS else "text"
+        blocks.append(Code(match.group(2).rstrip("\n"), language))
+        pos = match.end()
+    rest = text[pos:].strip()
+    if rest:
+        blocks.append(Markdown(rest))
+    return blocks
 
 
 def lesson_anchor(lesson_id: str) -> str:
@@ -199,7 +225,7 @@ def solution_blocks(ex: Exercise, lesson: Lesson, number: int) -> list[Block]:
         blocks += [Markdown("**Answer.**"), Code(ex.solution, ex.language)]
     elif isinstance(ex, DesignExercise):
         blocks += [Markdown("**Answer.**"), Markdown(ex.model_answer)]
-    blocks.append(Markdown(ex.explanation))
+    blocks += prose_blocks(ex.explanation)
     wrong = wrong_answer_notes(ex)
     if wrong:
         blocks += [Markdown("**Common wrong answers.**"), Items(wrong)]
@@ -228,9 +254,9 @@ def lesson_blocks(lesson: Lesson) -> list[Block]:
     blocks: list[Block] = [
         Heading(3, f"{lesson.id} {lesson.title}", lesson_anchor(lesson.id)),
         Heading(4, "Concept"),
-        Markdown(lesson.concept),
+        *prose_blocks(lesson.concept),
         Heading(4, "Why it matters"),
-        Markdown(lesson.why_it_matters),
+        *prose_blocks(lesson.why_it_matters),
         Heading(4, "Worked example: weak code"),
         Code(example.weak.code, example.language, example.weak.annotated_lines()),
         Heading(4, "Worked example: strong code"),
@@ -288,7 +314,7 @@ def build_blocks(scope: Scope, course: Course) -> list[Block]:
         body += [
             PageBreak(),
             Heading(2, f"Track {track.id} best-practice checklist", c_anchor),
-            Items([f"☐ {item}" for item in track.checklist]),
+            Items([f"☐ {item}" for item in track.checklist], checklist=True),
         ]
     contents.append((1, "Appendix: solutions and answer keys", "appendix"))
     body += [
@@ -351,8 +377,9 @@ def render_html(blocks: list[Block], title: str, css: str) -> str:
             parts.append(code_html(block))
         elif isinstance(block, Items):
             tag = "ol" if block.ordered else "ul"
+            list_class = "checklist" if block.checklist else "items"
             items = "".join(f"<li>{md_inline(item)}</li>" for item in block.items)
-            parts.append(f'<{tag} class="items">{items}</{tag}>')
+            parts.append(f'<{tag} class="{list_class}">{items}</{tag}>')
         elif isinstance(block, PageBreak):
             parts.append('<div class="pagebreak"></div>')
         elif isinstance(block, Contents):

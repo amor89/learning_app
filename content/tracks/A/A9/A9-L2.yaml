@@ -1,0 +1,313 @@
+id: A9-L2
+title: A fast local SparkSession and readable test data
+
+concept: |
+  Unit tests for PySpark run on your laptop and in CI, not on a cluster. A local session that starts in seconds and runs small jobs fast needs a few settings:
+
+  ```python
+  builder = (
+      SparkSession.builder.master("local[2]")
+      .config("spark.sql.shuffle.partitions", "2")
+      .config("spark.ui.enabled", "false")
+      .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+      .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+      .config("spark.sql.sources.default", "delta")
+  )
+  spark = configure_spark_with_delta_pip(builder).getOrCreate()
+  ```
+
+  - `local[2]` runs Spark in one process with two worker threads. Two threads, not one, so bugs that depend on partitioning still show up.
+  - `spark.sql.shuffle.partitions` defaults to 200. On ten test rows, every shuffle creates 200 tiny tasks. Two is plenty.
+  - `configure_spark_with_delta_pip` from `delta-spark` adds the matching Delta JAR. The two `config` lines enable Delta SQL and the Delta catalog.
+  - Open-source Spark writes `saveAsTable` as Parquet by default. Databricks uses Delta. Set the default so tests behave like production.
+
+  **Test data.** Build it with an explicit schema, as a DDL string such as `"respondent_id STRING, final_weight DOUBLE"`. Inference guesses types from values, fails on a column of only `None` (`CANNOT_DETERMINE_TYPE`), and turns `2` into a LONG where production has DOUBLE.
+
+  A **test data builder** keeps tests short: one function returns a valid row with sensible defaults, and each test overrides only the field it is about.
+
+  ```python
+  def respondent(**overrides: object) -> dict[str, object]:
+      row = {"respondent_id": "R1", "wave_id": "W1", "final_weight": 1.0, "in_scope": True}
+      row.update(overrides)
+      return row
+  ```
+
+  A test that says `respondent(final_weight=None)` tells the reader exactly what it is testing.
+
+why_it_matters: |
+  A project's Spark tests take 14 minutes in CI, so developers stop running them locally. The session uses the default 200 shuffle partitions, and each of the 60 tests runs two or three shuffles on a handful of rows. Most of the time goes into scheduling empty tasks. A MERGE bug that a test would have caught ships to production, because nobody waited for the suite.
+
+  With `local[2]` and two shuffle partitions, the same suite runs in under two minutes, and people run it before every push.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      @pytest.fixture(scope="session")
+      def spark():
+          return SparkSession.builder.getOrCreate()
+
+
+      def test_null_weights_are_reported(spark):
+          df = spark.createDataFrame([{"respondent_id": "R1", "final_weight": None, "wave_id": "W1", "in_scope": True}])
+          assert null_weight_count(df) == 1
+    annotations:
+      - find: "return SparkSession.builder.getOrCreate()"
+        note: "No master, 200 shuffle partitions, UI on, no Delta: slow and unlike production."
+      - find: 'df = spark.createDataFrame([{"respondent_id": "R1", "final_weight": None, "wave_id": "W1", "in_scope": True}])'
+        note: "Inferred schema: a column of only None raises CANNOT_DETERMINE_TYPE, and every field is spelt out in every test."
+  strong:
+    code: |
+      RESPONDENT_SCHEMA = "respondent_id STRING, wave_id STRING, final_weight DOUBLE, in_scope BOOLEAN"
+
+
+      def respondent(**overrides: object) -> dict[str, object]:
+          """A valid silver respondent. Override only the fields a test is about."""
+          row: dict[str, object] = {"respondent_id": "R1", "wave_id": "W1", "final_weight": 1.0, "in_scope": True}
+          unknown = set(overrides) - set(row)
+          if unknown:
+              raise KeyError(f"unknown fields: {sorted(unknown)}")
+          row.update(overrides)
+          return row
+
+
+      def respondents_df(spark: SparkSession, rows: list[dict[str, object]]) -> DataFrame:
+          """DataFrame with the silver schema, whatever the values."""
+          fields = [f.split()[0] for f in RESPONDENT_SCHEMA.split(", ")]
+          return spark.createDataFrame([tuple(r[f] for f in fields) for r in rows], RESPONDENT_SCHEMA)
+
+
+      def test_null_weights_are_reported(spark: SparkSession) -> None:
+          df = respondents_df(spark, [respondent(), respondent(respondent_id="R2", final_weight=None)])
+          assert null_weight_count(df) == 1
+    annotations:
+      - find: 'RESPONDENT_SCHEMA = "respondent_id STRING, wave_id STRING, final_weight DOUBLE, in_scope BOOLEAN"'
+        note: "One DDL schema: types match production, and None is always allowed."
+      - find: 'raise KeyError(f"unknown fields: {sorted(unknown)}")'
+        note: "A typo such as final_wieght fails loudly instead of silently adding nothing."
+      - find: 'respondent(respondent_id="R2", final_weight=None)'
+        note: "The test reads as its intent: a second respondent with a missing weight."
+  takeaway: |
+    A tuned local session makes tests fast enough to run on every change. Builders with explicit schemas make them short and exact.
+
+exercises:
+  - id: A9-L2-E1
+    type: predict_output
+    difficulty: 1
+    language: pyspark
+    prompt: |
+      A fresh local session on PySpark 4.0 with no extra configuration. What does this print?
+    code: |
+      print(spark.conf.get("spark.sql.shuffle.partitions"))
+    answer: "200"
+    wrong_answers:
+      - answer: "2"
+        feedback: "Two is what you should set for tests. The default is 200."
+      - answer: "auto"
+        feedback: "Databricks can manage shuffle partitions automatically, but open-source Spark's default setting is 200."
+    hints:
+      - "The default suits clusters, not tests."
+      - "It is a round number in the hundreds."
+      - "200."
+    explanation: |
+      The default is 200, which suits large data on a cluster. On test data it creates hundreds of empty tasks per shuffle. Set it to 2.
+
+  - id: A9-L2-E2
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the local test session: two threads, two shuffle partitions, with the Delta JAR added.
+    template: |
+      builder = (
+          SparkSession.builder.master("[[g1]]")
+          .config("spark.sql.shuffle.partitions", "[[g2]]")
+          .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+          .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+      )
+      spark = [[g3]](builder).getOrCreate()
+    gaps:
+      g1: {accepted: ["local[2]"]}
+      g2: {accepted: ["2"]}
+      g3: {accepted: [configure_spark_with_delta_pip]}
+    wrong_answers:
+      - answer: {g1: "local[1]"}
+        feedback: "One thread hides bugs that only appear with several partitions. Use two."
+      - answer: {g1: yarn}
+        feedback: "yarn needs a cluster. Unit tests run in-process with `local[...]`."
+      - answer: {g3: configure_delta}
+        feedback: "The delta-spark helper is `configure_spark_with_delta_pip`."
+    hints:
+      - "The local master takes the thread count in brackets."
+      - "Match the shuffle partitions to the threads."
+      - "The helper from the delta package ends with `_pip`."
+    explanation: |
+      `local[2]` runs two threads in-process, two shuffle partitions avoid empty tasks, and `configure_spark_with_delta_pip` adds the Delta JAR that matches your delta-spark version.
+
+  - id: A9-L2-E3
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `respondent(**overrides)`. It returns a dict with defaults `respondent_id="R1"`, `wave_id="W1"`, `final_weight=1.0`, `in_scope=True`, updated with the overrides. Raise `KeyError` naming any override that is not one of those four fields. Each call must return a new dict.
+    starter: |
+      def respondent(**overrides: object) -> dict[str, object]:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: respondent
+          typed: true
+          docstring: true
+          message: "Give `respondent` type hints and a docstring."
+        - id: no_mutable_default
+          kind: forbids_mutable_default
+          message: "Do not use a mutable default. Build a new dict inside the function."
+      tests:
+        - id: defaults
+          code: |
+            assert respondent() == {"respondent_id": "R1", "wave_id": "W1", "final_weight": 1.0, "in_scope": True}
+          message: "With no overrides, return the four defaults."
+        - id: override
+          code: |
+            r = respondent(final_weight=None, respondent_id="R2")
+            assert r["final_weight"] is None and r["respondent_id"] == "R2" and r["wave_id"] == "W1"
+          message: "Overrides replace only the named fields."
+        - id: typo
+          code: |
+            try:
+                respondent(final_wieght=2.0)
+            except KeyError as err:
+                assert "final_wieght" in str(err)
+            else:
+                raise AssertionError("no KeyError")
+          message: "An unknown field must raise KeyError naming it, or typos slip through."
+        - id: independent
+          code: |
+            a = respondent()
+            a["wave_id"] = "W9"
+            assert respondent()["wave_id"] == "W1"
+          message: "Each call must return a fresh dict. Changing one must not change the defaults."
+    solution: |
+      def respondent(**overrides: object) -> dict[str, object]:
+          """A valid silver respondent row. Override only the fields a test is about.
+
+          Raises:
+              KeyError: If an override names an unknown field.
+          """
+          row: dict[str, object] = {"respondent_id": "R1", "wave_id": "W1", "final_weight": 1.0, "in_scope": True}
+          unknown = set(overrides) - set(row)
+          if unknown:
+              raise KeyError(f"unknown fields: {sorted(unknown)}")
+          row.update(overrides)
+          return row
+    seeded_bugs:
+      - |
+        _DEFAULTS: dict[str, object] = {"respondent_id": "R1", "wave_id": "W1", "final_weight": 1.0, "in_scope": True}
+
+
+        def respondent(**overrides: object) -> dict[str, object]:
+            """Shares one dict between calls."""
+            _DEFAULTS.update(overrides)
+            return _DEFAULTS
+      - |
+        def respondent(**overrides: object) -> dict[str, object]:
+            """Accepts typos silently."""
+            row: dict[str, object] = {"respondent_id": "R1", "wave_id": "W1", "final_weight": 1.0, "in_scope": True}
+            row.update(overrides)
+            return row
+    wrong_answers:
+      - answer: |
+          def respondent(**overrides: object) -> dict[str, object]:
+              """Accepts typos silently."""
+              row: dict[str, object] = {"respondent_id": "R1", "wave_id": "W1", "final_weight": 1.0, "in_scope": True}
+              row.update(overrides)
+              return row
+        triggers: typo
+    hints:
+      - "Build the defaults dict inside the function."
+      - "Compare the override keys with the default keys."
+      - "Raise KeyError for unknown keys, then update and return."
+    explanation: |
+      A fresh dict per call keeps tests independent. Rejecting unknown fields turns a typo in a test into an immediate error instead of a test that checks nothing.
+
+  - id: A9-L2-E4
+    type: spot_bug
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      This helper builds test data. It works for most tests, but fails with `CANNOT_DETERMINE_TYPE` in the test for missing weights. Tap the line, then fix the function with an explicit schema.
+    code: |
+      def weights_df(spark: SparkSession, weights: list[float | None]) -> DataFrame:
+          """One respondent per weight."""
+          rows = [(f"R{i}", w) for i, w in enumerate(weights)]
+          return spark.createDataFrame(rows, ["respondent_id", "final_weight"])
+    bug_lines: [4]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: ddl_schema
+          kind: requires_pattern
+          pattern: "createDataFrame\\(\\s*rows\\s*,\\s*[\"']respondent_id\\s+STRING\\s*,\\s*final_weight\\s+DOUBLE[\"']\\s*\\)"
+          message: "Pass a DDL schema: \"respondent_id STRING, final_weight DOUBLE\"."
+    fix_solution: |
+      def weights_df(spark: SparkSession, weights: list[float | None]) -> DataFrame:
+          """One respondent per weight."""
+          rows = [(f"R{i}", w) for i, w in enumerate(weights)]
+          return spark.createDataFrame(rows, "respondent_id STRING, final_weight DOUBLE")
+    spark_tests: |
+      df = weights_df(spark, [None, None])
+      assert df.count() == 2 and df.schema["final_weight"].dataType == T.DoubleType()
+    wrong_answers:
+      - lines: [3]
+        feedback: "Building tuples is fine. The problem is that Spark has to guess the types."
+    hints:
+      - "Column names alone leave Spark to infer types."
+      - "What can it infer from [None, None]?"
+      - "Pass a DDL string with the types."
+    explanation: |
+      A list of names gives Spark no types, so it infers them. With only `None` weights there is nothing to infer from. A DDL schema string fixes the types for every test.
+
+  - id: A9-L2-E5
+    type: order
+    difficulty: 5
+    prompt: |
+      Order the set-up of a local PySpark test harness.
+    items:
+      - {id: java, text: "Install Java 17 or 21"}
+      - {id: venv, text: "Create a virtual environment and install pyspark, delta-spark and pytest"}
+      - {id: fixture, text: "Write a session-scoped spark fixture in conftest.py"}
+      - {id: builders, text: "Write test data builders with explicit schemas"}
+      - {id: tests, text: "Write tests with known answers against the builders"}
+    answer: [java, venv, fixture, builders, tests]
+    wrong_answers:
+      - answer: [venv, java, fixture, builders, tests]
+        feedback: "Either order installs fine, but Spark needs Java before anything runs: check it first so the first test run does not fail."
+      - answer: [java, venv, builders, tests, fixture]
+        feedback: "Tests need the spark fixture to create DataFrames. Write it before the tests."
+    hints:
+      - "Spark runs on the JVM."
+      - "Tests depend on the fixture and the builders."
+      - "Infrastructure first, then data helpers, then tests."
+    explanation: |
+      Java, then the Python environment, then the shared fixture, then data builders, then the tests that use them.
+
+recap:
+  - front: "Local test session settings"
+    back: "master(\"local[2]\"), shuffle partitions 2, UI off, Delta configured with configure_spark_with_delta_pip."
+  - front: "Default spark.sql.shuffle.partitions"
+    back: "200: far too many for test data."
+  - front: "Why explicit schemas in test data?"
+    back: "Inference fails on all-None columns and can pick different types from production."
+  - front: "Test data builder"
+    back: "A function with valid defaults. Tests override only the fields they are about, and typos raise."
+
+claims:
+  - claim: "spark.sql.shuffle.partitions defaults to 200; createDataFrame with only column names infers types and fails on all-None columns."
+    status: verified
+    source: "Run on PySpark 4.0.4 in this repository."
+  - claim: "configure_spark_with_delta_pip adds the Delta package matching the installed delta-spark version."
+    status: verified
+    source: "Used by practice/conftest.py with delta-spark 4.0.1."

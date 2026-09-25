@@ -321,3 +321,52 @@ claims:
   - claim: "F.count_distinct exists in PySpark 4.0."
     status: verified
     source: "Run on PySpark 4.0.4 in this repository."
+
+practical:
+  platform: databricks
+  title: "Reconcile silver with gold, and catch a dropped region"
+  intro: |
+    Run this in Databricks Free Edition. It builds a small silver table and two gold versions: one correct, one built with an inner join that drops an unknown region. The reconciliation passes for the first and fails for the second.
+  cells:
+    - kind: code
+      source: |
+        import math
+
+        from pyspark.sql import DataFrame
+        from pyspark.sql import functions as F
+
+        silver = spark.createDataFrame(
+            [("R1", "W1", "N", True, 1.5), ("R2", "W1", "S", True, 0.5), ("R3", "W1", "NI", True, 2.0), ("R4", "W1", "N", False, 9.0)],
+            "respondent_id STRING, wave_id STRING, region_code STRING, in_scope BOOLEAN, final_weight DOUBLE",
+        )
+        regions = spark.createDataFrame([("N", "North"), ("S", "South")], "region_code STRING, region STRING")
+    - kind: code
+      source: |
+        def gold_from(silver: DataFrame, how: str) -> DataFrame:
+            """Gold metrics per wave and region, joined to the lookup with the given join type."""
+            joined = silver.filter(F.col("in_scope")).join(F.broadcast(regions), "region_code", how)
+            return joined.groupBy("wave_id", "region").agg(
+                F.count("*").alias("unweighted_n"),
+                F.coalesce(F.sum("final_weight"), F.lit(0.0)).alias("weighted_base"),
+            )
+
+
+        def silver_total(silver: DataFrame, wave_id: str) -> float:
+            """In-scope weight total for one wave."""
+            row = silver.filter((F.col("wave_id") == wave_id) & F.col("in_scope")).agg(F.coalesce(F.sum("final_weight"), F.lit(0.0))).collect()[0]
+            return float(row[0])
+
+
+        def gold_total(gold: DataFrame, wave_id: str) -> float:
+            """Sum of weighted_base across subgroups for one wave."""
+            row = gold.filter(F.col("wave_id") == wave_id).agg(F.coalesce(F.sum("weighted_base"), F.lit(0.0))).collect()[0]
+            return float(row[0])
+    - kind: code
+      source: |
+        expected = silver_total(silver, "W1")
+        for how in ["left", "inner"]:
+            actual = gold_total(gold_from(silver, how), "W1")
+            ok = math.isclose(expected, actual, rel_tol=1e-9, abs_tol=1e-6)
+            print(f"{how:5} join: silver {expected:.2f}, gold {actual:.2f}, {'PASS' if ok else 'FAIL'}")
+    - kind: markdown
+      source: "The inner join drops respondent R3 with region code NI, and the reconciliation fails by exactly R3's weight."

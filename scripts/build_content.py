@@ -36,7 +36,7 @@ from learnkit.models import (  # noqa: E402
     PredictOutputExercise,
     SpotBugExercise,
 )
-from learnkit.render import CSS_CLASS, code_lines, md_inline, md_to_html  # noqa: E402
+from learnkit.render import CSS_CLASS, code_lines, md_inline, md_to_html, unknown_tags  # noqa: E402
 
 SITE = ROOT / "site"
 OUT = SITE / "content"
@@ -150,6 +150,30 @@ def render_lesson(lesson: Lesson, module: ModuleContent) -> dict[str, Any]:
     }
 
 
+def check_html(node: Any, where: str) -> None:
+    """Fail the build when rendered content holds a tag lessons should never produce.
+
+    Raises:
+        ValueError: With the lesson field and the unexpected tags.
+    """
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if isinstance(value, str) and (key.endswith("html") or key in {"front", "back"}):
+                bad = unknown_tags(value)
+                if bad:
+                    raise ValueError(f"{where}.{key}: unexpected HTML tags {sorted(bad)}")
+            else:
+                check_html(value, f"{where}.{key}")
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            if isinstance(value, str):
+                bad = unknown_tags(value)
+                if bad and not where.endswith("lines"):
+                    raise ValueError(f"{where}[{i}]: unexpected HTML tags {sorted(bad)}")
+            else:
+                check_html(value, f"{where}[{i}]")
+
+
 def download_links(stem: str) -> dict[str, str] | None:
     """Return handbook links for a stem when both files exist."""
     pdf = DOWNLOADS / f"{stem}.pdf"
@@ -249,7 +273,9 @@ def main() -> None:
         shutil.rmtree(lessons_dir)
     for module in course.modules.values():
         for lesson in module.lessons:
-            write_json(lessons_dir / f"{lesson.id}.json", render_lesson(lesson, module))
+            rendered = render_lesson(lesson, module)
+            check_html(rendered, lesson.id)
+            write_json(lessons_dir / f"{lesson.id}.json", rendered)
     version = content_version()
     write_json(OUT / "index.json", build_index(course, version))
     write_json(TEST_FIXTURE, [ex.model_dump(mode="json") for ex in all_exercises(course)])

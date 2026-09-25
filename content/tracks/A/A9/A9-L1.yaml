@@ -1,0 +1,355 @@
+id: A9-L1
+title: pytest basics, and a SparkSession fixture shared by every test
+
+concept: |
+  **pytest** finds files named `test_*.py`, runs every function named `test_*`, and reports each failing `assert` with the values on both sides. No classes or special assert methods are needed.
+
+  ```python
+  def test_weighted_share_uses_weights() -> None:
+      assert weighted_share([1, 0], [3.0, 1.0]) == 0.75
+  ```
+
+  **Fixtures** provide what tests need. A test names a fixture as a parameter, and pytest builds it and passes it in. For Spark, one fixture creates the session:
+
+  ```python
+  @pytest.fixture(scope="session")
+  def spark() -> Iterator[SparkSession]:
+      session = SparkSession.builder.master("local[2]").getOrCreate()
+      yield session
+      session.stop()
+  ```
+
+  - `scope="session"` builds it once for the whole test run. Starting Spark takes several seconds. Once per test, and a 40-test suite spends minutes on start-up alone.
+  - `yield` hands the value to the tests. The code after `yield` runs once at the end, which is where you stop the session.
+  - Put shared fixtures in `conftest.py`. pytest loads it automatically for every test in that folder and below.
+
+  `@pytest.mark.parametrize` runs one test with several inputs, and each input is reported as its own test:
+
+  ```python
+  @pytest.mark.parametrize(("flags", "weights", "expected"), [([1], [2.0], 1.0), ([0, 0], [1.0, 1.0], 0.0)])
+  def test_share(flags, weights, expected): ...
+  ```
+
+  A good test fails for the bug you fear. Write it against the known answer on small data, including the edge cases: empty input, zero totals, missing values. Check it by breaking the code on purpose and watching the test fail.
+
+why_it_matters: |
+  A team's test for `weighted_share` checks that the result is between 0 and 1. The function is later rewritten and accidentally returns the unweighted share. The result is still between 0 and 1, so the test passes, and weighted reach in the dashboard is wrong for a month.
+
+  A test with a known answer, `weighted_share([1, 0], [3.0, 1.0]) == 0.75`, fails the moment the weights are ignored, because the unweighted answer is 0.5.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import pytest
+      from pyspark.sql import SparkSession
+
+
+      @pytest.fixture
+      def spark():
+          session = SparkSession.builder.master("local[2]").getOrCreate()
+          yield session
+          session.stop()
+
+
+      def test_share():
+          share = weighted_share([1, 0, 1], [2.0, 1.0, 1.0])
+          assert 0 <= share <= 1
+    annotations:
+      - find: "@pytest.fixture"
+        note: "Default function scope: Spark starts and stops for every test that uses it."
+      - find: "assert 0 <= share <= 1"
+        note: "Passes for almost any wrong implementation. It does not test the rule."
+  strong:
+    code: |
+      from collections.abc import Iterator
+
+      import pytest
+      from pyspark.sql import SparkSession
+
+
+      @pytest.fixture(scope="session")
+      def spark() -> Iterator[SparkSession]:
+          """One local session for the whole test run."""
+          session = SparkSession.builder.master("local[2]").config("spark.ui.enabled", "false").getOrCreate()
+          yield session
+          session.stop()
+
+
+      @pytest.mark.parametrize(
+          ("flags", "weights", "expected"),
+          [
+              ([1, 0, 1], [2.0, 1.0, 1.0], 0.75),
+              ([0, 0], [1.0, 1.0], 0.0),
+              ([1, 0], [0.0, 0.0], None),
+          ],
+      )
+      def test_weighted_share(flags: list[int], weights: list[float], expected: float | None) -> None:
+          assert weighted_share(flags, weights) == expected
+    annotations:
+      - find: '@pytest.fixture(scope="session")'
+        note: "One Spark start-up for the whole run."
+      - find: "yield session"
+        note: "Tests run here. The line after yield is the teardown."
+      - find: "([1, 0, 1], [2.0, 1.0, 1.0], 0.75),"
+        note: "A known answer that differs from the unweighted one (0.67), so ignoring weights fails."
+      - find: "([1, 0], [0.0, 0.0], None),"
+        note: "The edge case: zero total weight must give None."
+  takeaway: |
+    One session-scoped fixture, and tests with known answers that fail for the bugs you care about.
+
+exercises:
+  - id: A9-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which fixture scope suits a SparkSession used by 40 tests?
+    options:
+      - {id: a, text: "function"}
+      - {id: b, text: "session"}
+      - {id: c, text: "No fixture: create a session inside each test"}
+      - {id: d, text: "class"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Spark takes seconds to start, and tests can safely share one local session."}
+      - {id: r2, text: "Only session-scoped fixtures can use yield."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Function scope rebuilds the fixture for every test: 40 Spark start-ups."
+      - answer: c
+        feedback: "Same cost as function scope, plus duplicated set-up code in every test."
+      - answer: d
+        feedback: "Class scope rebuilds per test class. Session scope builds once."
+      - answer: b|r2
+        feedback: "Right scope, wrong reason. Fixtures of any scope can yield. Session scope wins on start-up cost."
+    hints:
+      - "How long does a SparkSession take to start?"
+      - "How often should it start in one test run?"
+      - "Once."
+    explanation: |
+      `scope="session"` starts Spark once for the whole run. Tests stay independent as long as each creates its own data and tables.
+
+  - id: A9-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      How many tests does pytest report for this file?
+    code: |
+      import pytest
+
+
+      @pytest.mark.parametrize("wave", ["W13", "W14", "W15"])
+      def test_wave_loads(wave: str) -> None:
+          assert wave.startswith("W")
+
+
+      def test_empty_wave_list() -> None:
+          assert unprocessed([]) == []
+    answer: "4"
+    wrong_answers:
+      - answer: "2"
+        feedback: "Each parametrize value is a separate test: three for test_wave_loads, plus one."
+      - answer: "3"
+        feedback: "Three from the parametrized test, plus test_empty_wave_list: four."
+    hints:
+      - "How many values does parametrize receive?"
+      - "Each value becomes its own test."
+      - "3 + 1."
+    explanation: |
+      `parametrize` generates one test per value, so pytest reports `test_wave_loads[W13]`, `[W14]`, `[W15]` and `test_empty_wave_list`: four.
+
+  - id: A9-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the fixture so Spark starts once per test run and stops at the end.
+    template: |
+      @pytest.[[g1]](scope="[[g2]]")
+      def spark() -> Iterator[SparkSession]:
+          session = SparkSession.builder.master("local[2]").getOrCreate()
+          [[g3]] session
+          session.stop()
+    gaps:
+      g1: {accepted: [fixture]}
+      g2: {accepted: [session]}
+      g3: {accepted: [yield]}
+    wrong_answers:
+      - answer: {g3: return}
+        feedback: "`return` ends the function, so `session.stop()` never runs. `yield` hands over the session and resumes for teardown."
+      - answer: {g2: module}
+        feedback: "Module scope starts Spark once per test file. Session scope starts it once for the run."
+    hints:
+      - "The decorator that declares a fixture."
+      - "The widest scope."
+      - "The keyword that pauses a function and resumes it later."
+    explanation: |
+      `@pytest.fixture(scope="session")` builds the fixture once. `yield` gives the session to the tests, and the line after it runs at the end.
+
+  - id: A9-L1-E4
+    type: write_function
+    difficulty: 4
+    language: python
+    packages: [pytest]
+    prompt: |
+      `weighted_share(flags, weights)` returns the share of weight where the flag is 1, or `None` when the total weight is 0. Write **the test**, `test_weighted_share()`, not the function.
+
+      The checker runs your test three times: against a correct implementation (it must pass), against one that ignores the weights, and against one that returns 0.0 instead of None for a zero total (both must fail).
+    starter: |
+      def test_weighted_share() -> None:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: test_defined
+          kind: requires_function
+          name: test_weighted_share
+          typed: true
+          message: "Define `test_weighted_share() -> None`."
+        - id: has_assert
+          kind: requires_pattern
+          pattern: "\\bassert\\b"
+          message: "A test needs at least one assert."
+      setup: |
+        def _correct(flags, weights):
+            total = sum(weights)
+            if total == 0:
+                return None
+            return sum(w for f, w in zip(flags, weights) if f == 1) / total
+
+        def _unweighted(flags, weights):
+            if sum(weights) == 0:
+                return None
+            return sum(flags) / len(flags)
+
+        def _zero_not_none(flags, weights):
+            total = sum(weights)
+            if total == 0:
+                return 0.0
+            return sum(w for f, w in zip(flags, weights) if f == 1) / total
+
+        def _run_with(impl):
+            globals()["weighted_share"] = impl
+            test_weighted_share()
+      tests:
+        - id: passes_correct
+          code: |
+            _run_with(_correct)
+          message: "Your test fails against a correct implementation. Check the expected values."
+        - id: catches_unweighted
+          code: |
+            try:
+                _run_with(_unweighted)
+            except AssertionError:
+                pass
+            else:
+                raise AssertionError("did not catch the unweighted bug")
+          message: "Your test passes when the weights are ignored. Use weights where the weighted and unweighted answers differ, such as [1, 0] with [3.0, 1.0]."
+        - id: catches_zero
+          code: |
+            try:
+                _run_with(_zero_not_none)
+            except AssertionError:
+                pass
+            else:
+                raise AssertionError("did not catch the zero-total bug")
+          message: "Your test passes when a zero total returns 0.0. Add a case with all weights 0 and assert the result `is None`."
+    solution: |
+      def test_weighted_share() -> None:
+          assert weighted_share([1, 0], [3.0, 1.0]) == 0.75
+          assert weighted_share([1, 0], [0.0, 0.0]) is None
+    seeded_bugs:
+      - |
+        def test_weighted_share() -> None:
+            share = weighted_share([1, 0, 1], [2.0, 1.0, 1.0])
+            assert 0 <= share <= 1
+      - |
+        def test_weighted_share() -> None:
+            assert weighted_share([1, 0], [3.0, 1.0]) == 0.75
+      - |
+        def test_weighted_share() -> None:
+            assert weighted_share([1, 1], [1.0, 1.0]) == 1.0
+            assert weighted_share([1, 0], [0.0, 0.0]) is None
+    wrong_answers:
+      - answer: |
+          def test_weighted_share() -> None:
+              share = weighted_share([1, 0, 1], [2.0, 1.0, 1.0])
+              assert 0 <= share <= 1
+        triggers: catches_unweighted
+      - answer: |
+          def test_weighted_share() -> None:
+              assert weighted_share([1, 0], [3.0, 1.0]) == 0.75
+        triggers: catches_zero
+    hints:
+      - "Pick inputs where the weighted and unweighted answers differ."
+      - "[1, 0] with weights [3.0, 1.0]: weighted 0.75, unweighted 0.5."
+      - "Add `assert weighted_share([1, 0], [0.0, 0.0]) is None`."
+    explanation: |
+      A test proves something only if a plausible bug makes it fail. Known answers chosen to separate the right rule from the wrong one, plus the edge case, catch both bugs.
+
+  - id: A9-L1-E5
+    type: spot_bug
+    difficulty: 5
+    language: python
+    prompt: |
+      The test suite takes six minutes for 45 small tests. Tap the line that causes most of it, then fix the fixture.
+    code: |
+      import pytest
+      from pyspark.sql import SparkSession
+
+
+      @pytest.fixture
+      def spark():
+          session = SparkSession.builder.master("local[2]").getOrCreate()
+          yield session
+          session.stop()
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: session_scope
+          kind: requires_pattern
+          pattern: "@pytest\\.fixture\\(\\s*scope\\s*=\\s*[\"']session[\"']\\s*\\)"
+          message: "Give the fixture `scope=\"session\"`."
+        - id: still_yields
+          kind: requires_pattern
+          pattern: "yield session"
+          message: "Keep `yield session`, so teardown still runs."
+    fix_solution: |
+      import pytest
+      from pyspark.sql import SparkSession
+
+
+      @pytest.fixture(scope="session")
+      def spark():
+          session = SparkSession.builder.master("local[2]").getOrCreate()
+          yield session
+          session.stop()
+    wrong_answers:
+      - lines: [9]
+        feedback: "Stopping the session in teardown is right. The problem is how often the fixture runs."
+      - lines: [7]
+        feedback: "The builder is fine. How many times is it called in the run?"
+    hints:
+      - "What is the default fixture scope?"
+      - "How many times does Spark start in 45 tests?"
+      - "`@pytest.fixture(scope=\"session\")`."
+    explanation: |
+      The default function scope starts and stops Spark for every test, at several seconds each. Session scope starts it once.
+
+recap:
+  - front: "What does pytest run?"
+    back: "Functions named test_* in files named test_*.py. Plain assert statements."
+  - front: "SparkSession fixture scope"
+    back: "scope=\"session\": start Spark once per test run."
+  - front: "yield in a fixture"
+    back: "Hands the value to tests. Code after yield is the teardown."
+  - front: "What makes a test worth having?"
+    back: "It fails for the bug you fear: known answers that separate right from wrong, plus edge cases."
+
+claims:
+  - claim: "pytest collects one test per parametrize value; fixtures with yield run teardown after; scope='session' builds once per run."
+    status: verified
+    source: "pytest 9.1.1 behaviour, used by this repository's own test suite."

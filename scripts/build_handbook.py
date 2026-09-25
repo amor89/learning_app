@@ -60,7 +60,7 @@ table.codetable td { border: 0; padding: 0 3pt; font-size: 7.2pt; }
 table.codetable td.lnum { width: 16pt; text-align: right; color: #5b6875; }
 /* Wrapped lines get a hanging indent, so a continuation never looks like a new line. */
 table.codetable td.src {
-  white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 14pt; text-indent: -11pt;
+  white-space: pre-wrap; overflow-wrap: break-word; padding-left: 14pt; text-indent: -11pt;
 }
 table.codetable tr.ann { background: #fff4c2; }
 table.codetable tr { break-inside: avoid; }
@@ -71,7 +71,7 @@ table.codetable tr { break-inside: avoid; }
 div.hl pre {
   background: #f5f7fa; border: 0.5pt solid #d5dbe3; padding: 4pt 5pt;
   font: 7.2pt/1.35 "DejaVu Sans Mono", monospace;
-  white-space: pre-wrap; overflow-wrap: anywhere;
+  white-space: pre-wrap; overflow-wrap: break-word;
 }
 ul.toc { list-style: none; padding: 0; }
 ul.toc li { margin: 1pt 0; }
@@ -79,6 +79,9 @@ ul.toc a::after { content: leader('.') target-counter(attr(href), page); }
 .toc1 { font-weight: bold; margin-top: 5pt !important; }
 .toc2 { padding-left: 9pt; }
 .toc3 { padding-left: 18pt; font-size: 8.3pt; }
+div.hl pre code { background: none; padding: 0; font: inherit; }
+ul.checklist { list-style: none; padding-left: 0; }
+ul.checklist li { margin: 4pt 0; }
 """
 
 

@@ -418,3 +418,64 @@ claims:
   - claim: "datetime.utcnow() is deprecated from Python 3.12."
     status: verified
     source: "Python 3.12 release notes (What's New in Python 3.12, deprecated APIs); CLAUDE.md standard."
+
+practical:
+  platform: databricks
+  title: "Write run log records for a successful and a failed run"
+  intro: |
+    Run this in Databricks Free Edition. It creates a run log table with an explicit schema, runs one step that succeeds and one that fails, and records both. It also shows the inference error the reference code hits.
+  cells:
+    - kind: code
+      source: |
+        import uuid
+        from collections.abc import Callable
+        from datetime import datetime, timezone
+
+        from pyspark.sql import DataFrame, SparkSession
+        from pyspark.sql import types as T
+
+        CATALOG = spark.catalog.currentCatalog()
+        SCHEMA = f"{CATALOG}.learning_a7"
+        RUN_LOG = f"{SCHEMA}.pipeline_run_log"
+        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
+
+        RUN_LOG_SCHEMA = T.StructType([
+            T.StructField("run_id", T.StringType(), False),
+            T.StructField("pipeline_name", T.StringType(), False),
+            T.StructField("rows_processed", T.LongType(), False),
+            T.StructField("status", T.StringType(), False),
+            T.StructField("error_message", T.StringType(), True),
+            T.StructField("started_at", T.TimestampType(), False),
+            T.StructField("finished_at", T.TimestampType(), False),
+        ])
+    - kind: code
+      source: |
+        def run_logged(spark: SparkSession, name: str, step: Callable[[], int]) -> None:
+            """Run a step, record the outcome in the run log, and re-raise failures."""
+            run_id, started = str(uuid.uuid4()), datetime.now(timezone.utc)
+            status, rows, error = "FAILED", 0, None
+            try:
+                rows = step()
+                status = "SUCCESS"
+            except Exception as err:
+                error = f"{type(err).__name__}: {err}"
+                raise
+            finally:
+                row = (run_id, name, rows, status, error, started, datetime.now(timezone.utc))
+                spark.createDataFrame([row], RUN_LOG_SCHEMA).write.format("delta").mode("append").saveAsTable(RUN_LOG)
+    - kind: code
+      source: |
+        run_logged(spark, "nat_silver_pipeline", lambda: 1832)
+        try:
+            run_logged(spark, "nat_gold_pipeline", lambda: 1 // 0)
+        except ZeroDivisionError:
+            print("the failure was re-raised, and recorded")
+        display(spark.table(RUN_LOG).orderBy("started_at"))
+    - kind: markdown
+      source: "Now the reference approach: a dict with `error_message=None` and no schema."
+    - kind: code
+      source: |
+        try:
+            spark.createDataFrame([{"run_id": "x", "error_message": None}])
+        except Exception as err:
+            print(type(err).__name__, str(err)[:120])

@@ -2,7 +2,7 @@
 
 A personal, offline-capable course with four tracks: Databricks pipeline engineering, Python for data science, Microsoft Fabric, and finding errors in code. It runs as a static site on GitHub Pages and installs on an iPhone home screen.
 
-Status: Phase 1 complete (engine, all exercise types, Pyodide runner, progress, PWA, handbook, one sample lesson per track).
+Status: Phase 2 complete. Track A (Databricks pipeline engineering) has all 30 lessons. Tracks B, C and D each have one sample lesson.
 
 ## Layout
 
@@ -43,7 +43,7 @@ Run the app locally: `python -m http.server -d site 8000`, then open http://loca
 
 ## Laptop practice with Spark
 
-See `practice/README.md`. Short version: install Java 17 or 21, `pip install -e . --group spark --group dev`, then `pytest practice`.
+See `practice/README.md`. Short version: install Java 17 or 21, create a separate virtual environment, `pip install -e . --group spark`, then `pytest practice`. The Spark harness needs pandas 2.x, so it cannot share the `dev` environment, which uses pandas 3.
 
 ## Documents
 

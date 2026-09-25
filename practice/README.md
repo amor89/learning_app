@@ -10,10 +10,12 @@ Practise the PySpark lessons on your laptop with a local SparkSession and Delta 
    ```bash
    python -m venv .venv
    source .venv/bin/activate
-   pip install "pyspark==4.0.4" "delta-spark==4.0.1" "pytest>=9,<10"
+   pip install -e . --group spark
    ```
 
    The first test run downloads the Delta Lake JAR from Maven Central.
+
+   Use a separate virtual environment from the main `dev` one. PySpark 4.0.4 fails with pandas 3.x (`ImportError: cannot import name '_builtin_table'`), so the `spark` group pins pandas 2.x.
 
 ## Use
 

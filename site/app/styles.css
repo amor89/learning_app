@@ -315,3 +315,13 @@ select { font-family: var(--sans); padding: 8px; min-height: 44px; width: 100%; 
   text-align: center; z-index: 20; max-width: 480px; margin: 0 auto;
 }
 h1[tabindex="-1"]:focus { outline: none; }
+
+/* Highlighted code inside lesson prose (Markdown fenced blocks) scrolls inside its box. */
+.hl { overflow-x: auto; max-width: 100%; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); margin: 8px 0; }
+.hl pre { margin: 0; padding: 8px 12px; font: 13px/1.5 var(--mono); white-space: pre; }
+
+/* Long unbroken tokens (code, error names) must wrap on a 390px screen. */
+fieldset { min-width: 0; }
+.slot, .design > *, .choice > * { min-width: 0; }
+.choice span, .slot span, .order-text, .prompt, .feedback, .hints li, .explanation, .takeaway, .notes li { overflow-wrap: anywhere; }
+:not(pre) > code { overflow-wrap: anywhere; }
