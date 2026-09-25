@@ -1,0 +1,462 @@
+id: D3-L3
+title: Mutable defaults and the truthiness of zero
+
+concept: |
+  Two Python habits produce wrong results with no error message. Both appear in code written by people and by AI assistants, including your reference pipeline.
+
+  **Mutable default arguments.** Python evaluates a default value once, when it defines the function. Every call that relies on the default shares that one object. Write `def add_check(result, results=[])`, and each call appends to the same list. The second validation run returns the first run's checks as well.
+
+  The fix is a `None` sentinel:
+
+  ```python
+  def add_check(result: str, results: list[str] | None = None) -> list[str]:
+      results = [] if results is None else results
+      results.append(result)
+      return results
+  ```
+
+  ruff flags the pattern as rule B006. Treat that warning as a bug.
+
+  **Truthiness of numbers.** `if value:` is `False` for `None`, and also for `0`, `0.0`, empty strings and empty containers. When zero is a valid measurement, such as a 0% reach, a zero weight or zero rows, a truthiness test treats it as missing.
+
+  Your reference `check_wave_stability` does this:
+
+  ```python
+  if current_pct and prior_pct:
+  ```
+
+  A metric that falls from 12% to 0% skips the comparison. The largest possible drop produces no warning.
+
+  Test for the case you mean. For missing, write `is None`. For zero, write `== 0`.
+
+  ```python
+  if current_pct is not None and prior_pct is not None:
+  ```
+
+  The same rule covers type hints. `error_message: str = None` claims the value is always a string. Write `str | None = None`, and mypy then makes you handle the `None` case.
+
+why_it_matters: |
+  A questionnaire routing error removes one question for a whole wave. Its weighted percentage drops from 12% to 0.0%. The wave-over-wave stability check runs `if current_pct and prior_pct:`, treats 0.0 as missing and skips the metric. QA reports PASS. The dashboard publishes 0% reach for that question, and a client asks why the channel "lost its whole audience" in a week.
+
+  The check existed to catch exactly this change. One truthiness test disabled it for the one value that mattered most.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def compare_waves(current: dict, prior: dict, tolerance: float = 0.10, flags=[]):
+          """Flag metrics whose share moved more than tolerance between waves."""
+          for metric, current_pct in current.items():
+              prior_pct = prior.get(metric)
+              if current_pct and prior_pct:
+                  if abs(current_pct - prior_pct) > tolerance:
+                      flags.append(metric)
+          return flags
+    annotations:
+      - find: "flags=[]):"
+        note: "The default list is created once. Flags from one call leak into the next."
+      - find: "current: dict, prior: dict"
+        note: "Bare `dict` hides the value type. The values are floats or None."
+      - find: "if current_pct and prior_pct:"
+        note: "A share of 0.0 is falsy, so the biggest possible drop is never compared."
+  strong:
+    code: |
+      def compare_waves(
+          current: dict[str, float | None],
+          prior: dict[str, float | None],
+          tolerance: float = 0.10,
+      ) -> list[str]:
+          """Flag metrics whose share moved more than tolerance between waves.
+
+          A metric is skipped only when a share is missing. A share of 0.0 is compared.
+          """
+          flags: list[str] = []
+          for metric, current_pct in current.items():
+              prior_pct = prior.get(metric)
+              if current_pct is None or prior_pct is None:
+                  continue
+              if abs(current_pct - prior_pct) > tolerance:
+                  flags.append(metric)
+          return flags
+    annotations:
+      - find: "current: dict[str, float | None],"
+        note: "The hint says a share can be missing, so mypy checks every use."
+      - find: "flags: list[str] = []"
+        note: "A new list on every call. No state leaks between runs."
+      - find: "if current_pct is None or prior_pct is None:"
+        note: "Skips only missing values. 0.0 goes on to the comparison."
+  takeaway: |
+    Both fixes are one line. Both bugs pass every test that uses only non-zero values and a single call.
+
+exercises:
+  - id: D3-L3-E1
+    type: predict_output
+    difficulty: 1
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      def add_flag(flag, flags=[]):
+          flags.append(flag)
+          return flags
+
+      add_flag("null_weights")
+      print(add_flag("row_count"))
+    answer: "['null_weights', 'row_count']"
+    wrong_answers:
+      - answer: "['row_count']"
+        feedback: "That is what the author intended. The default list is created once, so the second call appends to the list the first call used."
+      - answer: "['row_count', 'null_weights']"
+        feedback: "`append` adds to the end. The first call's flag is already in the list."
+    hints:
+      - "When is the default `[]` created?"
+      - "Both calls use the default. Is it the same list?"
+      - "The list is created once, when Python defines the function."
+    explanation: |
+      The default list is created when Python defines the function. Both calls append to that one list, so the second call returns both flags.
+
+  - id: D3-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      `current_pct = 0.0` and `prior_pct = 0.12`. The tolerance is 0.10. What does `check_wave_stability` from the reference code do with this metric?
+    options:
+      - {id: a, text: "Flags it as WARN, because the change is 0.12."}
+      - {id: b, text: "Marks it PASS."}
+      - {id: c, text: "Leaves it out of the results."}
+      - {id: d, text: "Raises a ZeroDivisionError."}
+    answer: c
+    reasons:
+      - {id: r1, text: "`if current_pct and prior_pct:` is False when current_pct is 0.0, so the block never runs."}
+      - {id: r2, text: "The function filters out metrics below 1%."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That is what the check should do. Look at the `if` line before the comparison: 0.0 is falsy."
+      - answer: b
+        feedback: "Nothing is appended for this metric, so it cannot be marked PASS. The `if` skips it."
+      - answer: d
+        feedback: "The check subtracts, it does not divide. No error appears, which is the problem."
+      - answer: c|r2
+        feedback: "Right outcome, wrong reason. There is no 1% filter. The truthiness test treats 0.0 as missing."
+    hints:
+      - "Evaluate `0.0 and 0.12` in your head."
+      - "`0.0` is falsy, like `None`."
+      - "The whole block, including `results.append`, is skipped."
+    explanation: |
+      `0.0 and 0.12` evaluates to `0.0`, which is falsy. The block that compares and appends never runs, so the metric vanishes from the results and no warning appears.
+
+  - id: D3-L3-E3
+    type: fill_gap
+    difficulty: 3
+    language: python
+    prompt: |
+      Fix both signatures. The error message is optional, and the flags list must not be shared between calls.
+    template: |
+      def log_run(status: str, error_message: [[g1]] = None) -> None: ...
+
+      def collect(flag: str, flags: list[str] | None = [[g2]]) -> list[str]: ...
+    gaps:
+      g1: {accepted: ["str | None", "Optional[str]", "None | str"]}
+      g2: {accepted: ["None"]}
+    wrong_answers:
+      - answer: {g1: str}
+        feedback: "`str = None` claims the value is always a string. mypy in strict mode rejects it. Write `str | None`."
+      - answer: {g2: "[]"}
+        feedback: "A list default is created once and shared by every call. Use `None` and create the list inside the function."
+    hints:
+      - "The first default is None, so the type must allow None."
+      - "The second default must be immutable."
+      - "`str | None` for the first gap and `None` for the second."
+    explanation: |
+      `error_message: str | None = None` states that the value may be missing. `flags: list[str] | None = None` avoids a shared list. Create the list inside the function when it is `None`.
+
+  - id: D3-L3-E4
+    type: spot_bug
+    difficulty: 3
+    language: python
+    prompt: |
+      This check should warn when a share moves by more than the tolerance. A drop from 12% to 0% produces no warning. Tap the line with the bug, then fix the function.
+    code: |
+      def stability_status(current_pct: float | None, prior_pct: float | None, tolerance: float = 0.10) -> str:
+          """Return WARN, PASS, or SKIP when a share is missing."""
+          if current_pct and prior_pct:
+              change = abs(current_pct - prior_pct)
+              return "WARN" if change > tolerance else "PASS"
+          return "SKIP"
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_truthiness
+          kind: forbids_bare_truthiness
+          names: [current_pct, prior_pct]
+          message: "The condition still tests the shares for truth. 0.0 is falsy. Compare with `is None`."
+      tests:
+        - id: zero_drop
+          code: |
+            assert stability_status(0.0, 0.12) == "WARN"
+          message: "A drop from 0.12 to 0.0 must return WARN."
+        - id: missing
+          code: |
+            assert stability_status(None, 0.12) == "SKIP"
+          message: "A missing share must still return SKIP."
+        - id: stable
+          code: |
+            assert stability_status(0.40, 0.42) == "PASS"
+          message: "A change within tolerance must return PASS."
+    fix_solution: |
+      def stability_status(current_pct: float | None, prior_pct: float | None, tolerance: float = 0.10) -> str:
+          """Return WARN, PASS, or SKIP when a share is missing."""
+          if current_pct is not None and prior_pct is not None:
+              change = abs(current_pct - prior_pct)
+              return "WARN" if change > tolerance else "PASS"
+          return "SKIP"
+    wrong_answers:
+      - lines: [4]
+        feedback: "The subtraction is correct. The code never reaches it when a share is 0.0."
+      - lines: [5]
+        feedback: "The comparison with the tolerance is correct. Look at what stops the code reaching it."
+    hints:
+      - "Which values make `if current_pct and prior_pct:` False?"
+      - "0.0 is one of them."
+      - "Replace the truthiness test with `is not None` on both values."
+    explanation: |
+      Line 3 treats 0.0 as missing. Use `if current_pct is not None and prior_pct is not None:` so that only missing shares skip the comparison.
+
+  - id: D3-L3-E5
+    type: write_function
+    difficulty: 4
+    language: python
+    prompt: |
+      Write `compare_waves(current, prior, tolerance=0.10)`. Both arguments map metric names to a share or `None`. Return the metrics whose share changed by more than `tolerance`, in the order of `current`. Skip a metric only when either share is `None` or the metric is missing from `prior`. Calling the function twice must not carry results over.
+    starter: |
+      def compare_waves(
+          current: dict[str, float | None],
+          prior: dict[str, float | None],
+          tolerance: float = 0.10,
+      ) -> list[str]:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: compare_waves
+          typed: true
+          docstring: true
+          message: "Give `compare_waves` type hints on every parameter, a return type and a docstring."
+        - id: no_mutable_default
+          kind: forbids_mutable_default
+          message: "A list or dict default is shared between calls. Create the list inside the function."
+      tests:
+        - id: zero_share
+          code: |
+            assert compare_waves({"a": 0.0}, {"a": 0.12}) == ["a"]
+          message: "A drop from 0.12 to 0.0 must be flagged. Test for None, not for truth."
+        - id: missing_share
+          code: |
+            assert compare_waves({"a": None, "b": 0.5}, {"a": 0.3, "b": 0.5}) == []
+          message: "A None share must be skipped, and an unchanged share must not be flagged."
+        - id: missing_metric
+          code: |
+            assert compare_waves({"new": 0.4}, {}) == []
+          message: "A metric missing from prior must be skipped, not raise KeyError. Use `prior.get(metric)`."
+        - id: no_leak
+          code: |
+            compare_waves({"a": 0.9}, {"a": 0.1})
+            assert compare_waves({"b": 0.5}, {"b": 0.5}) == []
+          message: "The second call returned flags from the first call. Create a new list inside the function."
+        - id: order
+          code: |
+            assert compare_waves({"z": 0.9, "a": 0.9}, {"z": 0.1, "a": 0.1}) == ["z", "a"]
+          message: "Return flags in the order of `current`, without sorting."
+    solution: |
+      def compare_waves(
+          current: dict[str, float | None],
+          prior: dict[str, float | None],
+          tolerance: float = 0.10,
+      ) -> list[str]:
+          """Flag metrics whose share moved more than tolerance between waves.
+
+          A metric is skipped only when a share is missing. A share of 0.0 is compared.
+          """
+          flags: list[str] = []
+          for metric, current_pct in current.items():
+              prior_pct = prior.get(metric)
+              if current_pct is None or prior_pct is None:
+                  continue
+              if abs(current_pct - prior_pct) > tolerance:
+                  flags.append(metric)
+          return flags
+    seeded_bugs:
+      - |
+        def compare_waves(current: dict[str, float | None], prior: dict[str, float | None], tolerance: float = 0.10) -> list[str]:
+            """Truthiness bug."""
+            flags: list[str] = []
+            for metric, current_pct in current.items():
+                prior_pct = prior.get(metric)
+                if current_pct and prior_pct:
+                    if abs(current_pct - prior_pct) > tolerance:
+                        flags.append(metric)
+            return flags
+      - |
+        _FLAGS: list[str] = []
+
+
+        def compare_waves(current: dict[str, float | None], prior: dict[str, float | None], tolerance: float = 0.10) -> list[str]:
+            """Module-level list leaks between calls."""
+            for metric, current_pct in current.items():
+                prior_pct = prior.get(metric)
+                if current_pct is not None and prior_pct is not None and abs(current_pct - prior_pct) > tolerance:
+                    _FLAGS.append(metric)
+            return _FLAGS
+      - |
+        def compare_waves(current: dict[str, float | None], prior: dict[str, float | None], tolerance: float = 0.10) -> list[str]:
+            """KeyError on a new metric."""
+            flags: list[str] = []
+            for metric, current_pct in current.items():
+                prior_pct = prior[metric]
+                if current_pct is not None and prior_pct is not None and abs(current_pct - prior_pct) > tolerance:
+                    flags.append(metric)
+            return flags
+    wrong_answers:
+      - answer: |
+          def compare_waves(current: dict[str, float | None], prior: dict[str, float | None], tolerance: float = 0.10) -> list[str]:
+              """Truthiness bug."""
+              flags: list[str] = []
+              for metric, current_pct in current.items():
+                  prior_pct = prior.get(metric)
+                  if current_pct and prior_pct:
+                      if abs(current_pct - prior_pct) > tolerance:
+                          flags.append(metric)
+              return flags
+        triggers: zero_share
+      - answer: |
+          def compare_waves(current: dict[str, float | None], prior: dict[str, float | None], tolerance: float = 0.10) -> list[str]:
+              """KeyError on a new metric."""
+              flags: list[str] = []
+              for metric, current_pct in current.items():
+                  prior_pct = prior[metric]
+                  if current_pct is not None and prior_pct is not None and abs(current_pct - prior_pct) > tolerance:
+                      flags.append(metric)
+              return flags
+        triggers: missing_metric
+    hints:
+      - "Start with `flags: list[str] = []` inside the function."
+      - "Read the prior share with `prior.get(metric)`, which gives None for a missing metric."
+      - "Skip with `if current_pct is None or prior_pct is None: continue`, then compare with the tolerance."
+    explanation: |
+      Create the list inside the function. Use `prior.get` so a new metric gives `None`. Skip only on `None`, then compare the absolute change with the tolerance.
+
+  - id: D3-L3-E6
+    type: refactor
+    difficulty: 5
+    language: python
+    prompt: |
+      A validator collects check results with the helper below. The second contract validation in a job reports the first contract's failures too. Refactor `add_result` so each validation starts empty, keep the signature compatible for callers that pass a list, and add type hints and a docstring.
+    starter: |
+      def add_result(name, passed, results=[]):
+          results.append({"check": name, "passed": passed})
+          return results
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: add_result
+          typed: true
+          docstring: true
+          message: "Add type hints and a docstring to `add_result`."
+        - id: no_mutable_default
+          kind: forbids_mutable_default
+          message: "`results=[]` is still there. Default to None and create the list inside."
+      tests:
+        - id: fresh_each_call
+          code: |
+            add_result("row_count", True)
+            assert add_result("weight_sum", False) == [{"check": "weight_sum", "passed": False}]
+          message: "Two calls without a list must not share results."
+        - id: uses_given_list
+          code: |
+            existing = [{"check": "a", "passed": True}]
+            out = add_result("b", False, existing)
+            assert out is existing and len(existing) == 2
+          message: "When the caller passes a list, append to that list and return it."
+        - id: empty_given_list
+          code: |
+            batch = []
+            add_result("c", True, batch)
+            assert batch == [{"check": "c", "passed": True}]
+          message: "An empty list from the caller was replaced. `results or []` treats an empty list as missing. Test `results is None`."
+    solution: |
+      def add_result(
+          name: str, passed: bool, results: list[dict[str, object]] | None = None
+      ) -> list[dict[str, object]]:
+          """Append one check result and return the list.
+
+          Args:
+              name: Check name.
+              passed: Whether the check passed.
+              results: List to append to. A new list is created when omitted.
+
+          Returns:
+              The list with the new result.
+          """
+          results = [] if results is None else results
+          results.append({"check": name, "passed": passed})
+          return results
+    seeded_bugs:
+      - |
+        def add_result(name: str, passed: bool, results: list[dict[str, object]] = []) -> list[dict[str, object]]:
+            """Still a mutable default."""
+            results.append({"check": name, "passed": passed})
+            return results
+      - |
+        def add_result(name: str, passed: bool, results: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
+            """Ignores the caller's list."""
+            fresh: list[dict[str, object]] = []
+            fresh.append({"check": name, "passed": passed})
+            return fresh
+      - |
+        def add_result(name: str, passed: bool, results: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
+            """Truthiness replaces an empty caller list."""
+            results = results or []
+            results.append({"check": name, "passed": passed})
+            return results
+    wrong_answers:
+      - answer: |
+          def add_result(name: str, passed: bool, results: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
+              """Ignores the caller's list."""
+              fresh: list[dict[str, object]] = []
+              fresh.append({"check": name, "passed": passed})
+              return fresh
+        triggers: uses_given_list
+      - answer: |
+          def add_result(name: str, passed: bool, results: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
+              """Truthiness replaces an empty caller list."""
+              results = results or []
+              results.append({"check": name, "passed": passed})
+              return results
+        triggers: empty_given_list
+    hints:
+      - "Default `results` to None."
+      - "Create a new list only when `results is None`."
+      - "`results or []` looks similar but replaces an empty list the caller passed. Use `is None`."
+    explanation: |
+      Default to `None`, create the list when `results is None`, then append and return. Avoid `results or []`: an empty list the caller passed is falsy, so the function would append to a new list and the caller would never see the result.
+
+recap:
+  - front: "When does Python evaluate a default argument?"
+    back: "Once, when it defines the function. A list or dict default is shared by every call."
+  - front: "Safe pattern for an optional list argument"
+    back: "Default to None. Inside: results = [] if results is None else results."
+  - front: "What is wrong with `if current_pct and prior_pct:`?"
+    back: "0.0 is falsy, so a real share of zero is treated as missing. Use `is not None`."
+  - front: "Type hint for an optional string that defaults to None"
+    back: "str | None = None. Never str = None."
+
+claims:
+  - claim: "ruff rule B006 flags mutable default arguments."
+    status: verified
+    source: "ruff 0.16.9 run in this repo reports B006 on `def f(x=[])`."

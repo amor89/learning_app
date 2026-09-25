@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+node_modules/
+spark-warehouse/
+metastore_db/
+derby.log
+test-results/
+tests/app/exercises.generated.json
+*.egg-info/

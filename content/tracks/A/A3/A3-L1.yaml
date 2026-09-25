@@ -1,0 +1,516 @@
+id: A3-L1
+title: Idempotent MERGE, and why you deduplicate the source first
+
+concept: |
+  A pipeline is **idempotent** when running it twice with the same input leaves the table in the same state as running it once. Retries, reruns and redeliveries happen every week in production, so idempotence is not optional.
+
+  An append is not idempotent. Run `write.mode("append")` twice and every row lands twice. A Delta `MERGE` is idempotent when two conditions hold:
+
+  1. The `ON` condition covers every column of the table's grain. For a silver table with one row per respondent per wave, that means `respondent_id` **and** `wave_id`.
+  2. The source holds at most one row per key.
+
+  The second condition catches people out. When two source rows match the same target row, Delta cannot tell which one should win. It stops the `MERGE` with the error `DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE`. When neither row matches a target row, both rows are inserted, and your grain is broken without any error.
+
+  So deduplicate the source before you merge. Rank the rows for each key by a version column, such as `delivery_version` or `ingestion_timestamp`, and keep the newest. Use a window with `row_number()`. Do not use `dropDuplicates()`: it keeps an arbitrary row per key, so a rerun keeps a different version with no warning.
+
+  The pattern for every silver load:
+
+  - Keep the newest source row per key.
+  - `MERGE` on the full grain.
+  - `whenMatchedUpdateAll()` for redelivered rows, `whenNotMatchedInsertAll()` for new ones.
+
+  Bronze stays append-only, because bronze records every delivery as received. Silver is where you resolve versions.
+
+why_it_matters: |
+  A supplier redelivers a wave with corrected weights. The file repeats 37 respondents, because the supplier's export joined two tables. The silver job uses the reference `upsert_silver`, which merges without deduplicating. The `MERGE` fails at 02:00 with `DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE`. Gold does not refresh, and the morning Power BI report shows last week's numbers.
+
+  The on-call engineer "fixes" it by switching the job to append. The next run succeeds. Silver now holds the wave twice. Reach percentages look normal, because both the numerator and the denominator doubled. Weighted population estimates are twice their true size for a month, until a reconciliation check against the weight total catches it.
+
+  Deduplicating on the full grain before the `MERGE` prevents both failures.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      from delta.tables import DeltaTable
+      from pyspark.sql import DataFrame, SparkSession
+
+      spark = SparkSession.builder.getOrCreate()
+
+
+      def upsert_silver(new_df: DataFrame, target_table: str, merge_keys: list) -> None:
+          """Merge new data into silver table."""
+          delta_table = DeltaTable.forName(spark, target_table)
+          merge_condition = " AND ".join(
+              [f"target.{k} = source.{k}" for k in merge_keys]
+          )
+          (
+              delta_table.alias("target")
+              .merge(new_df.alias("source"), merge_condition)
+              .whenMatchedUpdateAll()
+              .whenNotMatchedInsertAll()
+              .execute()
+          )
+    annotations:
+      - find: "spark = SparkSession.builder.getOrCreate()"
+        note: "A session created at import time. Tests cannot inject a local session, and importing the module has a side effect."
+      - find: "merge_keys: list)"
+        note: "`list` with no element type. mypy cannot check that callers pass column names."
+      - find: '.merge(new_df.alias("source"), merge_condition)'
+        note: "The source goes straight into the MERGE. One repeated key in a redelivery fails the whole job."
+  strong:
+    code: |
+      from delta.tables import DeltaTable
+      from pyspark.sql import DataFrame, SparkSession, Window
+      from pyspark.sql import functions as F
+
+
+      def latest_per_key(df: DataFrame, keys: list[str], order_col: str) -> DataFrame:
+          """Keep the newest row for each key.
+
+          Args:
+              df: Source rows, possibly with repeated keys.
+              keys: Columns that identify one target row.
+              order_col: Column that ranks versions. Highest wins.
+
+          Returns:
+              One row per key.
+          """
+          window = Window.partitionBy(*keys).orderBy(F.col(order_col).desc())
+          return (
+              df.withColumn("_rank", F.row_number().over(window))
+              .filter(F.col("_rank") == 1)
+              .drop("_rank")
+          )
+
+
+      def upsert_silver(
+          spark: SparkSession,
+          source: DataFrame,
+          target_table: str,
+          keys: list[str],
+          order_col: str,
+      ) -> None:
+          """MERGE the newest source row per key into a silver table.
+
+          Running it twice with the same source leaves the table unchanged.
+          """
+          condition = " AND ".join(f"t.{k} = s.{k}" for k in keys)
+          (
+              DeltaTable.forName(spark, target_table).alias("t")
+              .merge(latest_per_key(source, keys, order_col).alias("s"), condition)
+              .whenMatchedUpdateAll()
+              .whenNotMatchedInsertAll()
+              .execute()
+          )
+    annotations:
+      - find: "from pyspark.sql import functions as F"
+        note: "Import the module as `F`. Importing `sum` or `max` by name shadows the Python built-ins."
+      - find: "window = Window.partitionBy"
+        note: "One partition per key, newest version first. The result is the same on every run."
+      - find: "F.row_number().over(window)"
+        note: "`row_number()` gives exactly one row rank 1 per key, even when versions tie. `rank()` would keep ties."
+      - find: "spark: SparkSession,"
+        note: "The session is a parameter. A test passes a local session, a job passes the cluster session."
+      - find: ".merge(latest_per_key("
+        note: "Deduplicate inside the MERGE call, so no caller can skip it."
+  takeaway: |
+    The strong version is idempotent for any source: repeated keys, a retry or a full redelivery. The weak version works only while the supplier never repeats a row.
+
+exercises:
+  - id: A3-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      The silver table holds one row for respondent `R1` in wave `W1`. A redelivery holds **two** rows for `R1` in `W1`. You run a `MERGE` on `respondent_id` and `wave_id` with `whenMatchedUpdateAll()` and `whenNotMatchedInsertAll()`. What happens?
+    options:
+      - {id: a, text: "The target row takes the values of the last source row."}
+      - {id: b, text: "The MERGE fails with an error."}
+      - {id: c, text: "Both source rows are inserted as new rows."}
+      - {id: d, text: "The target row takes the values of the first source row."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Two source rows match one target row, and Delta cannot tell which should win."}
+      - {id: r2, text: "Delta enforces a primary key on the target table."}
+      - {id: r3, text: "The source DataFrame must be cached before a MERGE."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Delta has no notion of 'last' in an unordered DataFrame. Row order in Spark is not guaranteed, so Delta refuses to guess."
+      - answer: d
+        feedback: "Spark gives no row order without an explicit sort, so 'first' has no meaning. Delta refuses to guess."
+      - answer: c
+        feedback: "Both rows match the existing target row, so neither goes to the insert clause. Duplicate inserts happen only when no target row matches."
+      - answer: b|r2
+        feedback: "Right outcome, wrong reason. Delta does not enforce primary keys. The error comes from the ambiguous match, not from a key constraint."
+      - answer: b|r3
+        feedback: "Right outcome, wrong reason. Caching has nothing to do with it. The error comes from two source rows matching one target row."
+    hints:
+      - "Count how many source rows match the one target row."
+      - "Ask yourself which of the two source rows Delta should use for the update."
+      - "Delta raises DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE in this case."
+    explanation: |
+      Delta requires at most one source row per matched target row. With two, the update is ambiguous, so the `MERGE` fails with `DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE`. Deduplicate the source first.
+
+  - id: A3-L1-E2
+    type: fill_gap
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Complete the chain so that redelivered rows update, new rows insert, and the operation runs.
+    template: |
+      (
+          DeltaTable.forName(spark, "research_silver.nat_respondents").alias("t")
+          .merge(source.alias("s"), "t.respondent_id = s.respondent_id AND t.wave_id = s.wave_id")
+          .[[g1]]()
+          .[[g2]]()
+          .[[g3]]()
+      )
+    gaps:
+      g1: {accepted: [whenMatchedUpdateAll]}
+      g2: {accepted: [whenNotMatchedInsertAll]}
+      g3: {accepted: [execute]}
+    wrong_answers:
+      - answer: {g3: collect}
+        feedback: "`collect()` is a DataFrame action. A MERGE builder runs with `execute()`."
+      - answer: {g1: whenMatchedUpdate}
+        feedback: "`whenMatchedUpdate()` needs a `set=` mapping of columns. With no arguments you want `whenMatchedUpdateAll()`."
+      - answer: {g2: whenNotMatchedBySourceDelete}
+        feedback: "`whenNotMatchedBySourceDelete()` deletes target rows that are missing from the source. With a one-wave source it would delete every other wave."
+    hints:
+      - "Two clauses and one action."
+      - "The clause names start with `whenMatched` and `whenNotMatched`, and both copy every column."
+      - "The copy-every-column versions end in `All`. The action that runs a MERGE is not `collect`."
+    explanation: |
+      `whenMatchedUpdateAll()` copies every source column onto the matched target row. `whenNotMatchedInsertAll()` inserts rows with no match. `execute()` runs the MERGE.
+
+  - id: A3-L1-E3
+    type: predict_output
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      `silver` starts empty. `source` holds 3 rows with 3 distinct `(respondent_id, wave_id)` keys. `load()` calls the strong `upsert_silver` from the worked example. What does the last line print?
+    code: |
+      load(source)  # MERGE on respondent_id and wave_id
+      load(source)  # the scheduler retries the same run
+      print(spark.table("silver").count())
+    answer: "3"
+    wrong_answers:
+      - answer: "6"
+        feedback: "6 is what an append would give. On the second run every source row matches an existing target row, so the MERGE updates instead of inserting."
+      - answer: "0"
+        feedback: "The first run inserts all 3 rows, because none of them matches an empty table."
+    hints:
+      - "Work through the first run: which clause fires for each row?"
+      - "On the second run, does any source row lack a match?"
+      - "Matched rows update in place. Updates do not add rows."
+    explanation: |
+      Run one inserts 3 rows. Run two matches all 3 and updates them with identical values. The count stays 3. That is idempotence.
+
+  - id: A3-L1-E4
+    type: spot_bug
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      Silver has one row per respondent per wave. After wave `W2` loads, every wave `W1` row has disappeared. Tap the line with the bug, then fix the code.
+    code: |
+      def upsert_respondents(spark: SparkSession, source: DataFrame) -> None:
+          """MERGE one wave of respondents into silver. Grain: respondent per wave."""
+          latest = latest_per_key(source, ["respondent_id", "wave_id"], "delivery_version")
+          (
+              DeltaTable.forName(spark, "research_silver.nat_respondents").alias("t")
+              .merge(latest.alias("s"), "t.respondent_id = s.respondent_id")
+              .whenMatchedUpdateAll()
+              .whenNotMatchedInsertAll()
+              .execute()
+          )
+    bug_lines: [6]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: wave_in_condition
+          kind: requires_pattern
+          pattern: "t\\.wave_id\\s*=\\s*s\\.wave_id"
+          message: "The condition still misses `wave_id`. Match on every column of the grain."
+        - id: respondent_in_condition
+          kind: requires_pattern
+          pattern: "t\\.respondent_id\\s*=\\s*s\\.respondent_id"
+          message: "Keep `respondent_id` in the condition as well as `wave_id`."
+    fix_solution: |
+      def upsert_respondents(spark: SparkSession, source: DataFrame) -> None:
+          """MERGE one wave of respondents into silver. Grain: respondent per wave."""
+          latest = latest_per_key(source, ["respondent_id", "wave_id"], "delivery_version")
+          (
+              DeltaTable.forName(spark, "research_silver.nat_respondents").alias("t")
+              .merge(latest.alias("s"), "t.respondent_id = s.respondent_id AND t.wave_id = s.wave_id")
+              .whenMatchedUpdateAll()
+              .whenNotMatchedInsertAll()
+              .execute()
+          )
+    wrong_answers:
+      - lines: [3]
+        feedback: "Line 3 deduplicates on both key columns, which matches the grain. Look at what the MERGE matches on."
+      - lines: [7]
+        feedback: "`whenMatchedUpdateAll()` is right for a redelivery. The problem is which rows count as a match."
+    hints:
+      - "The grain is respondent per wave. Which columns identify one row?"
+      - "Compare the deduplication keys with the MERGE condition."
+      - "A `W2` row for respondent R1 matches the `W1` row for R1, and overwrites it."
+    explanation: |
+      The condition matches on `respondent_id` alone. A wave `W2` row for a respondent matches that respondent's `W1` row and overwrites it, including `wave_id`. Match on the full grain: `t.respondent_id = s.respondent_id AND t.wave_id = s.wave_id`.
+
+  - id: A3-L1-E5
+    type: write_function
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Write `latest_per_key(df, keys, order_col)`. It returns one row per key: the row with the highest `order_col`. Use type hints and a docstring. The checker reads your code without running Spark.
+    starter: |
+      from pyspark.sql import DataFrame, Window
+      from pyspark.sql import functions as F
+
+
+      def latest_per_key(df: DataFrame, keys: list[str], order_col: str) -> DataFrame:
+          ...
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: latest_per_key
+          typed: true
+          docstring: true
+          message: "Define `latest_per_key` with type hints on every parameter, a return type and a docstring."
+        - id: functions_as_f
+          kind: requires_import
+          module: pyspark.sql
+          name: functions
+          alias: F
+          message: "Import the functions module as `F`: `from pyspark.sql import functions as F`."
+        - id: no_shadowing
+          kind: forbids_import_from
+          module: pyspark.sql.functions
+          names: [sum, min, max, round, abs, filter]
+          message: "Do not import built-in names from `pyspark.sql.functions`. They shadow Python's own `sum`, `max` and others."
+        - id: no_drop_duplicates
+          kind: forbids_call
+          name: dropDuplicates
+          message: "`dropDuplicates()` keeps an arbitrary row per key. Rank by `order_col` so the newest row wins every time."
+        - id: no_collect
+          kind: forbids_call
+          name: collect
+          message: "Do not `collect()` to the driver. Keep the work in Spark."
+        - id: partition_by_keys
+          kind: requires_call
+          name: partitionBy
+          message: "Build a window partitioned by the key columns: `Window.partitionBy(*keys)`."
+        - id: uses_row_number
+          kind: requires_call
+          name: row_number
+          message: "Rank rows with `F.row_number()`. It gives exactly one rank-1 row per key."
+        - id: newest_first
+          kind: requires_call
+          name: desc
+          message: "Order the window newest first with `.desc()`, or rank 1 is the oldest row."
+    solution: |
+      from pyspark.sql import DataFrame, Window
+      from pyspark.sql import functions as F
+
+
+      def latest_per_key(df: DataFrame, keys: list[str], order_col: str) -> DataFrame:
+          """Keep the row with the highest order_col for each key.
+
+          Args:
+              df: Source rows, possibly with repeated keys.
+              keys: Columns that identify one target row.
+              order_col: Column that ranks versions. Highest wins.
+
+          Returns:
+              One row per key.
+          """
+          window = Window.partitionBy(*keys).orderBy(F.col(order_col).desc())
+          return (
+              df.withColumn("_rank", F.row_number().over(window))
+              .filter(F.col("_rank") == 1)
+              .drop("_rank")
+          )
+    seeded_bugs:
+      - |
+        from pyspark.sql import DataFrame
+        from pyspark.sql import functions as F
+
+
+        def latest_per_key(df: DataFrame, keys: list[str], order_col: str) -> DataFrame:
+            """Keep one row per key."""
+            return df.dropDuplicates(keys)
+      - |
+        from pyspark.sql import DataFrame, Window
+        from pyspark.sql import functions as F
+
+
+        def latest_per_key(df: DataFrame, keys: list[str], order_col: str) -> DataFrame:
+            """Keep one row per key."""
+            window = Window.partitionBy(*keys).orderBy(F.col(order_col))
+            return df.withColumn("_r", F.row_number().over(window)).filter("_r = 1").drop("_r")
+      - |
+        from pyspark.sql import DataFrame, Window
+        from pyspark.sql import functions as F
+
+
+        def latest_per_key(df, keys, order_col):
+            window = Window.partitionBy(*keys).orderBy(F.col(order_col).desc())
+            return df.withColumn("_r", F.row_number().over(window)).filter("_r = 1").drop("_r")
+    wrong_answers:
+      - answer: |
+          from pyspark.sql import DataFrame
+          from pyspark.sql import functions as F
+
+
+          def latest_per_key(df: DataFrame, keys: list[str], order_col: str) -> DataFrame:
+              """Keep one row per key."""
+              return df.dropDuplicates(keys)
+        triggers: no_drop_duplicates
+      - answer: |
+          from pyspark.sql import DataFrame, Window
+          from pyspark.sql import functions as F
+
+
+          def latest_per_key(df: DataFrame, keys: list[str], order_col: str) -> DataFrame:
+              """Keep one row per key."""
+              window = Window.partitionBy(*keys).orderBy(F.col(order_col))
+              return df.withColumn("_r", F.row_number().over(window)).filter("_r = 1").drop("_r")
+        triggers: newest_first
+    hints:
+      - "You need a window, a rank and a filter."
+      - "`Window.partitionBy(*keys).orderBy(F.col(order_col).desc())` sorts each key's rows newest first."
+      - "Add `F.row_number().over(window)` as a column, keep rank 1, then drop the helper column."
+    explanation: |
+      A window partitioned by the keys and ordered by `order_col` descending puts the newest row first in each key. `row_number()` numbers them 1, 2, 3. Keep 1, drop the helper column.
+
+  - id: A3-L1-E6
+    type: order
+    difficulty: 5
+    prompt: |
+      Put the steps of an idempotent silver load in order.
+    items:
+      - {id: contract, text: "Validate the bronze delivery against its data contract"}
+      - {id: map, text: "Rename and cast columns from the Variable Registry"}
+      - {id: dedupe, text: "Keep the newest row per respondent and wave"}
+      - {id: merge, text: "MERGE into silver on respondent_id and wave_id"}
+      - {id: health, text: "Run the table health check on silver"}
+      - {id: log, text: "Write one record to the pipeline run log"}
+    answer: [contract, map, dedupe, merge, health, log]
+    wrong_answers:
+      - answer: [contract, map, merge, dedupe, health, log]
+        feedback: "Deduplicating after the MERGE is too late. The MERGE has already failed, or has already inserted the repeated rows."
+      - answer: [map, contract, dedupe, merge, health, log]
+        feedback: "The contract describes the delivery as received. Check it before you rename, or the column names in the contract no longer match."
+      - answer: [contract, map, dedupe, merge, log, health]
+        feedback: "Log last, so the run record includes the health check result and the final status."
+    hints:
+      - "Nothing unchecked should reach silver."
+      - "The MERGE needs a source with one row per key."
+      - "The run log records the outcome of everything before it."
+    explanation: |
+      Check the delivery, map it to canonical names, deduplicate, merge, confirm the table is healthy, then log the run with its final status.
+
+recap:
+  - front: "When is a pipeline idempotent?"
+    back: "When running it twice with the same input leaves the table as one run would."
+  - front: "Two conditions for an idempotent Delta MERGE"
+    back: "The ON condition covers the full grain, and the source has at most one row per key."
+  - front: "What happens when two source rows match one target row?"
+    back: "The MERGE fails with DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE."
+  - front: "Why not dropDuplicates() before a MERGE?"
+    back: "It keeps an arbitrary row per key. Use row_number() over a window ordered by version, newest first."
+
+claims:
+  - claim: "MERGE fails with DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE when several source rows match one target row."
+    status: verified
+    source: "practice/tests/test_a3_l1_merge.py reproduces the error on delta-spark 4.0.1. Docs: https://docs.databricks.com/aws/en/sql/language-manual/delta-merge-into"
+  - claim: "DeltaTable.forName, alias, merge, whenMatchedUpdateAll, whenNotMatchedInsertAll, whenNotMatchedBySourceDelete and execute exist in delta-spark 4.0."
+    status: verified
+    source: "practice/tests/test_a3_l1_merge.py checks the methods on delta-spark 4.0.1."
+  - claim: "Free Edition users can create schemas in the workspace catalog, whose name matches the workspace."
+    status: search-only
+    source: "https://docs.databricks.com/aws/en/catalogs/default"
+
+practical:
+  platform: databricks
+  title: "Prove a MERGE is idempotent"
+  intro: |
+    Run this in Databricks Free Edition on serverless compute. It creates a schema called `learning_a3` in your current catalog, loads the same data twice, and shows that the row count does not change. It then repeats a key and shows the error.
+  cells:
+    - kind: code
+      source: |
+        from delta.tables import DeltaTable
+        from pyspark.sql import DataFrame, SparkSession, Window
+        from pyspark.sql import functions as F
+
+        CATALOG = spark.catalog.currentCatalog()
+        SCHEMA = f"{CATALOG}.learning_a3"
+        TABLE = f"{SCHEMA}.nat_respondents"
+        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
+        spark.sql(f"DROP TABLE IF EXISTS {TABLE}")
+        spark.sql(
+            f"CREATE TABLE {TABLE} (respondent_id STRING, wave_id STRING, "
+            "final_weight DOUBLE, delivery_version INT)"
+        )
+    - kind: code
+      source: |
+        def latest_per_key(df: DataFrame, keys: list[str], order_col: str) -> DataFrame:
+            """Keep the row with the highest order_col for each key."""
+            window = Window.partitionBy(*keys).orderBy(F.col(order_col).desc())
+            return (
+                df.withColumn("_rank", F.row_number().over(window))
+                .filter(F.col("_rank") == 1)
+                .drop("_rank")
+            )
+
+
+        def upsert_silver(
+            spark: SparkSession, source: DataFrame, target_table: str, keys: list[str], order_col: str
+        ) -> None:
+            """MERGE the newest source row per key into a silver table."""
+            condition = " AND ".join(f"t.{k} = s.{k}" for k in keys)
+            (
+                DeltaTable.forName(spark, target_table).alias("t")
+                .merge(latest_per_key(source, keys, order_col).alias("s"), condition)
+                .whenMatchedUpdateAll()
+                .whenNotMatchedInsertAll()
+                .execute()
+            )
+    - kind: markdown
+      source: "Load the same three rows twice. The count stays at 3."
+    - kind: code
+      source: |
+        source = spark.createDataFrame(
+            [("R1", "W1", 1.2, 1), ("R2", "W1", 0.8, 1), ("R3", "W1", 1.0, 1)],
+            "respondent_id STRING, wave_id STRING, final_weight DOUBLE, delivery_version INT",
+        )
+        KEYS = ["respondent_id", "wave_id"]
+        upsert_silver(spark, source, TABLE, KEYS, "delivery_version")
+        upsert_silver(spark, source, TABLE, KEYS, "delivery_version")
+        print(spark.table(TABLE).count())  # 3
+    - kind: markdown
+      source: "Now a redelivery repeats R1. Merge it without deduplicating and read the error. Then run the deduplicating version and check that R1 carries version 2."
+    - kind: code
+      source: |
+        redelivery = spark.createDataFrame(
+            [("R1", "W1", 1.5, 2), ("R1", "W1", 1.4, 2)],
+            "respondent_id STRING, wave_id STRING, final_weight DOUBLE, delivery_version INT",
+        )
+        try:
+            (
+                DeltaTable.forName(spark, TABLE).alias("t")
+                .merge(redelivery.alias("s"), "t.respondent_id = s.respondent_id AND t.wave_id = s.wave_id")
+                .whenMatchedUpdateAll()
+                .whenNotMatchedInsertAll()
+                .execute()
+            )
+        except Exception as err:  # noqa: BLE001 - show the error class for learning
+            print(type(err).__name__, str(err)[:300])
+    - kind: code
+      source: |
+        upsert_silver(spark, redelivery, TABLE, KEYS, "delivery_version")
+        display(spark.table(TABLE).orderBy("respondent_id"))

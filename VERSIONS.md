@@ -25,12 +25,12 @@ Checked on 25 September 2026. Status key:
 | pandas | 3.0.6 | 3.0.x for Track B, with notes where 2.x behaviour differs (Copy-on-Write, string dtype) | Verified (PyPI) |
 | Polars | 1.44.2 | 1.44.x | Verified (PyPI) |
 | scikit-learn | 1.9.1 | 1.9.x | Verified (PyPI) |
-| NumPy | 2.5.3 | 2.x | Verified (PyPI) |
+| NumPy | 2.5.3 | 2.x (2.4.6 resolved locally alongside scikit-learn 1.9.1) | Verified (PyPI) |
 | DuckDB | 1.5.5 | 1.5.x | Verified (PyPI) |
 | pandera | 0.33.1 | 0.33.x | Verified (PyPI) |
 | pydantic | 2.13.5 | 2.x | Verified (PyPI) |
 | PySpark (local harness) | 4.2.0 latest. 4.0.4 matches DBR 17.3 LTS | 4.0.4 | Verified (PyPI) |
-| delta-spark (local harness) | 4.4.0 latest. 4.0.1 pairs with Spark 4.0 | 4.0.1 | Verified (PyPI). Pairing with Spark 4.0 unverified against the Delta compatibility table |
+| delta-spark (local harness) | 4.4.0 latest. 4.0.1 pairs with Spark 4.0 | 4.0.1 | Verified: `pytest practice --solutions` passes with PySpark 4.0.4 and delta-spark 4.0.1 on Java 21 |
 | ruff | 0.16.9 | 0.16.x | Verified (PyPI) |
 | mypy | 2.3.1 | 2.3.x | Verified (PyPI) |
 | pytest | 9.1.1 | 9.x | Verified (PyPI) |
@@ -41,7 +41,9 @@ Checked on 25 September 2026. Status key:
 
 | Item | Version | Status | Notes |
 |---|---|---|---|
-| Pyodide | 314.0.7 | Verified (npm registry) | The versions of pandas, NumPy and scikit-learn bundled with this release are unverified. The Pyodide CDN (cdn.jsdelivr.net) is blocked in this build environment. Browser exercises must state the Pyodide package versions, which differ from the laptop pins above. |
+| Pyodide | 314.0.7 | Verified (npm package and its pyodide-lock.json) | Bundles Python 3.14.2, pandas 3.0.2, NumPy 2.4.6, scikit-learn 1.8.0. CDN path `https://cdn.jsdelivr.net/pyodide/v314.0.7/full/` taken from the package's own loader. Pyodide 314 runs in module workers only. |
+
+Browser exercises run on the Pyodide versions. Laptop and CI tests run on the pins above. The pandas behaviour taught in Track B is the same in 3.0.2 and 3.0.6.
 
 ## Fabric feature status
 
@@ -62,4 +64,5 @@ Every Track C lesson cites a row in this table. Microsoft Learn pages were block
 
 - Serverless compute (and so Free Edition) does not support `df.cache()` / `persist()` or the classic Spark UI. Unverified. Affects A5 and D2 practicals.
 - `owner` is a reserved table property in Spark and fails in `SET TBLPROPERTIES`. Unverified. Affects `reference/pipelines/unity_catalog.sql` and A4.
+- MERGE fails with a multiple-source-rows error when two source rows match one target row. Verified locally by `practice/tests/test_a3_l1_merge.py` on delta-spark 4.0.1.
 - Spark 4.0 turns ANSI mode on by default, so an invalid `cast` raises an error instead of returning null. Unverified for DBR 17.3 LTS. Affects A2 and D3.

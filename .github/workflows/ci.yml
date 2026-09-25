@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install system libraries for WeasyPrint
+        run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . --group dev
+      - name: Lint and type-check
+        run: |
+          ruff check .
+          ruff format --check .
+          mypy
+      - name: Build content, handbook and practicals
+        run: python scripts/build_all.py
+      - name: Committed app bundle is up to date
+        # PDF and Word files carry build timestamps, so only the JSON bundle is compared.
+        run: git diff --exit-code -- site/content site/py
+      - name: Python quality gates
+        run: pytest
+      - name: JavaScript quality gates
+        run: node --test tests/app/checkers.test.mjs tests/app/store.test.mjs
+
+  practice:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install Spark harness
+        run: pip install -e . --group spark --group dev
+      - name: Reference solutions pass the practice tests
+        run: pytest practice --solutions

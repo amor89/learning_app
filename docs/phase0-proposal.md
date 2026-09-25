@@ -235,7 +235,15 @@ Your reference code seeds Track D. On top of the 12 defects in your README, I fo
 | 2. Unified Fabric solution | M16-18, current-work | Mirrored Databricks gold tables in OneLake, Direct Lake semantic model, Copilot-assisted report, verification log for every Copilot output |
 | 3. Review an AI-generated pull request | all-months | Review report graded against a hidden key |
 
-## 4. Blockers and decisions for you
+## 4. Decisions
+
+Recorded on 25 September 2026:
+- pandas 3.x for Track B.
+- Roadmap tags as proposed in section 2, including the four additions. The month ranges stay as your roadmap file states them.
+- Databricks Runtime 17.3 LTS (Spark 4.0) for lessons.
+- PDF at A5 portrait for iPhone reading. The Word file uses A4 with a wide right margin for notes.
+
+## 5. Original blockers and questions
 
 1. Network access. This build environment blocks `learn.microsoft.com`, `docs.databricks.com` and `cdn.jsdelivr.net`. I verified versions through PyPI, npm and search results that quote official pages. To meet your accuracy rule and to test Pyodide, add these hosts to the environment's allowed domains: `learn.microsoft.com`, `docs.databricks.com`, `cdn.jsdelivr.net`, `pyodide.org`. You change this under Network access in the environment settings.
 2. Roadmap tags. Confirm the four proposed additions in section 2. Your roadmap file also says the month ranges are a proposed split. Confirm them or send the originals.

@@ -1,0 +1,28 @@
+id: A
+title: Databricks pipeline engineering
+summary: Build Databricks pipelines that are correct, fast, observable and tested.
+checklist:
+  - Every function has type hints, a docstring and one job.
+  - No SparkSession is created at import time. Functions receive spark as a parameter.
+  - "Functions are imported as F: `from pyspark.sql import functions as F`."
+  - Table names, column maps and thresholds come from config or registry tables.
+  - Every table states its grain in a comment or table property.
+  - Bronze appends. Silver deduplicates the source, then MERGEs. Gold aggregates by every grain column.
+  - Every run writes one record to the run log table with an explicit schema.
+  - CRITICAL checks raise. WARN checks log and continue.
+  - Every division has a guard for zero and null.
+  - Counts come from one agg pass, not repeated count() calls.
+  - Incremental loads compare source and target on the same keys.
+  - Row filters use a SQL UDF with SET ROW FILTER. Grants go to groups.
+  - Tests run on a local SparkSession in CI before every merge.
+modules:
+  - {id: A1, title: Code structure, tags: [M16-18, current-work], summary: "Functions, type hints, docstrings, naming, config files and PEP 8."}
+  - {id: A2, title: Medallion architecture, tags: [M16-18, current-work], summary: "Bronze, silver and gold contracts."}
+  - {id: A3, title: Delta Lake, tags: [M16-18, current-work], summary: "MERGE, idempotent writes, schema enforcement and evolution, time travel, maintenance."}
+  - {id: A4, title: Unity Catalog, tags: [M16-18, current-work], summary: "Three-level namespace, grants, row filters and column masks."}
+  - {id: A5, title: PySpark performance, tags: [M16-18, current-work], summary: "Lazy evaluation, built-ins over UDFs, joins, partitioning, caching, explain plans."}
+  - {id: A6, title: Data quality, tags: [M16-18, current-work], summary: "Expectations, health checks and reconciliation between layers."}
+  - {id: A7, title: Observability, tags: [M16-18, current-work], summary: "Structured logging and pipeline run log tables."}
+  - {id: A8, title: Incremental processing, tags: [M16-18, current-work], summary: "Auto Loader, change data feed and processing only new waves."}
+  - {id: A9, title: Testing, tags: [M16-18, current-work], summary: "pytest, fixtures, local SparkSession and DataFrame equality checks."}
+  - {id: A10, title: Deployment, tags: [M16-18, current-work], summary: "Git folders, Databricks Asset Bundles, parameterised jobs and CI."}

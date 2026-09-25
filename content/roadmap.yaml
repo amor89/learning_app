@@ -1,0 +1,11 @@
+# Roadmap bands from reference/roadmap.md. Modules carry one or more band ids as tags.
+bands:
+  - {id: prereq, label: "Prerequisite for all months"}
+  - {id: M1-3, label: "Months 1 to 3: PyTorch foundations"}
+  - {id: M4-6, label: "Months 4 to 6: CNNs"}
+  - {id: M7-9, label: "Months 7 to 9: NLP with deep learning"}
+  - {id: M10-12, label: "Months 10 to 12: Transformers applied"}
+  - {id: M13-15, label: "Months 13 to 15: LLMs"}
+  - {id: M16-18, label: "Months 16 to 18: MLOps and deployment"}
+  - {id: current-work, label: "Current work"}
+  - {id: all-months, label: "Every month"}

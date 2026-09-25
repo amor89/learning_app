@@ -1,0 +1,25 @@
+id: C
+title: Microsoft Fabric
+summary: Unify data, analytics and Copilot in Fabric, and verify what Copilot produces.
+checklist:
+  - Check the status (GA or preview) of every Fabric feature before you depend on it.
+  - One copy of each dataset. Use shortcuts or mirroring before you copy.
+  - Lakehouse for Spark and files. Warehouse for T-SQL writes and multi-table transactions.
+  - The SQL analytics endpoint is read-only for table data. Write through Spark or a Warehouse.
+  - Semantic models use star schemas. DAX measures state their filter context.
+  - Direct Lake models are checked for fallback to DirectQuery.
+  - Every Copilot output is read, run on known data and compared against a second method.
+  - Workspaces map to domains. Access uses roles and OneLake security, not item sharing.
+  - Items live in Git. Changes move through deployment pipelines.
+  - Capacity use is monitored, and heavy jobs are scheduled off peak.
+modules:
+  - {id: C1, title: Fabric architecture, tags: [M16-18, current-work], summary: "Workspaces, capacities, items and OneLake as one logical lake."}
+  - {id: C2, title: "Lakehouse, Warehouse and SQL analytics endpoint", tags: [M16-18, current-work], summary: "When to use each."}
+  - {id: C3, title: Unifying datasets, tags: [M16-18, current-work], summary: "Shortcuts, mirroring (including Azure Databricks Unity Catalog) and avoiding duplicate copies."}
+  - {id: C4, title: Ingestion and orchestration, tags: [M16-18, current-work], summary: "Data Factory pipelines, Dataflows Gen2 and copy jobs."}
+  - {id: C5, title: Spark notebooks in Fabric, tags: [M16-18, current-work], summary: "Differences from Databricks, environments, V-Order and Delta interoperability."}
+  - {id: C6, title: Semantic models and Direct Lake, tags: [M16-18, current-work], summary: "Star schemas, DAX best practices and Power BI reports."}
+  - {id: C7, title: Real-Time Intelligence, tags: [M16-18, current-work], summary: "Eventstream, Eventhouse, KQL and Activator."}
+  - {id: C8, title: Copilot and AI in Fabric, tags: [M16-18, current-work], summary: "Copilot across workloads, data agents, limits and verification."}
+  - {id: C9, title: Governance and security, tags: [M16-18, current-work], summary: "Domains, OneLake security, sensitivity labels, Purview and lineage."}
+  - {id: C10, title: DevOps and cost, tags: [M16-18, current-work], summary: "Git integration, deployment pipelines and capacity monitoring."}

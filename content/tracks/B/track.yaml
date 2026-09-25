@@ -1,0 +1,35 @@
+id: B
+title: Python for data science
+summary: Write Python and run analyses that are correct, reproducible and easy to review.
+checklist:
+  - The project has a pyproject.toml, a virtual environment and pinned dependencies.
+  - ruff and mypy pass before every commit.
+  - Functions are pure where possible. Side effects sit at the edges.
+  - Dtypes are explicit. pandas code is vectorised, with no row-wise apply on large frames.
+  - Inputs are validated with pandera or pydantic at every boundary.
+  - Seeds, config and data versions are recorded for every result.
+  - Weighted estimates use the survey weights. Intervals and effect sizes go with every estimate.
+  - Preprocessing sits inside a scikit-learn Pipeline, fitted on training folds only.
+  - The metric matches the decision. Calibration and subgroup performance are checked.
+  - Every experiment is tracked in MLflow.
+  - Tests cover edge cases, including empty inputs and zeros.
+  - Every model has a model card. Every decision has a log entry.
+modules:
+  - {id: B1, title: Project setup, tags: [prereq], summary: "pyproject.toml, virtual environments, ruff, mypy and folder layout."}
+  - {id: B2, title: Code design, tags: [prereq], summary: "Pure functions, dataclasses, when to use classes, configuration objects."}
+  - {id: B3, title: Clean pandas, tags: [prereq], summary: "Dtypes, vectorisation, method chaining and Copy-on-Write in pandas 3."}
+  - {id: B4, title: Polars and DuckDB, tags: [prereq], summary: "Tools for larger local datasets."}
+  - {id: B5, title: Data validation, tags: [prereq], summary: "Schema checks with pandera and input models with pydantic."}
+  - {id: B6, title: Reproducibility, tags: [prereq], summary: "Seeds, config, data versioning and pinned dependencies."}
+  - {id: B7, title: Exploratory analysis done well, tags: [prereq], summary: "Profiling, visual checks and documented assumptions."}
+  - {id: B8, title: Statistical correctness, tags: [prereq], summary: "Survey weights, confidence intervals, effect sizes and multiple comparisons."}
+  - {id: B9, title: Experimental design, tags: [prereq], summary: "Power, sample size and A/B test analysis."}
+  - {id: B10, title: Feature engineering without leakage, tags: [prereq], summary: "Target leakage, contamination and time-safe features."}
+  - {id: B11, title: Machine learning workflow, tags: [prereq], summary: "Splits, Pipeline, ColumnTransformer, cross-validation and hyperparameter search."}
+  - {id: B12, title: Model evaluation, tags: [prereq, M4-6, M10-12], summary: "Metric choice, calibration, imbalanced classes and error analysis."}
+  - {id: B13, title: Interpretability and fairness, tags: [prereq], summary: "Permutation importance, SHAP and subgroup performance."}
+  - {id: B14, title: Experiment tracking with MLflow, tags: [prereq, M16-18], summary: "Tracking, registry and the model lifecycle."}
+  - {id: B15, title: Embeddings and clustering, tags: [M7-9], summary: "SentenceTransformers, HDBSCAN and cluster validation."}
+  - {id: B16, title: PyTorch hygiene, tags: [M1-3], summary: "Device handling, training loops and reproducibility."}
+  - {id: B17, title: Testing and performance, tags: [prereq], summary: "Unit tests, Hypothesis, profiling and memory use."}
+  - {id: B18, title: Documentation and communication, tags: [prereq, all-months], summary: "Docstrings, READMEs, model cards and decision logs."}

@@ -1,0 +1,23 @@
+id: D
+title: Finding errors in code
+summary: Find and fix errors fast, including errors in code that Claude and Copilot write.
+checklist:
+  - Read a traceback from the bottom up. Find the first frame in your own code.
+  - Reproduce the error on the smallest data that shows it.
+  - Check row counts before and after every join.
+  - Test numbers with `is None`, never with truthiness, when zero is a valid value.
+  - Never use a mutable object as a default argument.
+  - Check every function and parameter an AI suggests against the official docs for your version.
+  - Run AI code on a small input with a known answer before you trust it.
+  - Write the failing test first. A test that only repeats the code proves nothing.
+  - Ask the model to list its assumptions. Check each one.
+  - State versions, constraints, expected outputs and tests in every prompt.
+modules:
+  - {id: D1, title: Reading tracebacks and stack traces, tags: [all-months], summary: "Find the root cause in Python and Spark errors."}
+  - {id: D2, title: Debugging tools, tags: [all-months], summary: "breakpoint(), pdb, logging levels, Spark UI and explain()."}
+  - {id: D3, title: Silent errors, tags: [all-months], summary: "Join explosion, nulls in filters, type coercion, timezone drift, mutable defaults."}
+  - {id: D4, title: Data errors, tags: [all-months], summary: "Row counts across layers, distribution drift and weight totals."}
+  - {id: D5, title: Errors typical of AI-generated code, tags: [all-months], summary: "Invented APIs, deprecated calls, missing edge cases, self-confirming tests."}
+  - {id: D6, title: Verifying AI output, tags: [all-months], summary: "A workflow to check AI code before you trust it."}
+  - {id: D7, title: Review practice, tags: [all-months], summary: "25 AI-style snippets with seeded bugs and a hidden answer key."}
+  - {id: D8, title: Prompting for correct code, tags: [all-months], summary: "State versions, constraints, expected outputs and tests."}

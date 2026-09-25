@@ -1,0 +1,501 @@
+id: B3-L2
+title: Vectorise instead of apply
+
+concept: |
+  pandas stores each column as an array. A **vectorised** operation, such as `df["a"] * df["b"]`, `np.where()` or `pd.cut()`, runs one compiled loop over the whole array. `df.apply(func, axis=1)` does the opposite. It builds a Series for each row and calls your Python function once per row.
+
+  The gap is large. On one million rows, a row-wise `apply` that picks a weight when a flag is set took 4.0 seconds. `np.where` did the same job in 7.5 milliseconds, about 500 times faster. (pandas 3.0.6, NumPy 2.4.6, one laptop core.)
+
+  Speed is not the only gain. Vectorised code states the rule for the whole column in one line, so a reviewer checks one expression instead of a branching function.
+
+  Reach for these first:
+
+  | Task | Vectorised tool |
+  |---|---|
+  | Arithmetic between columns | `+`, `-`, `*`, `/` on Series |
+  | Two-way choice | `np.where(cond, a, b)` |
+  | Many-way choice | `np.select(conditions, choices, default)` |
+  | Numeric bands | `pd.cut(values, bins, labels, right=False)` |
+  | Lookup from a dict | `Series.map(mapping)` |
+  | Limits | `Series.clip(lower, upper)` |
+
+  Watch missing values. `NaN > 60` is `False`, so `np.where(minutes > 60, "heavy", "light")` labels a missing value `"light"`. Handle missing values on purpose: `pd.cut` keeps `NaN` as missing, and `Series.where(values.notna())` puts it back after `np.where`.
+
+  Keep `apply` for work with no vectorised form, such as calling an external parser on each string. Even then, try `Series.map` or a list comprehension on one column before `apply(axis=1)`.
+
+why_it_matters: |
+  A weighting script derives 25 columns with `apply(axis=1)`. It ran in 8 minutes on 2 million rows, so nobody noticed. The programme then merged three trackers into one file of 40 million rows. At the measured rate of about 4 seconds per million rows per column, the derivations alone need roughly 67 minutes. The job hit its 60-minute timeout every night for a week, and weighted results for all three trackers were late.
+
+  The same script also labelled respondents with a missing `minutes` value as `"light"` viewers, because the row function used `if row["minutes"] > 60`. The vectorised rewrite fixed the speed, and review of the one-line rule exposed the missing-value bug.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import pandas as pd
+
+
+      def derive(df):
+          def per_row(row):
+              weighted_reach = row["final_weight"] if row["reach_flag"] == 1 else 0.0
+              if row["age"] < 35:
+                  band = "16-34"
+              elif row["age"] < 55:
+                  band = "35-54"
+              else:
+                  band = "55+"
+              return pd.Series({"weighted_reach": weighted_reach, "age_group": band})
+
+          df[["weighted_reach", "age_group"]] = df.apply(per_row, axis=1)
+          return df
+    annotations:
+      - find: "def derive(df):"
+        note: "No type hints and no docstring. The reader cannot tell what the frame must contain."
+      - find: 'if row["age"] < 35:'
+        note: "`NaN < 35` is False, so a missing age falls through to `55+` without a warning."
+      - find: "df.apply(per_row, axis=1)"
+        note: "Builds a Series and calls Python for every row. About 500 times slower than a vectorised rule."
+      - find: 'df[["weighted_reach", "age_group"]] ='
+        note: "Mutates the caller's frame. A pure function returns a new frame."
+  strong:
+    code: |
+      import numpy as np
+      import pandas as pd
+
+      AGE_BINS = [16, 35, 55, np.inf]
+      AGE_LABELS = ["16-34", "35-54", "55+"]
+
+
+      def derive(df: pd.DataFrame) -> pd.DataFrame:
+          """Add weighted reach and age group.
+
+          Args:
+              df: Respondents with reach_flag, final_weight and age.
+
+          Returns:
+              A new frame. Missing ages give a missing age_group.
+          """
+          return df.assign(
+              weighted_reach=np.where(df["reach_flag"] == 1, df["final_weight"], 0.0),
+              age_group=pd.cut(df["age"], bins=AGE_BINS, labels=AGE_LABELS, right=False),
+          )
+    annotations:
+      - find: "AGE_BINS = [16, 35, 55, np.inf]"
+        note: "Band edges live in one constant, so a change to the bands is a one-line change."
+      - find: "weighted_reach=np.where("
+        note: "One compiled pass over the column."
+      - find: "age_group=pd.cut("
+        note: "`right=False` makes each band include its lower edge: 35 goes to `35-54`. Missing ages stay missing."
+      - find: "return df.assign("
+        note: "`assign` returns a new frame, so the caller's data is untouched."
+  takeaway: |
+    The strong version is shorter, about 500 times faster on large frames, and handles missing ages on purpose.
+
+exercises:
+  - id: B3-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which line computes `weighted_reach` for a frame with one million rows in a single compiled pass?
+    options:
+      - {id: a, text: '`df.apply(lambda r: r["final_weight"] if r["reach_flag"] == 1 else 0.0, axis=1)`'}
+      - {id: b, text: '`[w if f == 1 else 0.0 for w, f in zip(df["final_weight"], df["reach_flag"])]`'}
+      - {id: c, text: '`np.where(df["reach_flag"] == 1, df["final_weight"], 0.0)`'}
+      - {id: d, text: '`for i, row in df.iterrows(): ...`'}
+    answer: c
+    reasons:
+      - {id: r1, text: "It evaluates the condition and the choice on whole arrays in compiled code."}
+      - {id: r2, text: "It uses fewer characters than the other options."}
+      - {id: r3, text: "NumPy runs the lambda on several cores."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "`apply(axis=1)` calls the lambda once per row in Python. It measured about 500 times slower than `np.where` on one million rows."
+      - answer: b
+        feedback: "A list comprehension beats `apply`, but it still runs a Python loop over every value."
+      - answer: d
+        feedback: "`iterrows()` builds a Series for each row. It is the slowest option here."
+      - answer: c|r2
+        feedback: "Right choice, wrong reason. Length has nothing to do with speed. `np.where` works on whole arrays in compiled code."
+      - answer: c|r3
+        feedback: "Right choice, wrong reason. There is no lambda, and `np.where` runs on one core. It is fast because it avoids a Python call per row."
+    hints:
+      - "Look for the option with no per-row Python code."
+      - "A vectorised call takes whole columns as arguments."
+      - "`np.where(cond, a, b)` picks from `a` or `b` element by element in compiled code."
+    explanation: |
+      `np.where` takes whole arrays and runs one compiled loop. The other three options call Python code once per row.
+
+  - id: B3-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      import pandas as pd
+
+      s = pd.Series([0.0, 1.5, None])
+      print((s > 1).tolist())
+    answer: "[False, True, False]"
+    wrong_answers:
+      - answer: "[False, True, None]"
+        feedback: "A comparison on a float Series returns plain booleans. `NaN > 1` evaluates to `False`, not to a missing value."
+      - answer: "[False, True, nan]"
+        feedback: "Comparisons do not propagate `NaN` on float64 data. They return `False`, which is why missing values get silently mislabelled."
+      - answer: "[True, True, False]"
+        feedback: "`0.0 > 1` is `False`. Only 1.5 exceeds 1."
+    hints:
+      - "`None` in a float Series becomes `NaN`."
+      - "What does any comparison with `NaN` return?"
+      - "Every comparison with `NaN` is `False`."
+    explanation: |
+      `None` becomes `NaN` in a float64 Series, and `NaN > 1` is `False`. So the missing value is treated as "not above 1". This is the missing-value trap from the concept.
+
+  - id: B3-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the line so rows with `reach_flag == 1` keep their weight and every other row gets zero.
+    template: |
+      df["weighted_reach"] = np.[[g1]](df["reach_flag"] == 1, df["final_weight"], [[g2]])
+    gaps:
+      g1: {accepted: [where]}
+      g2: {accepted: ["0.0", "0"]}
+    wrong_answers:
+      - answer: {g1: select}
+        feedback: "`np.select` takes a list of conditions and a list of choices. For one condition and two outcomes, use `np.where`."
+      - answer: {g1: if}
+        feedback: "There is no `np.if`. The vectorised if-else in NumPy is `np.where`."
+      - answer: {g2: None}
+        feedback: "`None` turns the result into an object array. Use `0.0` so the column stays numeric."
+    hints:
+      - "The function takes a condition, a value for True and a value for False."
+      - "Its name is the SQL keyword for filtering rows."
+      - "`np.where(cond, value_if_true, value_if_false)`, with zero as the false value."
+    explanation: |
+      `np.where(cond, df["final_weight"], 0.0)` keeps the weight where the flag is 1 and returns 0.0 elsewhere, as one float array.
+
+  - id: B3-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas, numpy]
+    prompt: |
+      Write `weighted_reach_pct(df)`. It returns the weighted share of rows with `reach_flag == 1`: the sum of `final_weight` where the flag is 1, divided by the sum of all `final_weight`. Return `None` when the total weight is zero or the frame is empty. Do not use `apply` or a loop over rows.
+    starter: |
+      import numpy as np
+      import pandas as pd
+
+
+      def weighted_reach_pct(df: pd.DataFrame) -> float | None:
+          ...
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: weighted_reach_pct
+          typed: true
+          docstring: true
+          message: "Define `weighted_reach_pct` with type hints and a docstring."
+        - id: no_apply
+          kind: forbids_call
+          name: apply
+          message: "Do not use `apply`. Multiply or mask whole columns instead."
+        - id: no_iterrows
+          kind: forbids_call
+          name: iterrows
+          message: "Do not loop over rows with `iterrows()`. Work on whole columns."
+      tests:
+        - id: basic
+          code: |
+            df = pd.DataFrame({"reach_flag": [1, 0, 1], "final_weight": [2.0, 1.0, 1.0]})
+            assert abs(weighted_reach_pct(df) - 0.75) < 1e-9
+          message: "For weights 2, 1, 1 with flags 1, 0, 1 the answer is 3 / 4 = 0.75. Divide the flagged weight by the total weight."
+        - id: empty
+          code: |
+            df = pd.DataFrame({"reach_flag": pd.Series([], dtype="int64"), "final_weight": pd.Series([], dtype="float64")})
+            assert weighted_reach_pct(df) is None
+          message: "An empty frame must return None, not raise or return NaN. Guard the division."
+        - id: zero_weight
+          code: |
+            df = pd.DataFrame({"reach_flag": [1, 0], "final_weight": [0.0, 0.0]})
+            assert weighted_reach_pct(df) is None
+          message: "When the total weight is zero, return None instead of dividing by zero."
+        - id: returns_float
+          code: |
+            df = pd.DataFrame({"reach_flag": [1], "final_weight": [2.0]})
+            assert type(weighted_reach_pct(df)) is float
+          message: "Return a Python float (wrap the result in `float()`), not a NumPy scalar."
+    solution: |
+      import numpy as np
+      import pandas as pd
+
+
+      def weighted_reach_pct(df: pd.DataFrame) -> float | None:
+          """Weighted share of respondents with reach_flag == 1.
+
+          Args:
+              df: Rows with reach_flag and final_weight.
+
+          Returns:
+              The weighted share, or None when the total weight is zero.
+          """
+          total = df["final_weight"].sum()
+          if total == 0:
+              return None
+          reached = df["final_weight"].where(df["reach_flag"] == 1, 0.0).sum()
+          return float(reached / total)
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def weighted_reach_pct(df: pd.DataFrame) -> float | None:
+            """Weighted share."""
+            return float((df["final_weight"] * df["reach_flag"]).sum() / df["final_weight"].sum())
+      - |
+        import pandas as pd
+
+
+        def weighted_reach_pct(df: pd.DataFrame) -> float | None:
+            """Unweighted share, the wrong measure."""
+            if len(df) == 0:
+                return None
+            return float(df["reach_flag"].mean())
+      - |
+        import pandas as pd
+
+
+        def weighted_reach_pct(df: pd.DataFrame) -> float | None:
+            """Weighted share with apply."""
+            total = df["final_weight"].sum()
+            if total == 0:
+                return None
+            return float(df.apply(lambda r: r["final_weight"] * r["reach_flag"], axis=1).sum() / total)
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def weighted_reach_pct(df: pd.DataFrame) -> float | None:
+              """Weighted share."""
+              return float((df["final_weight"] * df["reach_flag"]).sum() / df["final_weight"].sum())
+        triggers: empty
+      - answer: |
+          import pandas as pd
+
+
+          def weighted_reach_pct(df: pd.DataFrame) -> float | None:
+              """Unweighted share, the wrong measure."""
+              if len(df) == 0:
+                  return None
+              return float(df["reach_flag"].mean())
+        triggers: basic
+    hints:
+      - "Compute the total weight first, and return early when it is zero."
+      - "`df['final_weight'].where(df['reach_flag'] == 1, 0.0)` keeps weights for reached rows only."
+      - "Sum the masked weights, divide by the total, and wrap the result in `float()`."
+    explanation: |
+      Sum the weights once for the denominator and return `None` when it is zero, which covers the empty frame too. Mask weights by the flag, sum, divide and convert to `float`.
+
+  - id: B3-L2-E5
+    type: refactor
+    difficulty: 4
+    language: python
+    packages: [pandas, numpy]
+    prompt: |
+      Refactor `add_age_group` to vectorised code. Keep the bands: under 35 is `16-34`, under 55 is `35-54`, anything else is `55+`. A missing age must give a missing age group, not `55+`. Do not change the input frame.
+    starter: |
+      import pandas as pd
+
+
+      def add_age_group(df):
+          def band(row):
+              if row["age"] < 35:
+                  return "16-34"
+              if row["age"] < 55:
+                  return "35-54"
+              return "55+"
+
+          df["age_group"] = df.apply(band, axis=1)
+          return df
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+        import pandas as pd
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: add_age_group
+          typed: true
+          docstring: true
+          message: "Add type hints and a docstring to `add_age_group`."
+        - id: no_apply
+          kind: forbids_call
+          name: apply
+          message: "The refactor must not use `apply`. Try `pd.cut` or `np.select`."
+        - id: no_iterrows
+          kind: forbids_call
+          name: iterrows
+          message: "Do not loop over rows."
+      tests:
+        - id: bands
+          code: |
+            df_in = pd.DataFrame({"age": [16, 34, 35, 54, 55, 80]})
+            out = add_age_group(df_in)
+            assert list(out["age_group"].astype(object)) == ["16-34", "16-34", "35-54", "35-54", "55+", "55+"]
+          message: "The bands are wrong at an edge. 35 belongs to 35-54 and 55 belongs to 55+. With pd.cut, set right=False."
+        - id: missing_age
+          code: |
+            out = add_age_group(pd.DataFrame({"age": [20.0, np.nan]}))
+            assert pd.isna(out["age_group"].iloc[1])
+          message: "A missing age must give a missing age group. `np.where` and `np.select` turn NaN into the default band. `pd.cut` keeps it missing."
+        - id: pure
+          code: |
+            df_in = pd.DataFrame({"age": [20, 60]})
+            add_age_group(df_in)
+            assert "age_group" not in df_in.columns
+          message: "Your function changed the caller's frame. Return a new frame with `df.assign(...)`."
+    solution: |
+      import numpy as np
+      import pandas as pd
+
+      AGE_BINS = [-np.inf, 35, 55, np.inf]
+      AGE_LABELS = ["16-34", "35-54", "55+"]
+
+
+      def add_age_group(df: pd.DataFrame) -> pd.DataFrame:
+          """Return a copy of df with an age_group column. Missing ages stay missing."""
+          return df.assign(
+              age_group=pd.cut(df["age"], bins=AGE_BINS, labels=AGE_LABELS, right=False)
+          )
+    seeded_bugs:
+      - |
+        import numpy as np
+        import pandas as pd
+
+
+        def add_age_group(df: pd.DataFrame) -> pd.DataFrame:
+            """np.select sends missing ages to the default."""
+            conditions = [df["age"] < 35, df["age"] < 55]
+            return df.assign(age_group=np.select(conditions, ["16-34", "35-54"], default="55+"))
+      - |
+        import numpy as np
+        import pandas as pd
+
+
+        def add_age_group(df: pd.DataFrame) -> pd.DataFrame:
+            """Right-closed bins put 35 in the wrong band."""
+            return df.assign(age_group=pd.cut(df["age"], bins=[-np.inf, 35, 55, np.inf], labels=["16-34", "35-54", "55+"]))
+      - |
+        import numpy as np
+        import pandas as pd
+
+
+        def add_age_group(df: pd.DataFrame) -> pd.DataFrame:
+            """Mutates the input."""
+            df["age_group"] = pd.cut(df["age"], bins=[-np.inf, 35, 55, np.inf], labels=["16-34", "35-54", "55+"], right=False)
+            return df
+    wrong_answers:
+      - answer: |
+          import numpy as np
+          import pandas as pd
+
+
+          def add_age_group(df: pd.DataFrame) -> pd.DataFrame:
+              """np.select sends missing ages to the default."""
+              conditions = [df["age"] < 35, df["age"] < 55]
+              return df.assign(age_group=np.select(conditions, ["16-34", "35-54"], default="55+"))
+        triggers: missing_age
+      - answer: |
+          import numpy as np
+          import pandas as pd
+
+
+          def add_age_group(df: pd.DataFrame) -> pd.DataFrame:
+              """Right-closed bins put 35 in the wrong band."""
+              return df.assign(age_group=pd.cut(df["age"], bins=[-np.inf, 35, 55, np.inf], labels=["16-34", "35-54", "55+"]))
+        triggers: bands
+    hints:
+      - "`pd.cut` turns numbers into labelled bands and keeps missing values missing."
+      - "Bins `[-np.inf, 35, 55, np.inf]` with `right=False` give [.., 35), [35, 55), [55, ..)."
+      - "Wrap it in `df.assign(age_group=pd.cut(...))` so you return a new frame."
+    explanation: |
+      `pd.cut` with left-closed bins (`right=False`) matches the original `<` comparisons exactly. It keeps `NaN` as missing, which fixes a bug the original had. `assign` returns a new frame.
+
+  - id: B3-L2-E6
+    type: spot_bug
+    difficulty: 5
+    language: python
+    prompt: |
+      The docstring promises that missing minutes stay missing. A respondent with no minutes recorded shows as `"light"`. Tap the line with the bug, then fix the function.
+    code: |
+      def add_viewing_band(df: pd.DataFrame) -> pd.DataFrame:
+          """Band weekly minutes into heavy (60 or more) and light. Missing minutes stay missing."""
+          minutes = df["minutes"]
+          band = np.where(minutes >= 60, "heavy", "light")
+          return df.assign(viewing_band=band)
+    bug_lines: [4]
+    packages: [pandas, numpy]
+    fix_checker:
+      kind: python
+      setup: |
+        import numpy as np
+        import pandas as pd
+      ast_rules:
+        - id: no_apply
+          kind: forbids_call
+          name: apply
+          message: "Keep it vectorised. Do not use `apply`."
+      tests:
+        - id: bands
+          code: |
+            out = add_viewing_band(pd.DataFrame({"minutes": [30.0, 60.0, 90.0]}))
+            assert list(out["viewing_band"]) == ["light", "heavy", "heavy"]
+          message: "Non-missing rows are banded wrongly. 60 or more is heavy."
+        - id: missing
+          code: |
+            out = add_viewing_band(pd.DataFrame({"minutes": [30.0, np.nan]}))
+            assert pd.isna(out["viewing_band"].iloc[1])
+          message: "A missing value still becomes a band. Put the missing values back with `.where(minutes.notna())`."
+    fix_solution: |
+      def add_viewing_band(df: pd.DataFrame) -> pd.DataFrame:
+          """Band weekly minutes into heavy (60 or more) and light. Missing minutes stay missing."""
+          minutes = df["minutes"]
+          band = pd.Series(np.where(minutes >= 60, "heavy", "light"), index=df.index)
+          return df.assign(viewing_band=band.where(minutes.notna()))
+    wrong_answers:
+      - lines: [3]
+        feedback: "Line 3 only selects the column. The missing value is lost where the condition is evaluated."
+      - lines: [5]
+        feedback: "`assign` is right. It writes whatever `band` holds, and `band` is already wrong."
+    hints:
+      - "What is `NaN >= 60`?"
+      - "`np.where` has only two outcomes, so a missing value gets one of them."
+      - "Build the band as a Series, then keep it only where `minutes.notna()`."
+    explanation: |
+      `NaN >= 60` is `False`, so `np.where` returns `"light"` for missing minutes. Wrap the result in a Series on the same index and apply `.where(minutes.notna())` to restore the missing values.
+
+recap:
+  - front: "Why is df.apply(func, axis=1) slow?"
+    back: "It calls a Python function once per row. np.where measured about 500 times faster on one million rows."
+  - front: "Vectorised if-else in NumPy"
+    back: "np.where(cond, value_if_true, value_if_false). For several conditions, np.select."
+  - front: "What does NaN > 60 return?"
+    back: "False. np.where and np.select send missing values to a real category unless you handle them."
+  - front: "Numeric bands that keep missing values missing"
+    back: "pd.cut(values, bins, labels, right=False)."
+
+claims:
+  - claim: "Row-wise apply was about 500 times slower than np.where on one million rows."
+    status: verified
+    source: "Measured in this repo's build environment: pandas 3.0.6, NumPy 2.4.6, 4.03 s against 7.5 ms."
+  - claim: "pd.cut keeps NaN as missing and supports right=False."
+    status: verified
+    source: "Run in pandas 3.0.6."

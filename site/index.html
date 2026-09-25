@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Learning app</title>
+  <meta name="description" content="Personal course: Databricks pipelines, Python for data science, Microsoft Fabric and finding errors in code.">
+  <meta name="theme-color" content="#1f5f8b" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f1720" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Learn">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="app/styles.css">
+  <link rel="stylesheet" href="app/highlight.css">
+  <script type="module" src="app/main.js"></script>
+</head>
+<body>
+  <a class="skip" href="#app">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="#/">Learning app</a>
+  </header>
+  <main id="app" tabindex="-1"><p class="loading">Loading…</p></main>
+  <nav class="tabbar" aria-label="Main">
+    <a href="#/" data-tab="home">Learn</a>
+    <a href="#/review" data-tab="review">Review</a>
+    <a href="#/settings" data-tab="settings">Settings</a>
+  </nav>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <noscript>This app needs JavaScript.</noscript>
+</body>
+</html>

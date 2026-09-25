@@ -1,0 +1,356 @@
+id: C2-L3
+title: Lakehouse, Warehouse or SQL analytics endpoint
+
+concept: |
+  Fabric gives you three ways to hold and query tables. All three store data as Delta tables in OneLake. They differ in who writes the data and in which language.
+
+  **Lakehouse.** You write with Spark: notebooks, Spark job definitions, Dataflows Gen2 or pipelines. It holds files and Delta tables side by side. Choose it for raw files, PySpark transformations and data science. This is the closest match to your Databricks work.
+
+  **SQL analytics endpoint.** Every lakehouse gets one automatically. It gives a **read-only** T-SQL surface over the lakehouse's Delta tables. You can `SELECT`, and you can create views, functions and stored procedures. You cannot `INSERT`, `UPDATE` or `DELETE` table data through it. It picks up new or changed tables through a metadata sync. Microsoft documents the usual lag as under one minute, but it varies.
+
+  **Warehouse.** You write with T-SQL. It supports full DML and DDL, and multi-table transactions. Choose it when a team works in T-SQL, loads data with stored procedures, or needs several tables to change together or not at all.
+
+  One rule decides most cases: **who writes the data, and in which language?** Spark writers go to a lakehouse. T-SQL writers go to a warehouse. T-SQL readers of lakehouse data use the SQL analytics endpoint.
+
+  You do not have to copy data between them. A warehouse query reads lakehouse tables in the same workspace with a three-part name: `lakehouse_name.schema.table`. Direct Lake semantic models read from either.
+
+  Check the status of each feature you rely on in VERSIONS.md before you build. Fabric changes monthly.
+
+why_it_matters: |
+  A team moves a finance reconciliation from SQL Server to Fabric. They land every table in a lakehouse, because the Databricks team already uses lakehouses. The month-end stored procedure updates three tables. On the SQL analytics endpoint it fails on its first `UPDATE`, because the endpoint is read-only.
+
+  Under deadline, someone rewrites it as three separate Spark notebook writes. On one month-end the second notebook fails. Table one holds the new month and table three holds the old one, and the reconciliation report shows a balance that does not tie. A warehouse transaction would have rolled back all three tables together.
+
+worked_example:
+  language: tsql
+  weak:
+    code: |
+      -- Connected to the SQL analytics endpoint of lakehouse lh_finance
+      CREATE PROCEDURE dbo.close_month @period CHAR(7) AS
+      BEGIN
+          UPDATE dbo.ledger SET status = 'closed' WHERE period = @period;
+          INSERT INTO dbo.balances
+          SELECT account_id, @period, SUM(amount) FROM dbo.ledger
+          WHERE period = @period GROUP BY account_id;
+          DELETE FROM dbo.open_items WHERE period = @period;
+      END;
+    annotations:
+      - find: "-- Connected to the SQL analytics endpoint"
+        note: "The endpoint gives read-only access to lakehouse tables. Every write below fails."
+      - find: "UPDATE dbo.ledger"
+        note: "UPDATE, INSERT and DELETE on lakehouse tables are not supported through the endpoint."
+      - find: "DELETE FROM dbo.open_items"
+        note: "Three tables must change together. Without a transaction, a failure halfway leaves them inconsistent."
+  strong:
+    code: |
+      -- Connected to warehouse wh_finance
+      CREATE PROCEDURE dbo.close_month @period CHAR(7) AS
+      BEGIN
+          BEGIN TRANSACTION;
+          UPDATE dbo.ledger SET status = 'closed' WHERE period = @period;
+          INSERT INTO dbo.balances (account_id, period, balance)
+          SELECT account_id, @period, SUM(amount) FROM dbo.ledger
+          WHERE period = @period GROUP BY account_id;
+          DELETE FROM dbo.open_items WHERE period = @period;
+          COMMIT TRANSACTION;
+      END;
+    annotations:
+      - find: "-- Connected to warehouse wh_finance"
+        note: "The T-SQL writer works in a warehouse, which supports full DML."
+      - find: "BEGIN TRANSACTION;"
+        note: "All three changes commit together or not at all. Warehouses support multi-table transactions."
+      - find: "INSERT INTO dbo.balances (account_id, period, balance)"
+        note: "Name the target columns. An INSERT without a column list breaks when someone adds a column."
+  takeaway: |
+    The data and the logic are the same. The item type decides whether the procedure runs at all, and whether a failure leaves the tables consistent.
+
+exercises:
+  - id: C2-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which statement about a lakehouse's SQL analytics endpoint is true?
+    options:
+      - {id: a, text: "You can run UPDATE on lakehouse tables through it."}
+      - {id: b, text: "You can create a view over lakehouse tables in it."}
+      - {id: c, text: "You create it by hand after you create the lakehouse."}
+      - {id: d, text: "It stores its own copy of the lakehouse tables."}
+    answer: b
+    reasons:
+      - {id: r1, text: "Views are T-SQL objects that read data. The endpoint allows objects that read, not statements that change table data."}
+      - {id: r2, text: "Views are stored inside the Delta tables."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The endpoint is read-only for table data. Write with Spark in the lakehouse, or move the table to a warehouse."
+      - answer: c
+        feedback: "Fabric creates the endpoint automatically with every lakehouse."
+      - answer: d
+        feedback: "It reads the same Delta tables in OneLake. There is no second copy. It syncs metadata, not data."
+      - answer: b|r2
+        feedback: "Right choice, wrong reason. A view is a T-SQL object in the endpoint. The Delta tables stay unchanged."
+    hints:
+      - "The endpoint is described as read-only. Read-only for what?"
+      - "It blocks changes to table data, not every kind of object."
+      - "Views, functions and stored procedures that read are allowed."
+    explanation: |
+      The endpoint is read-only for table data, but you can create views, functions and stored procedures in it. Fabric creates it with the lakehouse, and it reads the same Delta tables in OneLake.
+
+  - id: C2-L3-E2
+    type: design
+    difficulty: 2
+    prompt: |
+      Pick the Fabric item for each workload.
+    slots:
+      - id: raw
+        label: "Land raw JSON survey deliveries and clean them with PySpark"
+        options: &items
+          - {id: lakehouse, text: Lakehouse}
+          - {id: warehouse, text: Warehouse}
+          - {id: endpoint, text: SQL analytics endpoint}
+        answer: lakehouse
+      - id: finance
+        label: "Finance loads budgets with T-SQL stored procedures that change several tables together"
+        options: *items
+        answer: warehouse
+      - id: adhoc
+        label: "Analysts query the cleaned lakehouse tables with T-SQL and save a few views"
+        options: *items
+        answer: endpoint
+    model_answer: |
+      - Raw files and PySpark: **Lakehouse**. Spark writes, and files sit next to tables.
+      - T-SQL writes across several tables: **Warehouse**, for DML and multi-table transactions.
+      - T-SQL reads of lakehouse data, plus views: **SQL analytics endpoint**. No copy needed.
+    wrong_answers:
+      - answer: {finance: lakehouse}
+        feedback: "The finance team writes with T-SQL. A lakehouse accepts writes from Spark, and its endpoint is read-only. Use a warehouse."
+      - answer: {finance: endpoint}
+        feedback: "The endpoint cannot change table data, so the stored procedures would fail on their first UPDATE or INSERT."
+      - answer: {raw: warehouse}
+        feedback: "A warehouse does not hold raw files, and the team writes with PySpark. Use a lakehouse."
+      - answer: {adhoc: warehouse}
+        feedback: "Copying the lakehouse tables into a warehouse makes a second copy to keep in sync. The endpoint reads them where they are."
+    hints:
+      - "Ask who writes the data, and in which language."
+      - "Spark writers and files: one item. T-SQL writers: another."
+      - "T-SQL readers of lakehouse data need no new item at all."
+    explanation: |
+      Spark writers use a lakehouse. T-SQL writers use a warehouse. T-SQL readers of lakehouse data use the endpoint that comes with the lakehouse.
+
+  - id: C2-L3-E3
+    type: spot_bug
+    difficulty: 3
+    language: tsql
+    prompt: |
+      This script runs against the SQL analytics endpoint of `lh_research`. It fails partway. Tap the failing line, then rewrite the script so it runs on the endpoint.
+    code: |
+      -- Connected to the SQL analytics endpoint of lh_research
+      CREATE VIEW dbo.v_wave_reach AS
+      SELECT wave_id, SUM(weighted_reach) / SUM(weighted_base) AS reach_pct
+      FROM dbo.nat_metrics
+      GROUP BY wave_id;
+      GO
+      UPDATE dbo.nat_metrics SET weighted_reach = 0 WHERE wave_id = 'W00';
+    bug_lines: [7]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: no_dml
+          type: forbidden
+          pattern: "\\b(UPDATE|INSERT|DELETE|MERGE)\\b"
+          message: "The endpoint is read-only for table data. Remove the UPDATE and make the change in Spark instead."
+        - id: keeps_view
+          type: required
+          pattern: "CREATE\\s+VIEW\\s+dbo\\.v_wave_reach"
+          message: "Keep the view. Views are allowed on the endpoint."
+    fix_solution: |
+      -- Connected to the SQL analytics endpoint of lh_research
+      CREATE VIEW dbo.v_wave_reach AS
+      SELECT wave_id, SUM(weighted_reach) / SUM(weighted_base) AS reach_pct
+      FROM dbo.nat_metrics
+      GROUP BY wave_id;
+      GO
+      -- Fix wave W00 in the lakehouse with Spark, not here.
+    wrong_answers:
+      - lines: [2]
+        feedback: "Creating a view is allowed on the endpoint. Look for a statement that changes table data."
+      - lines: [3]
+        feedback: "The division could hit zero, but that is not what stops this script. Look for a write."
+    hints:
+      - "Which statements change table data?"
+      - "The endpoint accepts reads and objects that read."
+      - "UPDATE on a lakehouse table fails through the endpoint."
+    explanation: |
+      Line 7 is an `UPDATE` on a lakehouse table, which the read-only endpoint rejects. Make that correction in a Spark notebook against the lakehouse, and keep only the view here.
+
+  - id: C2-L3-E4
+    type: write_function
+    difficulty: 3
+    language: tsql
+    prompt: |
+      On the SQL analytics endpoint, write a view `dbo.v_wave_reach` with one row per `wave_id` and a column `reach_pct`: the sum of `weighted_reach` divided by the sum of `weighted_base` from `dbo.nat_metrics`. A wave with a zero base must return NULL, not a divide-by-zero error.
+    starter: |
+      CREATE VIEW dbo.v_wave_reach AS
+    checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: creates_view
+          type: required
+          pattern: "CREATE\\s+(OR\\s+ALTER\\s+)?VIEW\\s+dbo\\.v_wave_reach\\s+AS"
+          message: "Start with `CREATE VIEW dbo.v_wave_reach AS`."
+        - id: reads_metrics
+          type: required
+          pattern: "FROM\\s+dbo\\.nat_metrics"
+          message: "Read from `dbo.nat_metrics`."
+        - id: groups_by_wave
+          type: required
+          pattern: "GROUP\\s+BY\\s+wave_id"
+          message: "One row per wave needs `GROUP BY wave_id`."
+        - id: no_nullif
+          type: required
+          pattern: "NULLIF\\s*\\(\\s*SUM\\s*\\(\\s*weighted_base\\s*\\)\\s*,\\s*0\\s*\\)"
+          message: "Guard the division: divide by `NULLIF(SUM(weighted_base), 0)`, which turns a zero base into NULL."
+        - id: alias
+          type: required
+          pattern: "AS\\s+reach_pct"
+          message: "Name the column `reach_pct`."
+        - id: no_dml
+          type: forbidden
+          pattern: "\\b(UPDATE|INSERT|DELETE|MERGE)\\b"
+          message: "The endpoint is read-only for table data. A view needs no DML."
+    solution: |
+      CREATE VIEW dbo.v_wave_reach AS
+      SELECT
+          wave_id,
+          SUM(weighted_reach) / NULLIF(SUM(weighted_base), 0) AS reach_pct
+      FROM dbo.nat_metrics
+      GROUP BY wave_id;
+    seeded_bugs:
+      - |
+        CREATE VIEW dbo.v_wave_reach AS
+        SELECT wave_id, SUM(weighted_reach) / SUM(weighted_base) AS reach_pct
+        FROM dbo.nat_metrics
+        GROUP BY wave_id;
+      - |
+        CREATE VIEW dbo.v_wave_reach AS
+        SELECT wave_id, weighted_reach / NULLIF(weighted_base, 0) AS reach_pct
+        FROM dbo.nat_metrics;
+    wrong_answers:
+      - answer: |
+          CREATE VIEW dbo.v_wave_reach AS
+          SELECT wave_id, SUM(weighted_reach) / SUM(weighted_base) AS reach_pct
+          FROM dbo.nat_metrics
+          GROUP BY wave_id;
+        triggers: no_nullif
+      - answer: |
+          CREATE VIEW dbo.v_wave_reach AS
+          SELECT wave_id, SUM(weighted_reach) / NULLIF(SUM(weighted_base), 0) AS reach_pct
+          FROM dbo.nat_metrics;
+        triggers: groups_by_wave
+    hints:
+      - "Aggregate both sums per wave, then divide."
+      - "`NULLIF(x, 0)` returns NULL when x is 0, and dividing by NULL gives NULL."
+      - "`SUM(weighted_reach) / NULLIF(SUM(weighted_base), 0) AS reach_pct`, then `GROUP BY wave_id`."
+    explanation: |
+      Sum both columns per wave and divide by `NULLIF(SUM(weighted_base), 0)`. A zero base becomes NULL, so the division returns NULL instead of an error.
+
+  - id: C2-L3-E5
+    type: fill_gap
+    difficulty: 4
+    language: tsql
+    prompt: |
+      You are connected to warehouse `wh_finance`. Lakehouse `lh_research` sits in the same workspace. Complete the query so it reads the lakehouse table without copying it.
+    template: |
+      INSERT INTO dbo.wave_summary (wave_id, weighted_base)
+      SELECT wave_id, SUM(weighted_base)
+      FROM [[g1]].dbo.nat_metrics
+      GROUP BY wave_id;
+    gaps:
+      g1: {accepted: [lh_research, "[lh_research]"], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: wh_finance}
+        feedback: "`wh_finance` is the warehouse you are in. The table lives in the lakehouse, so name the lakehouse."
+      - answer: {g1: OneLake}
+        feedback: "There is no database called OneLake. The first part of a three-part name is the item name: the lakehouse."
+    hints:
+      - "Three-part names are item.schema.table."
+      - "The first part names the item that holds the table."
+      - "The table sits in the lakehouse `lh_research`."
+    explanation: |
+      A warehouse query reads a lakehouse table in the same workspace with `lh_research.dbo.nat_metrics`. The data stays in one place.
+
+  - id: C2-L3-E6
+    type: mcq
+    difficulty: 5
+    prompt: |
+      A pipeline runs a Spark notebook that creates a new gold table in `lh_research`. The next pipeline step immediately queries the table through the SQL analytics endpoint and fails with "Invalid object name". An hour later the same query works. What is the most likely cause?
+    options:
+      - {id: a, text: "The notebook wrote the table in a format the endpoint cannot read."}
+      - {id: b, text: "The endpoint had not yet synced the new table's metadata."}
+      - {id: c, text: "The endpoint needs a manual refresh every time a table changes."}
+      - {id: d, text: "The pipeline's identity lacks permission on new tables for one hour."}
+    answer: b
+    reasons:
+      - {id: r1, text: "The endpoint discovers new Delta tables through an automatic sync that usually takes under a minute but has no fixed limit."}
+      - {id: r2, text: "The endpoint copies data from the lakehouse on a schedule."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The query worked an hour later without any change to the table, so the format was fine."
+      - answer: c
+        feedback: "The sync runs automatically. A manual refresh speeds it up, but it is not required every time."
+      - answer: d
+        feedback: "Permissions do not change on a timer. The delay points to the metadata sync."
+      - answer: b|r2
+        feedback: "Right choice, wrong reason. The endpoint does not copy data. It syncs metadata about the Delta tables."
+    hints:
+      - "The query failed first and worked later, with no change in between."
+      - "How does the endpoint learn that a new table exists?"
+      - "Look at the metadata sync between the lakehouse and its endpoint."
+    explanation: |
+      The endpoint syncs lakehouse metadata automatically, usually in under a minute, but the lag varies. When a later step depends on a new table, add a metadata refresh step (portal, REST API) or a retry before the query. Check the current refresh options on Microsoft Learn.
+
+recap:
+  - front: "Lakehouse, Warehouse or endpoint: the deciding question"
+    back: "Who writes the data, and in which language? Spark writes to a lakehouse, T-SQL writes to a warehouse."
+  - front: "What can you do on the SQL analytics endpoint?"
+    back: "SELECT and create views, functions and procedures. No INSERT, UPDATE or DELETE on table data."
+  - front: "When do you need a Warehouse over a Lakehouse?"
+    back: "T-SQL writes, stored procedure loads, and multi-table transactions."
+  - front: "Read a lakehouse table from a warehouse in the same workspace"
+    back: "Use a three-part name: lakehouse.schema.table. No copy."
+  - front: "A new lakehouse table is missing from the endpoint"
+    back: "Metadata sync lag. Usually under a minute. Refresh or retry before dependent steps."
+
+claims:
+  - claim: "The SQL analytics endpoint is read-only for Delta table data. No INSERT, UPDATE or DELETE."
+    status: search-only
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/lakehouse-sql-analytics-endpoint"
+  - claim: "You can create views, functions and stored procedures in the SQL analytics endpoint."
+    status: search-only
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/lakehouse-sql-analytics-endpoint"
+  - claim: "Fabric Warehouse supports full DML, DDL and multi-table transactions."
+    status: search-only
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/decision-guide-lakehouse-warehouse"
+  - claim: "Metadata sync lag is usually under one minute, and you can refresh it from the portal, the REST API or sys.sp_dw_refresh_ext_table."
+    status: search-only
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/sql-analytics-endpoint-metadata-sync"
+  - claim: "A warehouse reads lakehouse tables in the same workspace with three-part names."
+    status: unverified
+    source: "Check Microsoft Learn: cross-database queries in Fabric Data Warehouse."
+
+practical:
+  platform: fabric
+  title: "Lakehouse, endpoint and warehouse side by side"
+  intro: |
+    Run this in a Fabric trial workspace. You create a lakehouse and a warehouse, write one table with Spark, read it through the endpoint, and see a write fail there.
+  steps:
+    - "In your trial workspace, create a lakehouse named `lh_research`."
+    - "Open a new notebook attached to `lh_research`. Run: `spark.createDataFrame([(\"W01\", 120.0, 400.0), (\"W02\", 0.0, 0.0)], \"wave_id STRING, weighted_reach DOUBLE, weighted_base DOUBLE\").write.mode(\"overwrite\").saveAsTable(\"nat_metrics\")`."
+    - "Switch the lakehouse view to its SQL analytics endpoint. Wait for `nat_metrics` to appear. Note how long it takes."
+    - "Open a new SQL query on the endpoint and create the `dbo.v_wave_reach` view from exercise 4. Query it. Wave W02 returns NULL."
+    - "In the same query window, run `UPDATE dbo.nat_metrics SET weighted_reach = 0 WHERE wave_id = 'W01';` and read the error message."
+    - "Create a warehouse named `wh_finance`. In a new query, run `SELECT * FROM lh_research.dbo.nat_metrics;`. If it fails, record the error, since this lesson marks cross-item queries as unverified."
+    - "Write down what you saw in each step. Compare it with the recap card."
