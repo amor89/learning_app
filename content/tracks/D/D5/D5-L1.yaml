@@ -1,0 +1,304 @@
+id: D5-L1
+title: Invented functions, parameters and syntax
+
+concept: |
+  AI assistants predict plausible code, so they sometimes produce a function, parameter or statement that does not exist, or exists only on another platform. Your reference code has one: `unity_catalog.sql` uses `CREATE ROW ACCESS POLICY`, which is Snowflake syntax. Databricks uses a SQL UDF with `ALTER TABLE ... SET ROW FILTER`.
+
+  What invented code does when it runs, checked on PySpark 4.0.4 and pandas 3.0.2:
+
+  | Invented code | Result |
+  | --- | --- |
+  | `spark.read.delta(path)` | `AttributeError: 'DataFrameReader' object has no attribute 'delta'` |
+  | `df.drop_duplicates(keep="latest")` | `ValueError: keep must be either "first", "last" or False` |
+  | `pd.read_csv(path, encodng="utf-8")` | `TypeError: ... unexpected keyword argument 'encodng'. Did you mean 'encoding'?` |
+  | `CREATE ROW ACCESS POLICY ...` in Spark SQL | `[PARSE_SYNTAX_ERROR] Syntax error at or near 'ROW'` |
+  | `F.col("a").isnotnull()` | `TypeError: 'Column' object is not callable` |
+
+  The last one is sly. The real method is `isNotNull`. PySpark treats an unknown attribute on a column as a **struct field lookup**, so `F.col("a").isnotnull` builds a valid expression for a field named `isnotnull`. Only the call fails. Without the parentheses, the typo would fail later, at analysis, far from the line that caused it.
+
+  Most invented names fail loudly, which makes them cheap to catch **if you run the code**. The expensive cases run: a parameter that exists but means something else, or a function from a newer version than your runtime.
+
+  **Check every API an assistant gives you:**
+
+  1. Find it in the official docs **for your version**: Databricks Runtime 17.3 LTS, PySpark 4.0, pandas 3.0.
+  2. In a notebook, confirm it exists: `hasattr(F, "try_divide")`, `help(pd.DataFrame.merge)`, or `inspect.signature(...)`.
+  3. For SQL, check the statement in the Databricks SQL reference, not a general SQL tutorial. Syntax from Snowflake, T-SQL and PostgreSQL looks alike and differs.
+
+  Treat an unfamiliar name as unverified until a step confirms it.
+
+why_it_matters: |
+  An assistant proposed `CREATE ROW ACCESS POLICY` to restrict survey rows by region. The engineer pasted it into the migration script without running it. The deployment failed in production at 2 a.m. with a parse error, and the table stayed unrestricted until morning. Checking the statement against the Databricks SQL reference would have taken two minutes.
+
+worked_example:
+  language: sql
+  weak:
+    code: |
+      CREATE ROW ACCESS POLICY region_policy
+        AS (region STRING) RETURNS BOOLEAN ->
+        is_member('analysts_' || region);
+      ALTER TABLE research_silver.nat_respondents ADD ROW ACCESS POLICY region_policy ON (region);
+    annotations:
+      - find: "CREATE ROW ACCESS POLICY region_policy"
+        note: "Snowflake syntax. Databricks fails with PARSE_SYNTAX_ERROR."
+      - find: "  is_member('analysts_' || region);"
+        note: "is_member checks workspace groups. Unity Catalog guidance favours is_account_group_member."
+  strong:
+    code: |
+      CREATE FUNCTION research_governance.region_filter(region STRING)
+        RETURN is_account_group_member(concat('analysts_', region));
+
+      ALTER TABLE research_silver.nat_respondents
+        SET ROW FILTER research_governance.region_filter ON (region);
+    annotations:
+      - find: "CREATE FUNCTION research_governance.region_filter(region STRING)"
+        note: "A SQL UDF returning a boolean, in a three-level name."
+      - find: "  SET ROW FILTER research_governance.region_filter ON (region);"
+        note: "The Databricks statement for row filters (Unity Catalog)."
+  takeaway: |
+    Look up every function, parameter and statement for your exact version, and run it on small data before it reaches a pipeline.
+
+exercises:
+  - id: D5-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      An assistant writes `spark.read.delta("/Volumes/research/raw/nat")` for Databricks. What happens?
+    options:
+      - {id: a, text: "AttributeError: DataFrameReader has no attribute 'delta'"}
+      - {id: b, text: "It reads the Delta table"}
+      - {id: c, text: "It reads the files as Parquet"}
+      - {id: d, text: "A warning, then the read succeeds"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The reader has format('delta').load(path) and table(name), but no delta() method."}
+      - {id: r2, text: "Delta tables cannot be read by path."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The method does not exist. Use spark.read.format(\"delta\").load(path) or spark.read.table(name)."
+      - answer: c
+        feedback: "No read happens. The attribute lookup fails first."
+      - answer: d
+        feedback: "Python raises AttributeError at once."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Reading by path works with format('delta').load(path)."
+    hints:
+      - "Is delta() a DataFrameReader method?"
+      - "Check with hasattr(spark.read, 'delta')."
+      - "No."
+    explanation: |
+      Plausible, and invented. `hasattr` or the PySpark API reference answers in seconds.
+
+  - id: D5-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      What is printed? (PySpark 4.0)
+    code: |
+      from pyspark.sql import functions as F
+
+      expr = F.col("region").isnotnull
+      print(type(expr).__name__)
+    answer: "Column"
+    wrong_answers:
+      - answer: "method"
+        feedback: "The real method is isNotNull, with capitals. isnotnull is treated as a struct field name."
+      - answer: "AttributeError"
+        feedback: "Column turns unknown attributes into field lookups, so no error appears here."
+    hints:
+      - "What does Column do with an unknown attribute?"
+      - "It assumes a struct field."
+      - "The result is another Column."
+    explanation: |
+      `F.col("region").isnotnull` means "the field isnotnull inside the struct region". Calling it raises `TypeError: 'Column' object is not callable`.
+
+  - id: D5-L1-E3
+    type: spot_bug
+    difficulty: 2
+    language: sql
+    prompt: |
+      An assistant wrote this Databricks SQL to mask the postcode column for non-analysts. Tap the line that does not exist in Databricks, then rewrite it with the Databricks statement.
+    code: |
+      CREATE FUNCTION research_governance.mask_postcode(p STRING)
+        RETURN CASE WHEN is_account_group_member('analysts') THEN p ELSE '***' END;
+      CREATE MASKING POLICY postcode_mask ON research_silver.nat_respondents (postcode);
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: set_mask
+          type: required
+          pattern: "ALTER\\s+TABLE\\s+research_silver\\.nat_respondents\\s+ALTER\\s+COLUMN\\s+postcode\\s+SET\\s+MASK\\s+research_governance\\.mask_postcode"
+          message: "Use ALTER TABLE research_silver.nat_respondents ALTER COLUMN postcode SET MASK research_governance.mask_postcode."
+        - id: no_policy
+          type: forbidden
+          pattern: "MASKING\\s+POLICY"
+          message: "CREATE MASKING POLICY is Snowflake syntax."
+    fix_solution: |
+      CREATE FUNCTION research_governance.mask_postcode(p STRING)
+        RETURN CASE WHEN is_account_group_member('analysts') THEN p ELSE '***' END;
+      ALTER TABLE research_silver.nat_respondents ALTER COLUMN postcode SET MASK research_governance.mask_postcode;
+    wrong_answers:
+      - lines: [1]
+        feedback: "A SQL UDF is exactly what Databricks column masks use."
+      - lines: [2]
+        feedback: "is_account_group_member is the recommended check in Unity Catalog."
+    hints:
+      - "Which statement comes from another platform?"
+      - "Databricks binds masks with ALTER TABLE."
+      - "ALTER COLUMN ... SET MASK."
+    explanation: |
+      Databricks column masks: a SQL UDF, then `ALTER TABLE ... ALTER COLUMN ... SET MASK`.
+
+  - id: D5-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `unknown_params(func: Callable[..., object], params: list[str]) -> list[str] | None`. Use `inspect.signature` to return the names in `params` that `func` does not accept, in the order given. If `func` accepts `**kwargs`, return `None`: you cannot tell from the signature alone.
+    starter: |
+      def unknown_params(func, params):
+          return []
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: unknown_params
+          typed: true
+          docstring: true
+          message: "Give `unknown_params` type hints and a docstring."
+        - id: uses_inspect
+          kind: requires_call
+          name: signature
+          message: "Use inspect.signature to read the parameters."
+      tests:
+        - id: invented
+          code: |
+            def read_delivery(path, encoding="utf-8", *, sep=","):
+                return path
+            assert unknown_params(read_delivery, ["encodng", "sep", "delimiter"]) == ["encodng", "delimiter"]
+          message: "Return the names the function does not accept, in order. Keyword-only parameters count as accepted."
+        - id: all_known
+          code: |
+            def f(a, b=1):
+                return a
+            assert unknown_params(f, ["a", "b"]) == []
+          message: "An empty list when every name exists."
+        - id: kwargs
+          code: |
+            def g(a, **options):
+                return a
+            assert unknown_params(g, ["anything"]) is None
+          message: "With **kwargs, any name is accepted by the signature. Return None."
+    solution: |
+      import inspect
+      from collections.abc import Callable
+
+
+      def unknown_params(func: Callable[..., object], params: list[str]) -> list[str] | None:
+          """Parameter names that a function does not accept.
+
+          Args:
+              func: Function to check.
+              params: Names suggested for it, for example by an assistant.
+
+          Returns:
+              Unknown names in order, or None if func takes **kwargs.
+          """
+          parameters = inspect.signature(func).parameters
+          if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()):
+              return None
+          return [name for name in params if name not in parameters]
+    seeded_bugs:
+      - |
+        import inspect
+        from collections.abc import Callable
+
+
+        def unknown_params(func: Callable[..., object], params: list[str]) -> list[str] | None:
+            """Ignores **kwargs."""
+            parameters = inspect.signature(func).parameters
+            return [name for name in params if name not in parameters]
+    wrong_answers:
+      - answer: |
+          import inspect
+          from collections.abc import Callable
+
+
+          def unknown_params(func: Callable[..., object], params: list[str]) -> list[str] | None:
+              """Ignores **kwargs."""
+              parameters = inspect.signature(func).parameters
+              return [name for name in params if name not in parameters]
+        triggers: kwargs
+    hints:
+      - "`inspect.signature(func).parameters` maps names to Parameter objects."
+      - "`p.kind is inspect.Parameter.VAR_KEYWORD` marks **kwargs."
+      - "Keep the order of params."
+    explanation: |
+      A signature check catches an invented parameter before the code runs. With **kwargs, only the docs can answer.
+
+  - id: D5-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Set the team rule for APIs suggested by an assistant.
+    slots:
+      - id: check
+        label: "Before code with a new function or parameter is merged"
+        options:
+          - {id: docs, text: "Link the official docs page for our version in the pull request"}
+          - {id: trust, text: "Accept it if the assistant is confident"}
+        answer: docs
+      - id: sql
+        label: "SQL statements such as row filters and masks"
+        options:
+          - {id: dbx_ref, text: "Checked against the Databricks SQL reference and run in a dev workspace"}
+          - {id: generic, text: "Checked against a general SQL tutorial"}
+        answer: dbx_ref
+      - id: unverified
+        label: "A function you cannot find in the docs"
+        options:
+          - {id: remove, text: "Do not use it. Mark it unverified and find a documented alternative"}
+          - {id: try, text: "Use it if it runs without error"}
+        answer: remove
+    model_answer: |
+      - A docs link for the right version turns "looks right" into "checked".
+      - SQL dialects share keywords and differ in statements. Only the platform reference counts.
+      - Undocumented behaviour can change or disappear without notice.
+    wrong_answers:
+      - answer: {check: trust}
+        feedback: "Assistants state invented APIs with the same confidence as real ones."
+      - answer: {sql: generic}
+        feedback: "CREATE ROW ACCESS POLICY appears in tutorials. It is Snowflake, not Databricks."
+      - answer: {unverified: try}
+        feedback: "Running is necessary, not sufficient. Undocumented behaviour has no guarantee."
+    hints:
+      - "What proves an API exists for your version?"
+      - "Which reference covers Databricks SQL?"
+      - "What does 'undocumented' guarantee?"
+    explanation: |
+      Docs for your version, the platform's own SQL reference, and no undocumented APIs.
+
+recap:
+  - front: "CREATE ROW ACCESS POLICY"
+    back: "Snowflake syntax. Databricks: SQL UDF plus ALTER TABLE ... SET ROW FILTER."
+  - front: "F.col('a').isnotnull()"
+    back: "Unknown attribute becomes a struct field lookup, then 'Column' object is not callable. The method is isNotNull."
+  - front: "Three ways to confirm an API exists"
+    back: "Official docs for your version, hasattr or help() in a notebook, inspect.signature for parameters."
+  - front: "The costly invented-API case"
+    back: "Code that runs: a real parameter with a different meaning, or a function from a newer version."
+
+claims:
+  - claim: "PySpark 4.0.4: spark.read.delta and DataFrameWriter.saveAsDelta raise AttributeError; F.col('a').isnotnull is a Column and calling it raises TypeError; CREATE ROW ACCESS POLICY raises PARSE_SYNTAX_ERROR."
+    status: verified
+    source: "Local run on PySpark 4.0.4, September 2026."
+  - claim: "pandas 3.0.2: drop_duplicates(keep='latest') raises ValueError; read_csv(encodng=...) raises TypeError with a 'Did you mean' hint."
+    status: verified
+    source: "Local run on pandas 3.0.2 with CPython 3.13, September 2026."
+  - claim: "Databricks row filters use a SQL UDF and ALTER TABLE ... SET ROW FILTER; column masks use ALTER TABLE ... ALTER COLUMN ... SET MASK."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/manually-apply (checked 2026-09-25)"

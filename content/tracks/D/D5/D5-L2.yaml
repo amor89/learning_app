@@ -1,0 +1,309 @@
+id: D5-L2
+title: Deprecated APIs and version mismatches
+
+concept: |
+  An assistant learned from years of code written for older versions. It often suggests an API that worked in 2021 and has since been deprecated, renamed or removed. Your reference `observability.py` uses `datetime.utcnow()`, deprecated from Python 3.12.
+
+  Examples that matter for this course, checked in September 2026:
+
+  | Old code | Current state | Use instead |
+  | --- | --- | --- |
+  | `datetime.utcnow()` | Deprecated, Python 3.12 | `datetime.now(timezone.utc)` |
+  | `df.append(other)` | Removed from pandas (gone in 3.0) | `pd.concat([df, other])` |
+  | `df.applymap(f)` | Removed in pandas 3.0 | `df.map(f)` |
+  | `df["a"][0] = x` | Never updates `df` under pandas 3 Copy-on-Write | `df.loc[0, "a"] = x` |
+  | `import distutils` | Removed in Python 3.12 | `packaging`, `setuptools` |
+  | `input_file_name()` | Not supported from Databricks Runtime 17.3 LTS | `_metadata.file_path` |
+  | `mssparkutils` in Fabric | Being retired | `notebookutils` |
+
+  The chained assignment row is the dangerous one. pandas 3.0.2 emits a `ChainedAssignmentError` warning and leaves the DataFrame unchanged. If warnings are hidden, the update simply does not happen.
+
+  **Version mismatches** cause the opposite problem: code for a **newer** version than yours. A function added in PySpark 4.1 fails on Databricks Runtime 17.3 LTS, which ships Spark 4.0. Pyodide in this app runs pandas 3.0.2. Your laptop might run 3.0.6.
+
+  Defend in three ways:
+
+  - **State the versions** in every prompt, and in the project: `VERSIONS.md`, `pyproject.toml` pins, the runtime in the job definition.
+  - **Show warnings** in tests. Run pytest with `-W error::DeprecationWarning` for your own code, so a deprecated call fails the build.
+  - **Compare versions as numbers**, never as strings. `"3.10" < "3.9"` is `True` as text.
+
+why_it_matters: |
+  An assistant fixed a data cleaning function by adding `df["weight"][mask] = 1.0` to cap weights. Tests passed on a developer laptop with pandas 1.5. In the pandas 3 environment, the cap never happened. Weights above 5 reached gold unchanged for four waves. The warning had been filtered out in the job's logging configuration.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import pandas as pd
+
+      def cap_weights(df: pd.DataFrame, cap: float) -> pd.DataFrame:
+          """Cap weights at cap."""
+          df["final_weight"][df["final_weight"] > cap] = cap
+          return df.applymap(lambda v: v)
+    annotations:
+      - find: 'df["final_weight"][df["final_weight"] > cap] = cap'
+        note: "Chained assignment. Under pandas 3 Copy-on-Write it never changes df."
+      - find: "return df.applymap(lambda v: v)"
+        note: "applymap no longer exists in pandas 3.0: AttributeError."
+  strong:
+    code: |
+      import pandas as pd
+
+      def cap_weights(df: pd.DataFrame, cap: float) -> pd.DataFrame:
+          """Return a copy with final_weight capped at cap. Written for pandas 3.0."""
+          out = df.copy()
+          out.loc[out["final_weight"] > cap, "final_weight"] = cap
+          return out
+    annotations:
+      - find: 'out.loc[out["final_weight"] > cap, "final_weight"] = cap'
+        note: "One .loc call: row mask and column together. Works in every pandas version."
+      - find: '"""Return a copy with final_weight capped at cap. Written for pandas 3.0."""'
+        note: "The docstring states the target version."
+  takeaway: |
+    Assume suggested code targets some other version. Check deprecations for yours, turn warnings into test failures, and compare versions numerically.
+
+exercises:
+  - id: D5-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      An assistant adds `F.input_file_name()` to your bronze job on Databricks Runtime 17.3 LTS. What do you use instead?
+    options:
+      - {id: a, text: "The _metadata.file_path column"}
+      - {id: b, text: "Keep input_file_name(), it is fine"}
+      - {id: c, text: "os.path.basename on the DataFrame"}
+      - {id: d, text: "A Python UDF reading the path"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Databricks release notes state input_file_name is no longer supported from 17.3 LTS. The file metadata column replaces it."}
+      - {id: r2, text: "input_file_name was renamed file_path."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "It is no longer supported on 17.3 LTS and above."
+      - answer: c
+        feedback: "os.path works on strings, not on DataFrame columns."
+      - answer: d
+        feedback: "A UDF cannot see the source file. The metadata column can."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. It was not renamed. A different mechanism, the _metadata column, replaces it."
+    hints:
+      - "Check the 17.3 LTS release notes."
+      - "File details live in a hidden metadata column."
+      - "_metadata.file_path."
+    explanation: |
+      Select `F.col("_metadata.file_path")` when reading files.
+
+  - id: D5-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print with pandas 3.0?
+    code: |
+      import pandas as pd
+
+      df = pd.DataFrame({"w": [1.0, 9.0]})
+      df["w"][1] = 5.0
+      print(df["w"].tolist())
+    answer: "[1.0, 9.0]"
+    wrong_answers:
+      - answer: "[1.0, 5.0]"
+        feedback: "That was pandas 1.x behaviour. Under Copy-on-Write, df['w'] behaves as a copy, so the original is unchanged."
+    hints:
+      - "What does pandas 3 do with chained assignment?"
+      - "The intermediate object behaves as a copy."
+      - "The original keeps 9.0."
+    explanation: |
+      pandas 3 warns with ChainedAssignmentError and leaves df unchanged. Use `df.loc[1, "w"] = 5.0`.
+
+  - id: D5-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Update this code from pandas 1.x to pandas 3.0.
+    template: |
+      combined = pd.[[g1]]([waves, new_wave], ignore_index=True)
+      labels = combined.[[g2]](str.strip)
+    gaps:
+      g1: {accepted: [concat]}
+      g2: {accepted: [map]}
+    wrong_answers:
+      - answer: {g2: applymap}
+        feedback: "applymap was removed in pandas 3.0. DataFrame.map replaces it."
+    hints:
+      - "DataFrame.append is gone. What joins frames end to end?"
+      - "applymap was renamed."
+      - "`concat` and `map`."
+    explanation: |
+      `pd.concat` replaces `append`. `DataFrame.map` replaces `applymap`.
+
+  - id: D5-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `version_at_least(installed: str, required: str) -> bool` comparing dotted versions such as `"3.0.2"` and `"3.10"` numerically. Ignore anything after the numeric part of each segment (`"4.0.4rc1"` counts as 4.0.4). Missing segments count as 0, so `"3.0"` equals `"3.0.0"`. Raise `ValueError` if a segment has no leading digits.
+    starter: |
+      def version_at_least(installed, required):
+          return installed >= required
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: version_at_least
+          typed: true
+          docstring: true
+          message: "Give `version_at_least` type hints and a docstring."
+      tests:
+        - id: numeric
+          code: |
+            assert version_at_least("3.10", "3.9") is True
+            assert version_at_least("3.9", "3.10") is False
+          message: "3.10 is newer than 3.9. Compare numbers, not strings."
+        - id: padding
+          code: |
+            assert version_at_least("3.0", "3.0.0") is True
+            assert version_at_least("4.0.4", "4.1") is False
+          message: "Pad missing segments with 0."
+        - id: suffix
+          code: |
+            assert version_at_least("4.0.4rc1", "4.0.4") is True
+          message: "Ignore suffixes after the digits in each segment."
+        - id: invalid
+          code: |
+            try:
+                version_at_least("abc", "1.0")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "A segment without digits is invalid."
+    solution: |
+      import re
+
+      SEGMENT = re.compile(r"^(\d+)")
+
+
+      def _parse(version: str) -> tuple[int, ...]:
+          """Numeric segments of a dotted version string."""
+          parts = []
+          for segment in version.split("."):
+              match = SEGMENT.match(segment)
+              if match is None:
+                  raise ValueError(f"invalid version segment {segment!r} in {version!r}")
+              parts.append(int(match.group(1)))
+          return tuple(parts)
+
+
+      def version_at_least(installed: str, required: str) -> bool:
+          """True if installed is the same as or newer than required.
+
+          Args:
+              installed: Installed version, such as "3.0.2".
+              required: Minimum version, such as "3.0".
+
+          Returns:
+              Whether installed >= required, compared numerically.
+
+          Raises:
+              ValueError: If a version has a segment without digits.
+          """
+          a, b = _parse(installed), _parse(required)
+          width = max(len(a), len(b))
+          return a + (0,) * (width - len(a)) >= b + (0,) * (width - len(b))
+    seeded_bugs:
+      - |
+        def version_at_least(installed: str, required: str) -> bool:
+            """String comparison."""
+            return installed >= required
+      - |
+        def version_at_least(installed: str, required: str) -> bool:
+            """No padding."""
+            a = tuple(int(p) for p in installed.split("."))
+            b = tuple(int(p) for p in required.split("."))
+            return a >= b
+    wrong_answers:
+      - answer: |
+          def version_at_least(installed: str, required: str) -> bool:
+              """String comparison."""
+              return installed >= required
+        triggers: numeric
+    hints:
+      - "Split on dots and read the leading digits of each part."
+      - "Compare tuples of ints."
+      - "Pad the shorter tuple with zeros."
+    explanation: |
+      Tuples of integers compare element by element, which is version order. In real projects, use `packaging.version.Version`.
+
+  - id: D5-L2-E5
+    type: spot_bug
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      This function caps weights, but under pandas 3 the weights come back unchanged. Tap the line, then fix it without changing the caller's DataFrame.
+    code: |
+      import pandas as pd
+
+      def cap_weights(df: pd.DataFrame, cap: float) -> pd.DataFrame:
+          """Return a copy with final_weight capped at cap."""
+          out = df.copy()
+          out["final_weight"][out["final_weight"] > cap] = cap
+          return out
+    bug_lines: [6]
+    fix_checker:
+      kind: python
+      tests:
+        - id: capped
+          code: |
+            import pandas as pd
+            df = pd.DataFrame({"final_weight": [1.0, 9.0]})
+            assert cap_weights(df, 5.0)["final_weight"].tolist() == [1.0, 5.0]
+          message: "Weights above the cap must be set to the cap. Use one .loc call with the row mask and the column."
+        - id: pure
+          code: |
+            import pandas as pd
+            df = pd.DataFrame({"final_weight": [1.0, 9.0]})
+            cap_weights(df, 5.0)
+            assert df["final_weight"].tolist() == [1.0, 9.0]
+          message: "Leave the caller's DataFrame unchanged."
+    fix_solution: |
+      import pandas as pd
+
+      def cap_weights(df: pd.DataFrame, cap: float) -> pd.DataFrame:
+          """Return a copy with final_weight capped at cap."""
+          out = df.copy()
+          out.loc[out["final_weight"] > cap, "final_weight"] = cap
+          return out
+    wrong_answers:
+      - lines: [5]
+        feedback: "The copy is right: it keeps the caller's frame unchanged."
+    hints:
+      - "Two indexing steps in one assignment."
+      - "Chained assignment."
+      - "out.loc[mask, 'final_weight'] = cap."
+    explanation: |
+      Index once with `.loc[rows, column]`. Chained indexing sets values on a temporary copy.
+
+recap:
+  - front: "Chained assignment in pandas 3"
+    back: "df['a'][i] = x never updates df (Copy-on-Write). Use df.loc[i, 'a'] = x."
+  - front: "pandas 3 removals"
+    back: "DataFrame.append (use pd.concat) and applymap (use DataFrame.map)."
+  - front: "input_file_name() on DBR 17.3 LTS"
+    back: "Not supported. Use _metadata.file_path."
+  - front: "Comparing version strings"
+    back: "Never as text: '3.10' < '3.9'. Compare integer tuples or use packaging.version."
+
+claims:
+  - claim: "pandas 3.0.2: no DataFrame.append or applymap; DataFrame.map exists; default string dtype 'str'; chained assignment emits ChainedAssignmentError and leaves the frame unchanged. Python 3.13: distutils missing; utcnow deprecated."
+    status: verified
+    source: "Local run on pandas 3.0.2 with CPython 3.13.12, September 2026."
+  - claim: "input_file_name is no longer supported from Databricks Runtime 17.3 LTS."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/release-notes/runtime/17.3lts (checked 2026-09-25)"
+  - claim: "mssparkutils is renamed NotebookUtils and will be retired."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-engineering/notebook-utilities (see lesson C5-L1)"

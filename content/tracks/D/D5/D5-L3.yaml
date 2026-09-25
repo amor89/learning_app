@@ -1,0 +1,375 @@
+id: D5-L3
+title: Five review checks for AI-written code
+
+concept: |
+  Code from an assistant usually runs. The problems hide in what it leaves out. Review it with five checks.
+
+  **1. Missing edge cases.** Assistants write the happy path. Ask what happens with an empty DataFrame, a zero total, a null, a duplicate key, a single row. Your reference `check_weight_distribution` fails on an empty wave for exactly this reason (lesson D4-L3).
+
+  **2. Self-confirming tests.** A test that computes its expected value with the same formula as the code proves nothing:
+
+  ```python
+  def test_share():
+      assert share(3, 4) == 3 / 4   # repeats the code
+  ```
+
+  If the formula is wrong, the test is wrong the same way. Write expected values by hand, from small data you understand: `assert share(3, 4) == 0.75`, `assert share(0, 0) is None`.
+
+  **3. Secrets in code.** Assistants fill in placeholders that look like real tokens, or keep the one you pasted into the prompt. A token in a notebook ends up in Git history. Read secrets at run time: `dbutils.secrets.get(scope, key)` on Databricks, `notebookutils.credentials.getSecret(vault_url, name)` in Fabric, or an environment variable on your laptop.
+
+  **4. Over-engineering.** A 12-line task arrives as an abstract base class, a factory and a config object. Every extra layer is code to test and review. Ask for the simplest version that meets the requirement, then add structure when a second use case appears.
+
+  **5. The wrong filter context in DAX.** `CALCULATE(SUM(fact_reach[weighted_reach]), ALL(fact_reach))` removes **every** filter on the fact table, including wave and region slicers. A "share of total" measure then divides by the all-time, all-region total. Remove only the filter the measure means to ignore: `ALL(dim_brand)` for a share across brands.
+
+  Each check takes a minute. Each catches a class of bug that runs without error.
+
+why_it_matters: |
+  An assistant wrote a reach function and its tests in one reply. All 12 tests passed. Each test computed its expected value with the same expression as the function, including the same missing `is None` check. A reviewer replaced three expected values with hand-worked numbers, and two tests failed at once: the function returned 0.0 where it should have returned None.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      API_TOKEN = "paste-your-token-here-EXAMPLE"
+
+      def share(part: float, total: float) -> float:
+          return part / total
+
+      def test_share():
+          assert share(3, 4) == 3 / 4
+    annotations:
+      - find: 'API_TOKEN = "paste-your-token-here-EXAMPLE"'
+        note: "A secret in code. The real token replaces the placeholder and lands in Git."
+      - find: "    return part / total"
+        note: "No guard for a zero total."
+      - find: "    assert share(3, 4) == 3 / 4"
+        note: "The expected value repeats the code. It cannot catch a wrong formula."
+  strong:
+    code: |
+      import os
+
+      def share(part: float, total: float) -> float | None:
+          """part / total, or None when total is 0."""
+          return None if total == 0 else part / total
+
+      def api_token() -> str:
+          """Read the token at run time, never from source code."""
+          return os.environ["SURVEY_API_TOKEN"]
+
+      def test_share():
+          assert share(3, 4) == 0.75
+          assert share(0, 0) is None
+    annotations:
+      - find: "    return None if total == 0 else part / total"
+        note: "The edge case is handled and documented."
+      - find: '    return os.environ["SURVEY_API_TOKEN"]'
+        note: "The secret stays outside the code. On Databricks use dbutils.secrets.get."
+      - find: "    assert share(0, 0) is None"
+        note: "Hand-written expected values, including the edge case."
+  takeaway: |
+    Review AI code for edge cases, self-confirming tests, secrets, needless structure and, in DAX, filters removed too widely.
+
+exercises:
+  - id: D5-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      An assistant writes `assert weighted_pct(r, b) == r / b * 100` as the test for `weighted_pct`. What is wrong with it?
+    options:
+      - {id: a, text: "It repeats the implementation, so a wrong formula passes"}
+      - {id: b, text: "It should use pytest.approx"}
+      - {id: c, text: "Tests must not use multiplication"}
+      - {id: d, text: "Nothing: it checks the output"}
+    answer: a
+    reasons:
+      - {id: r1, text: "A test's expected value must come from outside the code: small data worked by hand."}
+      - {id: r2, text: "Tests should never call the function they test."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "approx helps with floats, but the test still repeats the formula."
+      - answer: c
+        feedback: "Arithmetic is fine. Copying the implementation is the problem."
+      - answer: d
+        feedback: "It checks that the code equals itself."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Tests call the function. The expected value must be independent."
+    hints:
+      - "Where does the expected value come from?"
+      - "From the same formula."
+      - "Self-confirming."
+    explanation: |
+      Write `assert weighted_pct(25, 200) == 12.5` and `assert weighted_pct(1, 0) is None`: numbers you worked out yourself.
+
+  - id: D5-L3-E2
+    type: spot_bug
+    difficulty: 2
+    language: python
+    prompt: |
+      An assistant produced this Databricks helper. Tap the line that must never be committed, then fix it to read the value from the secret scope `survey-api`, key `token`.
+    code: |
+      import requests
+
+      API_TOKEN = "tok_EXAMPLE_do_not_use_0000"
+
+      def fetch_wave(wave_id: str) -> dict[str, object]:
+          """Fetch wave metadata from the survey platform."""
+          headers = {"Authorization": f"Bearer {API_TOKEN}"}
+          return requests.get(f"https://survey.example/api/waves/{wave_id}", headers=headers, timeout=30).json()
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_literal
+          kind: forbids_pattern
+          pattern: "tok_EXAMPLE"
+          message: "Remove the literal token."
+        - id: secret_scope
+          kind: requires_pattern
+          pattern: "dbutils\\.secrets\\.get\\(\\s*(scope\\s*=\\s*)?[\"']survey-api[\"']\\s*,\\s*(key\\s*=\\s*)?[\"']token[\"']\\s*\\)"
+          message: "Read it with dbutils.secrets.get(\"survey-api\", \"token\")."
+    fix_solution: |
+      import requests
+
+      def fetch_wave(wave_id: str) -> dict[str, object]:
+          """Fetch wave metadata from the survey platform."""
+          token = dbutils.secrets.get("survey-api", "token")
+          headers = {"Authorization": f"Bearer {token}"}
+          return requests.get(f"https://survey.example/api/waves/{wave_id}", headers=headers, timeout=30).json()
+    wrong_answers:
+      - lines: [7]
+        feedback: "The header format is right. The value it uses comes from a literal on line 3."
+      - lines: [8]
+        feedback: "The request is fine, with a timeout even. The secret is the problem."
+    hints:
+      - "Which line would leak through Git history?"
+      - "A literal credential."
+      - "Read it at run time from the scope."
+    explanation: |
+      Secrets come from a secret scope at run time. Databricks also redacts values read with `dbutils.secrets.get` in notebook output.
+
+  - id: D5-L3-E3
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A report has a wave slicer set to W14. An assistant's measure is `Share = DIVIDE(SUM(fact_reach[weighted_reach]), CALCULATE(SUM(fact_reach[weighted_reach]), ALL(fact_reach)))`. What is the denominator?
+    options:
+      - {id: a, text: "Weighted reach for all waves, all regions and all brands"}
+      - {id: b, text: "Weighted reach for W14 across all brands"}
+      - {id: c, text: "Weighted reach for W14 for the current brand"}
+      - {id: d, text: "An error, because ALL needs a column"}
+    answer: a
+    reasons:
+      - {id: r1, text: "ALL(fact_reach) removes every filter on the fact table, including the wave slicer."}
+      - {id: r2, text: "CALCULATE always ignores slicers."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That is what ALL(dim_brand) would give. ALL on the fact table removes the wave filter too."
+      - answer: c
+        feedback: "That is the numerator's context."
+      - answer: d
+        feedback: "ALL accepts a table. That is exactly the problem here."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. CALCULATE keeps slicer filters unless a modifier such as ALL removes them."
+    hints:
+      - "What does ALL on a whole table remove?"
+      - "Every filter on it."
+      - "Including the wave."
+    explanation: |
+      Name the dimension whose filter you mean to remove: `ALL(dim_brand)` keeps the wave and region filters.
+
+  - id: D5-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      An assistant wrote `weighted_mean(values, weights)` as `sum(v * w for v, w in zip(values, weights)) / sum(weights)`. Rewrite it with the edge cases it missed. Return `None` if the lists are empty or the weight total is 0. Skip pairs where the value or the weight is `None`. Raise `ValueError` if the lists differ in length or any weight is negative.
+    starter: |
+      def weighted_mean(values, weights):
+          return sum(v * w for v, w in zip(values, weights)) / sum(weights)
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: weighted_mean
+          typed: true
+          docstring: true
+          message: "Give `weighted_mean` type hints and a docstring."
+      tests:
+        - id: known
+          code: |
+            assert weighted_mean([10.0, 20.0], [1.0, 3.0]) == 17.5
+          message: "(10 x 1 + 20 x 3) / 4 = 17.5."
+        - id: empty_zero
+          code: |
+            assert weighted_mean([], []) is None
+            assert weighted_mean([5.0], [0.0]) is None
+          message: "Empty lists and a zero weight total return None."
+        - id: none_pairs
+          code: |
+            assert weighted_mean([10.0, None, 30.0], [1.0, 2.0, None]) == 10.0
+          message: "Skip pairs with a None value or weight."
+        - id: invalid
+          code: |
+            for vals, ws in (([1.0], [1.0, 2.0]), ([1.0], [-1.0])):
+                try:
+                    weighted_mean(vals, ws)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {vals}, {ws}")
+          message: "zip silently truncates different lengths. Raise ValueError, and for negative weights too."
+    solution: |
+      def weighted_mean(values: list[float | None], weights: list[float | None]) -> float | None:
+          """Weighted mean that skips missing pairs.
+
+          Args:
+              values: Values, None for missing.
+              weights: Weights, None for missing.
+
+          Returns:
+              The weighted mean, or None if there is nothing to average.
+
+          Raises:
+              ValueError: If lengths differ or a weight is negative.
+          """
+          if len(values) != len(weights):
+              raise ValueError("values and weights differ in length")
+          pairs = [(v, w) for v, w in zip(values, weights) if v is not None and w is not None]
+          if any(w < 0 for _, w in pairs):
+              raise ValueError("weights must not be negative")
+          total = sum(w for _, w in pairs)
+          if total == 0:
+              return None
+          return sum(v * w for v, w in pairs) / total
+    seeded_bugs:
+      - |
+        def weighted_mean(values: list[float | None], weights: list[float | None]) -> float | None:
+            """Relies on zip."""
+            pairs = [(v, w) for v, w in zip(values, weights) if v is not None and w is not None]
+            total = sum(w for _, w in pairs)
+            if total == 0:
+                return None
+            return sum(v * w for v, w in pairs) / total
+    wrong_answers:
+      - answer: |
+          def weighted_mean(values: list[float | None], weights: list[float | None]) -> float | None:
+              """Relies on zip."""
+              pairs = [(v, w) for v, w in zip(values, weights) if v is not None and w is not None]
+              total = sum(w for _, w in pairs)
+              if total == 0:
+                  return None
+              return sum(v * w for v, w in pairs) / total
+        triggers: invalid
+    hints:
+      - "Check lengths before zip: zip stops at the shorter list."
+      - "Filter pairs with `is not None`."
+      - "Guard the total before dividing."
+    explanation: |
+      Five edge cases the one-liner missed: different lengths, None values, negative weights, empty input and a zero total.
+
+  - id: D5-L3-E5
+    type: refactor
+    difficulty: 4
+    language: python
+    prompt: |
+      An assistant answered "flag weights above a cap" with the code below. Replace it with one function, `flag_high_weights(weights: list[float], cap: float) -> list[int]`, returning the indexes of weights above `cap`. No classes.
+    starter: |
+      from abc import ABC, abstractmethod
+
+
+      class WeightRule(ABC):
+          @abstractmethod
+          def check(self, weight):
+              ...
+
+
+      class CapRule(WeightRule):
+          def __init__(self, cap):
+              self.cap = cap
+
+          def check(self, weight):
+              return weight > self.cap
+
+
+      class RuleFactory:
+          @staticmethod
+          def create(kind, **kwargs):
+              if kind == "cap":
+                  return CapRule(**kwargs)
+              raise ValueError(kind)
+
+
+      def flag_high_weights(weights, cap):
+          rule = RuleFactory.create("cap", cap=cap)
+          return [i for i, w in enumerate(weights) if rule.check(w)]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: flag_high_weights
+          typed: true
+          docstring: true
+          message: "Give `flag_high_weights` type hints and a docstring."
+        - id: no_classes
+          kind: forbids_pattern
+          pattern: "^\\s*class\\s"
+          message: "The task needs no classes. Keep one small function."
+      tests:
+        - id: flags
+          code: |
+            assert flag_high_weights([1.0, 6.0, 5.0, 9.0], 5.0) == [1, 3]
+          message: "Return indexes of weights strictly above the cap."
+        - id: empty
+          code: |
+            assert flag_high_weights([], 5.0) == []
+          message: "No weights, no flags."
+    solution: |
+      def flag_high_weights(weights: list[float], cap: float) -> list[int]:
+          """Indexes of weights strictly above cap.
+
+          Args:
+              weights: Respondent weights.
+              cap: Largest allowed weight.
+
+          Returns:
+              Indexes of weights greater than cap.
+          """
+          return [i for i, w in enumerate(weights) if w > cap]
+    seeded_bugs:
+      - |
+        def flag_high_weights(weights: list[float], cap: float) -> list[int]:
+            """Uses >= instead of >."""
+            return [i for i, w in enumerate(weights) if w >= cap]
+    wrong_answers:
+      - answer: |
+          def flag_high_weights(weights: list[float], cap: float) -> list[int]:
+              """Uses >= instead of >."""
+              return [i for i, w in enumerate(weights) if w >= cap]
+        triggers: flags
+    hints:
+      - "What does the code do, stripped of structure?"
+      - "One comparison per weight."
+      - "A list comprehension with enumerate."
+    explanation: |
+      Three classes and a factory wrapped one comparison. Add structure when a second rule actually arrives.
+
+recap:
+  - front: "Five review checks for AI code"
+    back: "Edge cases, self-confirming tests, secrets, over-engineering, DAX filter context."
+  - front: "Self-confirming test"
+    back: "Expected value computed with the code's own formula. Use hand-worked values instead."
+  - front: "Where secrets live"
+    back: "Secret scopes or Key Vault, read at run time. Never in code or prompts."
+  - front: "ALL(fact_table) in a share measure"
+    back: "Removes every filter, including wave and region slicers. Use ALL on the one dimension you mean."
+
+claims:
+  - claim: "dbutils.secrets.get(scope, key) reads a secret and values are redacted in notebook output."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/security/secrets/ (checked 2026-09-25)"
+  - claim: "In DAX, ALL(table) inside CALCULATE removes all filters on that table; ALL on one dimension keeps other filters."
+    status: verified
+    source: "Taught and tested in lesson C6-L2; DAX CALCULATE and ALL semantics per Microsoft Learn DAX reference."
