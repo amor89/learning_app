@@ -1,0 +1,399 @@
+id: D7-L2
+title: "Review practice: PySpark and Spark SQL"
+
+concept: |
+  Nine snippets of PySpark and Spark SQL, each with one seeded bug. Most come straight from your reference pipeline's known defects. The answer key stays hidden until you submit.
+
+  Use the same routine as lesson D7-L1: read the goal, walk the lines, ask what each line assumes. Spark adds its own questions:
+
+  - **Imports.** Is `sum`, `min`, `max`, `round` or `filter` imported by name from `pyspark.sql.functions`? Is `functions as F` used instead?
+  - **Filters.** Does a comparison with a nullable column drop nulls? Is a boolean compared with `== True`?
+  - **Grain.** Does every `groupBy` include each grain column the docstring names? Does every join keep the grain?
+  - **Aggregates.** Can a `sum(when(...))` return null? Is a division guarded?
+  - **Passes over the data.** Are there several `count()` calls on an uncached DataFrame, where one `agg` would do?
+  - **Writes.** Does a MERGE source hold one row per key? Is a rename silently skipped when the source column is missing?
+  - **SQL.** Does `NOT IN` meet a nullable subquery?
+
+  For each snippet, tap the line, then write the fix. The checker tests the fix statically: it looks for the pattern the standard requires. Your score counts bugs found and fixes proposed.
+
+  When you finish, compare your list of misses with the checklist above. The item you missed most is the one to add to your personal review routine.
+
+why_it_matters: |
+  Spark code fails quietly more often than Python code. A shadowed import fails loudly. A missing grain column, a null sum or a duplicate MERGE key can pass every run and still publish wrong numbers. Practice on the defects from your own pipeline trains your eye for the ones that will appear in its next version.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      from pyspark.sql.functions import col, sum
+
+      metrics = silver.filter(col("in_scope") == True).groupBy("wave_id").agg(sum("final_weight"))
+    annotations:
+      - find: "from pyspark.sql.functions import col, sum"
+        note: "Shadows Python's sum for the whole module."
+      - find: 'metrics = silver.filter(col("in_scope") == True).groupBy("wave_id").agg(sum("final_weight"))'
+        note: "`== True` trips ruff E712. Filter on the column directly."
+  strong:
+    code: |
+      from pyspark.sql import functions as F
+
+      metrics = silver.filter(F.col("in_scope")).groupBy("wave_id").agg(F.sum("final_weight"))
+    annotations:
+      - find: "from pyspark.sql import functions as F"
+        note: "Python built-ins keep their meaning."
+      - find: 'metrics = silver.filter(F.col("in_scope")).groupBy("wave_id").agg(F.sum("final_weight"))'
+        note: "A boolean column is already a condition."
+  takeaway: |
+    For Spark code, check imports, null behaviour in filters and sums, grain in groupBy and joins, passes over data and MERGE keys.
+
+exercises:
+  - id: D7-L2-E1
+    type: spot_bug
+    difficulty: 1
+    language: pyspark
+    prompt: |
+      Goal: a gold aggregation module that also uses Python's built-in `sum` in a helper. Find the bug and fix the import.
+    code: |
+      from pyspark.sql.functions import col, count, sum, when
+
+      def total_checks(results: list[dict[str, str]]) -> int:
+          """Number of passed checks."""
+          return sum(1 for r in results if r["status"] == "PASS")
+    bug_lines: [1]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_shadow
+          kind: forbids_import_from
+          module: pyspark.sql.functions
+          names: [sum, min, max, round, abs, filter]
+          message: "Do not import sum by name from pyspark.sql.functions."
+        - id: as_f
+          kind: requires_import
+          module: pyspark.sql
+          name: functions
+          alias: F
+          message: "Import functions as F."
+    fix_solution: |
+      from pyspark.sql import functions as F
+
+      def total_checks(results: list[dict[str, str]]) -> int:
+          """Number of passed checks."""
+          return sum(1 for r in results if r["status"] == "PASS")
+    wrong_answers:
+      - lines: [5]
+        feedback: "This line is correct Python. It fails only because line 1 replaced sum."
+    hints:
+      - "Which sum does line 5 call?"
+      - "The one imported on line 1."
+      - "Import functions as F."
+    explanation: |
+      Reference defects 2 and 3. The helper raises NOT_COLUMN_OR_STR because it calls Spark's sum on a generator.
+
+  - id: D7-L2-E2
+    type: spot_bug
+    difficulty: 1
+    language: pyspark
+    prompt: |
+      Goal: keep in-scope respondents. Find the line that breaks the standard and fix it.
+    code: |
+      from pyspark.sql import functions as F
+
+      in_scope = silver.filter(F.col("in_scope") == True)
+      in_scope.write.mode("overwrite").saveAsTable("research_dev.nat_in_scope")
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_eq_true
+          kind: forbids_compare_to_bool
+          message: "Filter on F.col(\"in_scope\") directly. == True trips ruff E712."
+        - id: filters
+          kind: requires_call
+          name: filter
+          message: "Keep the filter."
+    fix_solution: |
+      from pyspark.sql import functions as F
+
+      in_scope = silver.filter(F.col("in_scope"))
+      in_scope.write.mode("overwrite").saveAsTable("research_dev.nat_in_scope")
+    wrong_answers:
+      - lines: [4]
+        feedback: "Overwriting a dev table is fine here. The standard issue is the comparison."
+    hints:
+      - "What does ruff E712 flag?"
+      - "Comparison to True."
+      - "The column is already boolean."
+    explanation: |
+      Reference defect 12. `F.col("in_scope")` is the condition.
+
+  - id: D7-L2-E3
+    type: spot_bug
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Goal: drop test panel respondents and keep everyone else, including respondents with no panel recorded. Find the bug and fix it.
+    code: |
+      from pyspark.sql import functions as F
+
+      live = respondents.filter(F.col("panel_type") != "test")
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: nulls_kept
+          kind: requires_pattern
+          pattern: "eqNullSafe\\(|isNull\\(\\)"
+          message: "Keep null panels: ~F.col(\"panel_type\").eqNullSafe(\"test\"), or add | F.col(\"panel_type\").isNull()."
+    fix_solution: |
+      from pyspark.sql import functions as F
+
+      live = respondents.filter(~F.col("panel_type").eqNullSafe("test"))
+    wrong_answers:
+      - lines: [1]
+        feedback: "The import follows the standard."
+    hints:
+      - "What is null != 'test' in Spark?"
+      - "Null, which the filter drops."
+      - "eqNullSafe."
+    explanation: |
+      Spark's three-valued logic drops null rows from a != filter.
+
+  - id: D7-L2-E4
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Goal: gold shows 0 unweighted reach for a subgroup where nobody was reached. The reference code uses `sum(when(col("reach_flag") == 1, 1)).alias("unweighted_reach")`. What does gold show?
+    options:
+      - {id: a, text: "null"}
+      - {id: b, text: "0"}
+      - {id: c, text: "The subgroup's row count"}
+      - {id: d, text: "An error"}
+    answer: a
+    reasons:
+      - {id: r1, text: "when without otherwise is null for non-matching rows, and a sum of nulls is null."}
+      - {id: r2, text: "Spark drops zero sums."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That is the goal. It needs coalesce(..., lit(0)) or otherwise(0)."
+      - answer: c
+        feedback: "Non-matching rows contribute null, not 1."
+      - answer: d
+        feedback: "No error. The null passes silently."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. A sum of real zeros is 0. A sum of only nulls is null."
+    hints:
+      - "What does when() give for non-matching rows?"
+      - "Null."
+      - "Sum of nulls."
+    explanation: |
+      Reference defect 16. Wrap with `F.coalesce(..., F.lit(0))`.
+
+  - id: D7-L2-E5
+    type: spot_bug
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      Goal (from the docstring): reach metrics at tracker x wave x subgroup grain. Find the bug and fix it.
+    code: |
+      from pyspark.sql import functions as F
+
+      metrics = (
+          silver.filter(F.col("in_scope"))
+          .groupBy("wave_id", "age_group", "gender", "region")
+          .agg(F.sum("final_weight").alias("weighted_base"))
+      )
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: tracker_in_grain
+          kind: requires_pattern
+          pattern: "groupBy\\([^)]*[\"']tracker_id[\"']"
+          message: "Group by tracker_id as well: the docstring's grain starts with tracker."
+    fix_solution: |
+      from pyspark.sql import functions as F
+
+      metrics = (
+          silver.filter(F.col("in_scope"))
+          .groupBy("tracker_id", "wave_id", "age_group", "gender", "region")
+          .agg(F.sum("final_weight").alias("weighted_base"))
+      )
+    wrong_answers:
+      - lines: [4]
+        feedback: "The in-scope filter follows the standard."
+      - lines: [6]
+        feedback: "The aggregate is fine. The grouping misses a grain column."
+    hints:
+      - "Compare the groupBy with the stated grain."
+      - "Which grain column is missing?"
+      - "tracker_id."
+    explanation: |
+      Reference finding 15. Without tracker_id, two trackers' respondents merge into one row per wave and subgroup.
+
+  - id: D7-L2-E6
+    type: spot_bug
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      Goal: table health counts for the run log, computed efficiently. Find the line that shows the problem and rewrite the counts as one aggregation.
+    code: |
+      from pyspark.sql import functions as F
+
+      df = spark.table(table_name)
+      health = {
+          "row_count": df.count(),
+          "null_ids": df.filter(F.col("respondent_id").isNull()).count(),
+          "null_weights": df.filter(F.col("final_weight").isNull()).count(),
+      }
+    bug_lines: [5, 6, 7]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: one_agg
+          kind: requires_call
+          name: agg
+          message: "Compute all counts in one df.agg(...) pass."
+        - id: no_action_counts
+          kind: forbids_pattern
+          pattern: "\\)\\.count\\(\\)|df\\.count\\(\\)"
+          message: "Each .count() rescans the table. Use F.count and F.sum inside one agg."
+    fix_solution: |
+      from pyspark.sql import functions as F
+
+      df = spark.table(table_name)
+      row = df.agg(
+          F.count("*").alias("row_count"),
+          F.sum(F.col("respondent_id").isNull().cast("int")).alias("null_ids"),
+          F.sum(F.col("final_weight").isNull().cast("int")).alias("null_weights"),
+      ).first()
+      health = row.asDict()
+    wrong_answers:
+      - lines: [3]
+        feedback: "Reading the table once is right. The three actions below each scan it again."
+    hints:
+      - "How many times is the table scanned?"
+      - "Once per count()."
+      - "One agg with conditional sums."
+    explanation: |
+      Reference defect 11. Three actions mean three scans of an uncached table. One `agg` does it in one.
+
+  - id: D7-L2-E7
+    type: spot_bug
+    difficulty: 4
+    language: pyspark
+    prompt: |
+      Goal: MERGE a redelivery into silver on respondent and wave. Redeliveries sometimes repeat a respondent. Find the bug and fix it.
+    code: |
+      from delta.tables import DeltaTable
+
+      target = DeltaTable.forName(spark, "research_silver.nat_respondents")
+      (target.alias("t")
+          .merge(delivery.alias("s"), "t.respondent_id = s.respondent_id AND t.wave_id = s.wave_id")
+          .whenMatchedUpdateAll()
+          .whenNotMatchedInsertAll()
+          .execute())
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: dedupe
+          kind: requires_pattern
+          pattern: "(dropDuplicates|drop_duplicates)\\(\\s*\\[\\s*[\"']respondent_id[\"']\\s*,\\s*[\"']wave_id[\"']\\s*\\]\\s*\\)"
+          message: "Deduplicate the source on the merge keys first: delivery.dropDuplicates([\"respondent_id\", \"wave_id\"])."
+    fix_solution: |
+      from delta.tables import DeltaTable
+
+      source = delivery.dropDuplicates(["respondent_id", "wave_id"])
+      target = DeltaTable.forName(spark, "research_silver.nat_respondents")
+      (target.alias("t")
+          .merge(source.alias("s"), "t.respondent_id = s.respondent_id AND t.wave_id = s.wave_id")
+          .whenMatchedUpdateAll()
+          .whenNotMatchedInsertAll()
+          .execute())
+    wrong_answers:
+      - lines: [6]
+        feedback: "Updating matched rows is right. The failure comes from two source rows matching one target row."
+    hints:
+      - "What happens when two source rows match one target row?"
+      - "MERGE fails."
+      - "Deduplicate the source on the keys."
+    explanation: |
+      Reference finding 14. Delta MERGE fails when several source rows match one target row. Deduplicate first, ideally keeping the latest delivery.
+
+  - id: D7-L2-E8
+    type: predict_output
+    difficulty: 4
+    language: sql
+    prompt: |
+      Goal: list respondents outside the excluded regions. `excluded` holds `'N'` and one NULL. How many rows does this return from 1,000 respondents, 300 of them in N?
+    code: |
+      SELECT COUNT(*) FROM respondents
+      WHERE region_code NOT IN (SELECT code FROM excluded);
+    answer: "0"
+    wrong_answers:
+      - answer: "700"
+        feedback: "That is what NOT EXISTS returns. NOT IN with a NULL in the list is never true."
+    hints:
+      - "Expand NOT IN into AND terms."
+      - "x <> NULL is null."
+      - "No row passes."
+    explanation: |
+      Use `NOT EXISTS` or a `left_anti` join when the list can hold nulls.
+
+  - id: D7-L2-E9
+    type: spot_bug
+    difficulty: 5
+    language: pyspark
+    prompt: |
+      Goal: rename delivery columns to canonical names. If a source column is missing, stop with an error naming it. Find the bug and fix it.
+    code: |
+      def rename_columns(bronze_df, column_map: dict[str, str]):
+          """Rename source columns to canonical names."""
+          for src, tgt in column_map.items():
+              bronze_df = bronze_df.withColumnRenamed(src, tgt)
+          return bronze_df
+    bug_lines: [4]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: checks_missing
+          kind: requires_pattern
+          pattern: "not\\s+in\\s+bronze_df\\.columns|set\\(column_map\\)\\s*-\\s*set\\(bronze_df\\.columns\\)"
+          message: "Check each source column against bronze_df.columns before renaming."
+        - id: raises
+          kind: requires_pattern
+          pattern: "raise\\s+\\w*Error"
+          message: "Raise an error naming the missing column."
+    fix_solution: |
+      def rename_columns(bronze_df, column_map: dict[str, str]):
+          """Rename source columns to canonical names. Raises if a source column is missing."""
+          missing = sorted(set(column_map) - set(bronze_df.columns))
+          if missing:
+              raise ValueError(f"delivery is missing columns: {missing}")
+          for src, tgt in column_map.items():
+              bronze_df = bronze_df.withColumnRenamed(src, tgt)
+          return bronze_df
+    wrong_answers:
+      - lines: [3]
+        feedback: "Looping over the map is fine. The rename inside it hides a missing column."
+    hints:
+      - "What does withColumnRenamed do with a missing column?"
+      - "Nothing, silently."
+      - "Check bronze_df.columns first."
+    explanation: |
+      Reference finding 18. A renamed column in a delivery vanishes without error, and every later step sees a null or a missing field.
+
+recap:
+  - front: "Spark review checklist"
+    back: "Imports, null behaviour in filters and sums, grain in groupBy, passes over data, MERGE keys, silent renames, NOT IN."
+  - front: "MERGE with repeated source keys"
+    back: "Fails when several source rows match one target row. Deduplicate the source on the merge keys first."
+  - front: "withColumnRenamed on a missing column"
+    back: "A silent no-op. Check df.columns and raise."
+
+claims:
+  - claim: "Snippet behaviours (shadowed sum NOT_COLUMN_OR_STR, != drops nulls, sum(when) null, NOT IN with NULL returns no rows, withColumnRenamed no-op, MERGE multiple-source-rows failure) match local runs."
+    status: verified
+    source: "Local runs on PySpark 4.0.4 and delta-spark 4.0.1 (see D1, D3, D4 claims and practice/tests/test_a3_l1_merge.py), September 2026."

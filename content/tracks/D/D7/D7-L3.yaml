@@ -1,0 +1,355 @@
+id: D7-L3
+title: "Review practice: Databricks SQL and DAX"
+
+concept: |
+  Eight snippets of Databricks SQL and DAX, each with one seeded bug. SQL and DAX look simple, which makes their bugs easy to read past. The answer key stays hidden until you submit.
+
+  **What to look for in Databricks SQL:**
+
+  - **Syntax from another platform.** `CREATE ROW ACCESS POLICY` and `CREATE MASKING POLICY` are Snowflake. Databricks uses a SQL UDF with `SET ROW FILTER` or `SET MASK`.
+  - **Grants to individuals.** Your standard grants to groups, never to one user's email.
+  - **Group checks.** `is_member()` checks workspace groups. Unity Catalog guidance favours `is_account_group_member()`.
+  - **Names.** Two-part names resolve against the current catalog. Use three-level names: `catalog.schema.table`.
+  - **Ratios.** An `AVG` of percentages weights every subgroup equally. Recompute ratios from their sums.
+  - **MERGE sources.** One row per key, or the statement fails.
+
+  **What to look for in DAX:**
+
+  - **Division.** `/` returns infinity or an error on a zero denominator. `DIVIDE` returns BLANK.
+  - **Filter context.** `ALL(fact_table)` removes every filter on the table, wave and region slicers included. Name the one dimension whose filter you mean to remove.
+
+  Review each snippet with the same routine: goal, then line by line. For SQL, also check each statement against the Databricks SQL reference in your head: does this statement exist here? The checker tests your fix against the pattern the standard requires. Your score counts bugs found and fixes proposed.
+
+  This lesson closes the practice module. The capstone review in Phase 6 uses the same skills on a whole pull request.
+
+why_it_matters: |
+  Security SQL and report measures carry outsized risk. A grant to one person survives their move to another team. A row filter written in the wrong dialect leaves a table open. A DAX measure with the wrong filter context shows a plausible number to every viewer of a dashboard. Reviewing these few lines carefully protects many readers.
+
+worked_example:
+  language: sql
+  weak:
+    code: |
+      SELECT region, AVG(weighted_reach_pct) AS reach_pct
+      FROM research_gold.nat_metrics
+      GROUP BY region;
+    annotations:
+      - find: "SELECT region, AVG(weighted_reach_pct) AS reach_pct"
+        note: "An average of subgroup percentages. A subgroup of 12 counts as much as one of 1,200."
+  strong:
+    code: |
+      SELECT region,
+             SUM(weighted_reach) / NULLIF(SUM(weighted_base), 0) AS reach_pct
+      FROM research_gold.nat_metrics
+      GROUP BY region;
+    annotations:
+      - find: "       SUM(weighted_reach) / NULLIF(SUM(weighted_base), 0) AS reach_pct"
+        note: "Total over total, with the zero base guarded."
+  takeaway: |
+    For SQL, check the dialect, grants, group functions, names and ratios. For DAX, check DIVIDE and the exact filter each ALL removes.
+
+exercises:
+  - id: D7-L3-E1
+    type: spot_bug
+    difficulty: 1
+    language: sql
+    prompt: |
+      Goal: restrict `research_silver.nat_respondents` rows by region with a Databricks row filter. Find the bug and fix it.
+    code: |
+      CREATE FUNCTION research_governance.region_filter(region STRING)
+        RETURN is_account_group_member(concat('analysts_', region));
+      CREATE ROW ACCESS POLICY region_policy ON research_silver.nat_respondents (region);
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: set_row_filter
+          type: required
+          pattern: "ALTER\\s+TABLE\\s+research_silver\\.nat_respondents\\s+SET\\s+ROW\\s+FILTER\\s+research_governance\\.region_filter\\s+ON\\s*\\(\\s*region\\s*\\)"
+          message: "Use ALTER TABLE research_silver.nat_respondents SET ROW FILTER research_governance.region_filter ON (region)."
+        - id: no_policy
+          type: forbidden
+          pattern: "ROW\\s+ACCESS\\s+POLICY"
+          message: "CREATE ROW ACCESS POLICY is Snowflake syntax."
+    fix_solution: |
+      CREATE FUNCTION research_governance.region_filter(region STRING)
+        RETURN is_account_group_member(concat('analysts_', region));
+      ALTER TABLE research_silver.nat_respondents SET ROW FILTER research_governance.region_filter ON (region);
+    wrong_answers:
+      - lines: [1]
+        feedback: "A SQL UDF is exactly what Databricks row filters use."
+    hints:
+      - "Does line 3 exist in Databricks SQL?"
+      - "It is Snowflake syntax."
+      - "ALTER TABLE ... SET ROW FILTER."
+    explanation: |
+      Reference defect 4. The UDF is right. The binding statement comes from another platform.
+
+  - id: D7-L3-E2
+    type: spot_bug
+    difficulty: 1
+    language: sql
+    prompt: |
+      Goal: let the analysts read the gold metrics table, following the standard. Find the bug and fix it.
+    code: |
+      GRANT USE CATALOG ON CATALOG research TO `analysts`;
+      GRANT USE SCHEMA ON SCHEMA research.research_gold TO `analysts`;
+      GRANT SELECT ON TABLE research.research_gold.nat_metrics TO `ana.lopez@example.com`;
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: to_group
+          type: required
+          pattern: "GRANT\\s+SELECT\\s+ON\\s+TABLE\\s+research\\.research_gold\\.nat_metrics\\s+TO\\s+`analysts`"
+          message: "Grant SELECT to the `analysts` group."
+        - id: no_user
+          type: forbidden
+          pattern: "@"
+          message: "Never grant to an individual user."
+    fix_solution: |
+      GRANT USE CATALOG ON CATALOG research TO `analysts`;
+      GRANT USE SCHEMA ON SCHEMA research.research_gold TO `analysts`;
+      GRANT SELECT ON TABLE research.research_gold.nat_metrics TO `analysts`;
+    wrong_answers:
+      - lines: [1]
+        feedback: "USE CATALOG to the group is needed and correct."
+    hints:
+      - "Who receives each grant?"
+      - "One line names a person."
+      - "Grant to the group."
+    explanation: |
+      Grants to groups survive team changes. A grant to one email is forgotten when that person moves.
+
+  - id: D7-L3-E3
+    type: spot_bug
+    difficulty: 2
+    language: sql
+    prompt: |
+      Goal: a column mask that shows postcodes only to members of the account-level group `analysts`, as Unity Catalog guidance recommends. Find the bug and fix it.
+    code: |
+      CREATE FUNCTION research_governance.mask_postcode(p STRING)
+        RETURN CASE WHEN is_member('analysts') THEN p ELSE '***' END;
+      ALTER TABLE research_silver.nat_respondents ALTER COLUMN postcode SET MASK research_governance.mask_postcode;
+    bug_lines: [2]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: account_group
+          type: required
+          pattern: "is_account_group_member\\(\\s*'analysts'\\s*\\)"
+          message: "Use is_account_group_member('analysts')."
+        - id: no_is_member
+          type: forbidden
+          pattern: "(?<!_)is_member\\("
+          message: "is_member checks workspace groups."
+    fix_solution: |
+      CREATE FUNCTION research_governance.mask_postcode(p STRING)
+        RETURN CASE WHEN is_account_group_member('analysts') THEN p ELSE '***' END;
+      ALTER TABLE research_silver.nat_respondents ALTER COLUMN postcode SET MASK research_governance.mask_postcode;
+    wrong_answers:
+      - lines: [3]
+        feedback: "ALTER COLUMN ... SET MASK is the correct Databricks statement."
+    hints:
+      - "Which group function does the goal name?"
+      - "Account-level groups."
+      - "is_account_group_member."
+    explanation: |
+      Reference finding 22. is_member checks workspace-local groups. Account groups are the ones Unity Catalog uses.
+
+  - id: D7-L3-E4
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Goal: a scheduled query must read production gold. It runs `SELECT * FROM research_gold.nat_metrics`. The job's session has `research_dev` as its current catalog. What does it read?
+    options:
+      - {id: a, text: "research_dev.research_gold.nat_metrics, if it exists"}
+      - {id: b, text: "research.research_gold.nat_metrics, because gold is production"}
+      - {id: c, text: "An error: two-part names are not allowed"}
+      - {id: d, text: "Both tables, unioned"}
+    answer: a
+    reasons:
+      - {id: r1, text: "A two-part name resolves against the current catalog. Only a three-level name is unambiguous."}
+      - {id: r2, text: "Databricks always prefers dev catalogs."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The name does not say which catalog. The session decides."
+      - answer: c
+        feedback: "Two-part names work. That is why they are risky."
+      - answer: d
+        feedback: "One table is resolved."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. The current catalog decides, whatever it is."
+    hints:
+      - "How many parts does the name have?"
+      - "Which part is missing?"
+      - "The current catalog fills it in."
+    explanation: |
+      Use three-level names in jobs: `research.research_gold.nat_metrics`.
+
+  - id: D7-L3-E5
+    type: spot_bug
+    difficulty: 3
+    language: sql
+    prompt: |
+      Goal: weighted reach percentage per region from the gold table, which has one row per subgroup with `weighted_reach` and `weighted_base`. Find the bug and fix it, guarding a zero base.
+    code: |
+      SELECT region,
+             AVG(weighted_reach / weighted_base) AS reach_pct
+      FROM research.research_gold.nat_metrics
+      GROUP BY region;
+    bug_lines: [2]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: total_over_total
+          type: required
+          pattern: "SUM\\(\\s*weighted_reach\\s*\\)\\s*/\\s*NULLIF\\(\\s*SUM\\(\\s*weighted_base\\s*\\)\\s*,\\s*0\\s*\\)"
+          message: "Use SUM(weighted_reach) / NULLIF(SUM(weighted_base), 0)."
+        - id: no_avg
+          type: forbidden
+          pattern: "AVG\\("
+          message: "An AVG of ratios weights every subgroup equally."
+    fix_solution: |
+      SELECT region,
+             SUM(weighted_reach) / NULLIF(SUM(weighted_base), 0) AS reach_pct
+      FROM research.research_gold.nat_metrics
+      GROUP BY region;
+    wrong_answers:
+      - lines: [4]
+        feedback: "Grouping by region matches the goal."
+    hints:
+      - "Does each subgroup weigh the same in AVG?"
+      - "Should it?"
+      - "Total over total."
+    explanation: |
+      Recompute ratios from sums at the level you report. NULLIF turns a zero base into a null result instead of an error.
+
+  - id: D7-L3-E6
+    type: fill_gap
+    difficulty: 3
+    language: dax
+    prompt: |
+      Goal: a reach percentage measure that shows an empty cell, not infinity, where the base is zero. The assistant wrote `RETURN reach_w / base_w`. Complete the fix.
+    template: |
+      Reach % =
+      VAR reach_w = SUM ( fact_reach[weighted_reach] )
+      VAR base_w = SUM ( fact_reach[weighted_base] )
+      RETURN [[g1]] ( reach_w, [[g2]] )
+    gaps:
+      g1: {accepted: [DIVIDE], case_sensitive: false}
+      g2: {accepted: [base_w]}
+    wrong_answers:
+      - answer: {g1: IFERROR}
+        feedback: "IFERROR hides every error, not only a zero base. DIVIDE returns BLANK for a zero or blank denominator."
+    hints:
+      - "What does / return when base_w is 0?"
+      - "Infinity or an error."
+      - "`DIVIDE` with the base as its second argument."
+    explanation: |
+      DIVIDE returns BLANK on a zero or blank denominator, so the cell stays empty (lesson C6-L2).
+
+  - id: D7-L3-E7
+    type: spot_bug
+    difficulty: 4
+    language: dax
+    prompt: |
+      Goal: each brand's share of weighted reach across all brands, respecting the wave and region slicers. Find the bug and fix it.
+    code: |
+      Brand share =
+      VAR this_brand = SUM ( fact_reach[weighted_reach] )
+      VAR all_brands = CALCULATE ( SUM ( fact_reach[weighted_reach] ), ALL ( fact_reach ) )
+      RETURN DIVIDE ( this_brand, all_brands )
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: dax
+      rules:
+        - id: all_brand
+          type: required
+          pattern: "ALL\\s*\\(\\s*dim_brand\\s*\\)"
+          message: "Remove only the brand filter: ALL ( dim_brand )."
+        - id: no_all_fact
+          type: forbidden
+          pattern: "ALL\\s*\\(\\s*fact_reach\\s*\\)"
+          message: "ALL ( fact_reach ) removes the wave and region filters too."
+    fix_solution: |
+      Brand share =
+      VAR this_brand = SUM ( fact_reach[weighted_reach] )
+      VAR all_brands = CALCULATE ( SUM ( fact_reach[weighted_reach] ), ALL ( dim_brand ) )
+      RETURN DIVIDE ( this_brand, all_brands )
+    wrong_answers:
+      - lines: [4]
+        feedback: "DIVIDE is right. The denominator's context is wrong."
+    hints:
+      - "Which filters does ALL(fact_reach) remove?"
+      - "All of them."
+      - "Name the brand dimension."
+    explanation: |
+      The denominator must keep the wave and region filters and drop only the brand filter.
+
+  - id: D7-L3-E8
+    type: spot_bug
+    difficulty: 5
+    language: sql
+    prompt: |
+      Goal: MERGE a redelivery into silver. The delivery can repeat a respondent within a wave. Keep the row with the latest `ingestion_timestamp`. Find the bug and fix it.
+    code: |
+      MERGE INTO research.research_silver.nat_respondents AS t
+      USING research.research_bronze.nat_raw_w14 AS s
+      ON t.respondent_id = s.respondent_id AND t.wave_id = s.wave_id
+      WHEN MATCHED THEN UPDATE SET *
+      WHEN NOT MATCHED THEN INSERT *;
+    bug_lines: [2]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: row_number
+          type: required
+          pattern: "ROW_NUMBER\\s*\\(\\s*\\)\\s+OVER\\s*\\(\\s*PARTITION\\s+BY\\s+respondent_id\\s*,\\s*wave_id\\s+ORDER\\s+BY\\s+ingestion_timestamp\\s+DESC\\s*\\)"
+          message: "Rank rows with ROW_NUMBER() OVER (PARTITION BY respondent_id, wave_id ORDER BY ingestion_timestamp DESC)."
+        - id: keep_first
+          type: required
+          pattern: "rn\\s*=\\s*1"
+          message: "Keep only rn = 1."
+    fix_solution: |
+      MERGE INTO research.research_silver.nat_respondents AS t
+      USING (
+        SELECT * EXCEPT (rn) FROM (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY respondent_id, wave_id ORDER BY ingestion_timestamp DESC) AS rn
+          FROM research.research_bronze.nat_raw_w14
+        ) WHERE rn = 1
+      ) AS s
+      ON t.respondent_id = s.respondent_id AND t.wave_id = s.wave_id
+      WHEN MATCHED THEN UPDATE SET *
+      WHEN NOT MATCHED THEN INSERT *;
+    wrong_answers:
+      - lines: [3]
+        feedback: "The join condition uses both merge keys. The source is the problem."
+    hints:
+      - "Can the source hold two rows for one key?"
+      - "Yes, and MERGE fails then."
+      - "Deduplicate in the USING clause with ROW_NUMBER."
+    explanation: |
+      Deduplicate the source on the merge keys, keeping the latest row, before MERGE. Reference finding 14 in SQL form.
+
+recap:
+  - front: "SQL review checklist"
+    back: "Dialect, grants to groups, is_account_group_member, three-level names, ratios from sums, one source row per MERGE key."
+  - front: "DAX review checklist"
+    back: "DIVIDE for every ratio. ALL on the one dimension you mean, never the whole fact table."
+  - front: "Deduplicating a MERGE source in SQL"
+    back: "ROW_NUMBER() OVER (PARTITION BY keys ORDER BY ingestion_timestamp DESC), keep rn = 1."
+
+claims:
+  - claim: "Databricks row filters and masks, is_account_group_member, three-level namespace and grants follow the docs verified in Track A."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/manually-apply and related pages (checked 2026-09-25)"
+  - claim: "SELECT * EXCEPT (col) is supported in Databricks SQL."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-qry-star (checked 2026-09-25)"

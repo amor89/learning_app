@@ -99,6 +99,7 @@ def hide_answer_key(data: dict[str, Any]) -> dict[str, Any]:
         "bug_lines",
         "solution",
         "fix_solution",
+        "explanation",
         "explanation_html",
         "wrong_answers",
         "gaps",

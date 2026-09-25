@@ -1,0 +1,375 @@
+id: D7-L1
+title: "Review practice: Python and pandas"
+
+concept: |
+  This lesson is practice. Each exercise shows a short snippet in the style an assistant writes: tidy, plausible and typed. Each holds one seeded bug, drawn from your reference pipeline and from the lessons in Track D. The answer key stays hidden until you submit.
+
+  **How to review each snippet:**
+
+  1. Read the prompt's goal first. The bug is a gap between the goal and the code.
+  2. Walk the lines in order. For each, ask: what does this assume, and what input breaks it?
+  3. Tap the line you would change. Then write the fix, and run it against the checker.
+
+  **What to look for in Python and pandas code:**
+
+  - Names used but never imported, and imports that shadow built-ins.
+  - Deprecated calls: `datetime.utcnow()`, chained assignment, `applymap`.
+  - Type hints that lie: `str = None`.
+  - Truthiness where 0, 0.0 or an empty string is a valid value.
+  - Mutable default arguments.
+  - Joins that drop or duplicate rows, and nulls that behave unexpectedly in filters.
+  - Text compared where numbers were meant, such as wave ids.
+
+  Your score counts two things: bugs found (the right line) and fixes proposed (a fix that passes the checker). Aim to find the bug before you open a hint. When a hint helps, note which one: that is the check you skipped.
+
+  Work at your own pace. A snippet you get wrong is worth more than one you get right, as long as you read the explanation.
+
+why_it_matters: |
+  Reviewing is a separate skill from writing. Engineers who review AI output well do it by habit: goal first, then line by line, asking what each line assumes. Short, deliberate practice on seeded bugs builds that habit faster than waiting for real bugs to appear in production.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def latest_wave(wave_ids: list[str]) -> str:
+          """Return the most recent wave."""
+          return max(wave_ids)
+    annotations:
+      - find: "    return max(wave_ids)"
+        note: "Text comparison: max(['W9', 'W10']) is 'W9'."
+  strong:
+    code: |
+      def latest_wave(wave_ids: list[str]) -> str:
+          """Return the most recent wave. Wave ids look like 'W' plus a number."""
+          return max(wave_ids, key=lambda w: int(w[1:]))
+    annotations:
+      - find: "    return max(wave_ids, key=lambda w: int(w[1:]))"
+        note: "Compares the numbers, so W10 beats W9."
+  takeaway: |
+    Goal first, then line by line: what does each line assume, and which input breaks it?
+
+exercises:
+  - id: D7-L1-E1
+    type: spot_bug
+    difficulty: 1
+    language: python
+    prompt: |
+      Goal: return a new unique run id for the run log. Find the bug and fix it.
+    code: |
+      def new_run_id() -> str:
+          """Return a new unique run id."""
+          return str(uuid.uuid4())
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: imports_uuid
+          kind: requires_import
+          module: uuid
+          message: "Import uuid."
+      tests:
+        - id: works
+          code: |
+            a, b = new_run_id(), new_run_id()
+            assert len(a) == 36 and a != b
+          message: "Return a 36-character UUID string, different on each call."
+    fix_solution: |
+      import uuid
+
+
+      def new_run_id() -> str:
+          """Return a new unique run id."""
+          return str(uuid.uuid4())
+    wrong_answers:
+      - lines: [1]
+        feedback: "The signature is fine. The body uses a name that was never imported."
+    hints:
+      - "Where does uuid come from?"
+      - "It is never imported."
+      - "Add import uuid."
+    explanation: |
+      Reference defect 1. NameError on the first run. ruff rule F821 flags undefined names before you run anything.
+
+  - id: D7-L1-E2
+    type: predict_output
+    difficulty: 1
+    language: python
+    prompt: |
+      Goal: each call starts with an empty list of warnings. What does this print?
+    code: |
+      def add_warning(msg, warnings=[]):
+          warnings.append(msg)
+          return warnings
+
+      add_warning("weight sum low")
+      print(len(add_warning("null ids")))
+    answer: "2"
+    wrong_answers:
+      - answer: "1"
+        feedback: "The default list is created once and shared, so the second call sees the first call's warning."
+    hints:
+      - "When is the default list created?"
+      - "Once, at definition."
+      - "Both calls share it."
+    explanation: |
+      Mutable default argument. Default to None and create the list inside.
+
+  - id: D7-L1-E3
+    type: spot_bug
+    difficulty: 2
+    language: python
+    prompt: |
+      Goal: record the run time as an aware UTC timestamp. Find the bug and fix it.
+    code: |
+      from datetime import datetime, timezone
+
+      def run_timestamp() -> datetime:
+          """Current time in UTC for the run log."""
+          return datetime.utcnow()
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_utcnow
+          kind: forbids_call
+          name: utcnow
+          message: "utcnow() is deprecated from Python 3.12 and returns a naive datetime."
+      tests:
+        - id: aware
+          code: |
+            ts = run_timestamp()
+            assert ts.tzinfo is not None and ts.utcoffset().total_seconds() == 0
+          message: "Return an aware datetime in UTC: datetime.now(timezone.utc)."
+    fix_solution: |
+      from datetime import datetime, timezone
+
+      def run_timestamp() -> datetime:
+          """Current time in UTC for the run log."""
+          return datetime.now(timezone.utc)
+    wrong_answers:
+      - lines: [1]
+        feedback: "The import is right, and timezone is even imported already. It is just not used."
+    hints:
+      - "Is the returned datetime aware?"
+      - "utcnow() returns a naive one, and is deprecated."
+      - "datetime.now(timezone.utc)."
+    explanation: |
+      Reference defect 6. Naive timestamps cannot be compared with aware ones and hide their zone.
+
+  - id: D7-L1-E4
+    type: spot_bug
+    difficulty: 2
+    language: python
+    prompt: |
+      Goal: `error_message` is optional. The signature must say so for mypy. Find the bug and fix the signature.
+    code: |
+      def log_run(
+          pipeline_name: str,
+          status: str,
+          error_message: str = None,
+      ) -> None:
+          """Append one record to the run log."""
+    bug_lines: [4]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: optional_hint
+          kind: requires_pattern
+          pattern: "error_message:\\s*(str\\s*\\|\\s*None|None\\s*\\|\\s*str|Optional\\[str\\])\\s*=\\s*None"
+          message: "Write error_message: str | None = None."
+    fix_solution: |
+      def log_run(
+          pipeline_name: str,
+          status: str,
+          error_message: str | None = None,
+      ) -> None:
+          """Append one record to the run log."""
+    wrong_answers:
+      - lines: [3]
+        feedback: "status is required and always a string. The optional parameter is the next one."
+    hints:
+      - "Can error_message be None?"
+      - "Then the type must allow None."
+      - "str | None = None."
+    explanation: |
+      Reference defect 7. `str = None` claims the value is always a string. mypy --strict rejects it.
+
+  - id: D7-L1-E5
+    type: spot_bug
+    difficulty: 3
+    language: python
+    prompt: |
+      Goal: count respondents with a recorded weight. A weight of 0.0 is recorded and valid for this count. Find the bug and fix it.
+    code: |
+      def count_weighted(weights: list[float | None]) -> int:
+          """Number of respondents with a recorded weight."""
+          recorded = [w for w in weights if w]
+          return len(recorded)
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      tests:
+        - id: zero_counts
+          code: |
+            assert count_weighted([1.2, 0.0, None]) == 2
+          message: "0.0 is a recorded weight. Test with `is not None`, not truthiness."
+        - id: none_skipped
+          code: |
+            assert count_weighted([None, None]) == 0
+          message: "None is not recorded."
+    fix_solution: |
+      def count_weighted(weights: list[float | None]) -> int:
+          """Number of respondents with a recorded weight."""
+          recorded = [w for w in weights if w is not None]
+          return len(recorded)
+    wrong_answers:
+      - lines: [4]
+        feedback: "len is right. The filter above drops 0.0."
+    hints:
+      - "Is 0.0 truthy?"
+      - "No."
+      - "Use `is not None`."
+    explanation: |
+      Truthiness treats 0.0 like None. Your standard: test for None with `is None`.
+
+  - id: D7-L1-E6
+    type: mcq
+    difficulty: 3
+    prompt: |
+      Goal: keep every respondent except those in region `N`, including respondents with no region. Does `df[df["region"] != "N"]` meet the goal in pandas 3?
+    options:
+      - {id: a, text: "Yes: in pandas, != keeps missing regions"}
+      - {id: b, text: "No: missing regions are dropped"}
+      - {id: c, text: "No: it raises on missing values"}
+      - {id: d, text: "Only if the column is a string dtype"}
+    answer: a
+    reasons:
+      - {id: r1, text: "pandas treats missing != 'N' as True, so those rows stay. Spark would drop them."}
+      - {id: r2, text: "pandas fills missing values with empty strings before comparing."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That is Spark and SQL behaviour. pandas keeps them."
+      - answer: c
+        feedback: "The comparison runs without error."
+      - answer: d
+        feedback: "The result is the same for object and str dtypes."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. pandas does not fill. Missing compares as not-equal."
+    hints:
+      - "Lesson D3-L1: nulls in filters."
+      - "pandas and Spark differ here."
+      - "pandas keeps them."
+    explanation: |
+      The same filter in PySpark would drop the null rows. Know which engine you are reviewing.
+
+  - id: D7-L1-E7
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [pandas]
+    prompt: |
+      Goal: attach region names to every respondent. Respondents whose code is missing from the lookup must stay, with no name. Find the bug and fix it.
+    code: |
+      import pandas as pd
+
+      def add_region(resp: pd.DataFrame, regions: pd.DataFrame) -> pd.DataFrame:
+          """Attach region names. One row per respondent."""
+          lookup = regions.dropna(subset=["code"])
+          return resp.merge(lookup, on="code", how="inner", validate="many_to_one")
+    bug_lines: [6]
+    fix_checker:
+      kind: python
+      tests:
+        - id: keeps_all
+          code: |
+            import pandas as pd
+            resp = pd.DataFrame({"id": [1, 2], "code": ["N", "X"]})
+            regions = pd.DataFrame({"code": ["N"], "name": ["North"]})
+            out = add_region(resp, regions)
+            assert len(out) == 2 and out.loc[out["id"] == 2, "name"].isna().all(), out
+          message: "An inner join drops respondent 2. Use a left join."
+        - id: dup_raises
+          code: |
+            import pandas as pd
+            try:
+                add_region(pd.DataFrame({"code": ["N"]}), pd.DataFrame({"code": ["N", "N"], "name": ["a", "b"]}))
+            except Exception:
+                pass
+            else:
+                raise AssertionError("duplicate keys accepted")
+          message: "Keep validate='many_to_one', so duplicate lookup keys still raise."
+    fix_solution: |
+      import pandas as pd
+
+      def add_region(resp: pd.DataFrame, regions: pd.DataFrame) -> pd.DataFrame:
+          """Attach region names. One row per respondent."""
+          lookup = regions.dropna(subset=["code"])
+          return resp.merge(lookup, on="code", how="left", validate="many_to_one")
+    wrong_answers:
+      - lines: [5]
+        feedback: "Dropping null lookup keys is right: pandas would otherwise match null to null."
+    hints:
+      - "Which join type keeps unmatched left rows?"
+      - "Inner drops them."
+      - "how='left'."
+    explanation: |
+      An inner join quietly removes respondents with unknown codes. The grain promise, one row per respondent, needs a left join.
+
+  - id: D7-L1-E8
+    type: spot_bug
+    difficulty: 5
+    language: python
+    prompt: |
+      Goal: return the most recent wave from ids like `W9`, `W10`, `W11`. Find the bug and fix it.
+    code: |
+      def latest_wave(wave_ids: list[str]) -> str:
+          """Return the most recent wave id."""
+          if not wave_ids:
+              raise ValueError("no waves")
+          return max(wave_ids)
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      tests:
+        - id: numeric
+          code: |
+            assert latest_wave(["W9", "W10", "W2"]) == "W10"
+          message: "W10 is the latest. Compare the numbers, not the text."
+        - id: empty
+          code: |
+            try:
+                latest_wave([])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "Keep the error for an empty list."
+    fix_solution: |
+      def latest_wave(wave_ids: list[str]) -> str:
+          """Return the most recent wave id."""
+          if not wave_ids:
+              raise ValueError("no waves")
+          return max(wave_ids, key=lambda w: int(w[1:]))
+    wrong_answers:
+      - lines: [3]
+        feedback: "`if not wave_ids` is correct for a list: an empty list is the case to catch."
+    hints:
+      - "What is max(['W9', 'W10'])?"
+      - "'W9': text comparison."
+      - "Use key=lambda w: int(w[1:])."
+    explanation: |
+      Text sorts character by character. The truthiness test on line 3 is fine: an empty list is exactly what it should catch.
+
+recap:
+  - front: "Review routine for a snippet"
+    back: "Goal first, then each line: what does it assume, and which input breaks it?"
+  - front: "Python bugs seeded in this lesson"
+    back: "Missing import, mutable default, utcnow, str = None, truthiness of 0.0, inner join, text max."
+  - front: "When truthiness is fine"
+    back: "Testing a list or dict for emptiness. Not for numbers where 0 is valid."
+
+claims:
+  - claim: "Snippet behaviours (NameError without import, mutable default sharing, utcnow naive and deprecated, pandas != keeps missing, max of strings) match local runs."
+    status: verified
+    source: "Local runs on CPython 3.13.12 and pandas 3.0.2, September 2026 (see D1, D3 and D5 claims)."
