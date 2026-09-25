@@ -1,0 +1,414 @@
+id: D1-L1
+title: Read a Python traceback from the bottom up
+
+concept: |
+  A traceback lists the calls that led to an error, oldest first. The line that matters most is at the **bottom**. Read it in this order:
+
+  1. **The last line** names the exception type and message: `NameError: name 'uuid' is not defined`. That is what went wrong.
+  2. **The frame just above it** shows where: file, line number, function, and the source line. Python 3.11 and later add `^` or `~` marks under the exact expression.
+  3. **Walk up** until you reach the first frame in **your own code**. Frames inside `site-packages` or the standard library are rarely the cause. The call from your code that fed them bad input usually is.
+
+  Here is your reference `log_pipeline_run`, cut down, on Python 3.13:
+
+  ```text
+  Traceback (most recent call last):
+    File "observability.py", line 7, in <module>
+      main()
+      ~~~~^^
+    File "observability.py", line 5, in main
+      log_run()
+      ~~~~~~~^^
+    File "observability.py", line 2, in log_run
+      return str(uuid.uuid4())
+                 ^^^^
+  NameError: name 'uuid' is not defined. Did you forget to import 'uuid'?
+  ```
+
+  Python 3.12 added the "Did you forget to import" hint. Python 3.11 prints the same error without it.
+
+  **Chained exceptions** print two tracebacks. The joining sentence tells you how they relate:
+
+  - "**The above exception was the direct cause of the following exception**" means someone wrote `raise NewError(...) from err`. The first traceback is the root cause.
+  - "**During handling of the above exception, another exception occurred**" means a second error happened inside an `except` block. Your error handler has its own bug. Fix both.
+
+  When you catch an exception to add context, use `raise ... from err`. The original traceback stays attached, so the next person sees both.
+
+  Never read only the first line of a traceback, and never read only the message. `KeyError: 'row_count_max'` names the missing key. The frame tells you which dictionary, and so which config file, lacks it.
+
+why_it_matters: |
+  A contract validator failed with a 60-line traceback. The on-call engineer read the top frames, which pointed at the job scheduler, and restarted the job three times. The last line said `KeyError: 'row_count_max'`, and the frame above it named `_check_row_count`. The new tracker's contract file lacked one key. Reading from the bottom would have found it in a minute.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def load_contract(path: str) -> dict[str, object]:
+          """Load a contract file."""
+          try:
+              with open(path) as f:
+                  return json.load(f)
+          except Exception:
+              raise ValueError("bad contract")
+    annotations:
+      - find: "except Exception:"
+        note: "Catches everything, including a typo in your own code."
+      - find: 'raise ValueError("bad contract")'
+        note: "No path, no cause. The traceback prints 'During handling...', and the reader must guess which error was the real one."
+  strong:
+    code: |
+      import json
+
+
+      def load_contract(path: str) -> dict[str, object]:
+          """Load a contract file.
+
+          Raises:
+              ValueError: If the file is not valid JSON.
+          """
+          try:
+              with open(path, encoding="utf-8") as f:
+                  return json.load(f)
+          except json.JSONDecodeError as err:
+              raise ValueError(f"contract {path} is not valid JSON: line {err.lineno}") from err
+    annotations:
+      - find: "except json.JSONDecodeError as err:"
+        note: "Catch only the error you expect. A missing file still raises FileNotFoundError with its own traceback."
+      - find: 'raise ValueError(f"contract {path} is not valid JSON: line {err.lineno}") from err'
+        note: "The message names the file and line. `from err` keeps the original traceback as the direct cause."
+  takeaway: |
+    Read the last line, then the frame above it, then walk up to your own code. When you re-raise, add context and chain with `from err`.
+
+exercises:
+  - id: D1-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A traceback is 40 lines long. Where do you start reading?
+    options:
+      - {id: a, text: "The last line: exception type and message"}
+      - {id: b, text: "The first line after 'Traceback (most recent call last)'"}
+      - {id: c, text: "The longest frame"}
+      - {id: d, text: "The first frame inside site-packages"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Frames run oldest first. The exception and the frame that raised it are at the bottom."}
+      - {id: r2, text: "Python prints the most important frame last to save space."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The first frame is the oldest call, often your entry point or a scheduler. The error happened at the other end."
+      - answer: c
+        feedback: "Length says nothing about relevance. Start at the bottom."
+      - answer: d
+        feedback: "Library frames rarely hold the cause. Find the last frame in your own code."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. The order is chronological: 'most recent call last'."
+    hints:
+      - "Read the header: 'most recent call last'."
+      - "Where is the most recent call?"
+      - "At the bottom."
+    explanation: |
+      The bottom holds what went wrong. The frames above say where and how you got there.
+
+  - id: D1-L1-E2
+    type: spot_bug
+    difficulty: 2
+    language: text
+    prompt: |
+      This traceback came from Python 3.13. Tap the frame line in **your own code** where you would start fixing. Your code is in `/repo/pipelines/`.
+    code: |
+      Traceback (most recent call last):
+        File "/repo/pipelines/run_qa.py", line 31, in <module>
+          report = check_weights(df, "final_weight")
+        File "/repo/pipelines/qa_statistical.py", line 19, in check_weights
+          "mean": round(stats["mean"], 4),
+                  ~~~~~^^^^^^^^^^^^^^^^^^
+      TypeError: type NoneType doesn't define __round__ method
+    bug_lines: [4]
+    wrong_answers:
+      - lines: [2]
+        feedback: "That is the entry point that called the function. The error happened deeper."
+      - lines: [7]
+        feedback: "That line says what went wrong: round() received None. The frame above it says where."
+    hints:
+      - "Read the last line first."
+      - "Which frame is closest to the error and inside /repo/pipelines/?"
+      - "The frame for qa_statistical.py, line 19."
+    explanation: |
+      `stats["mean"]` is None when the DataFrame is empty, and `round(None, 4)` raises TypeError. The frame for `qa_statistical.py` line 19 is where you add a guard.
+
+  - id: D1-L1-E3
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A traceback shows a `KeyError`, then the sentence "During handling of the above exception, another exception occurred", then a `NameError`. What does that tell you?
+    options:
+      - {id: a, text: "The except block that handled the KeyError has its own bug"}
+      - {id: b, text: "The code used raise ... from err"}
+      - {id: c, text: "Only the NameError matters"}
+      - {id: d, text: "Python retried the code"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The second exception was raised while handling the first, without an explicit chain. Both need a fix."}
+      - {id: r2, text: "NameError always hides a KeyError."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "`from err` prints 'The above exception was the direct cause of the following exception'."
+      - answer: c
+        feedback: "The KeyError started it. Fix the handler and the missing key."
+      - answer: d
+        feedback: "Python does not retry. It records that the handler failed."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. The two errors are unrelated types. The handler raised a new one."
+    hints:
+      - "Which sentence does `from err` print?"
+      - "This one is the other sentence."
+      - "The handler failed."
+    explanation: |
+      "During handling" means your error handler raised. "Direct cause" means someone chained on purpose.
+
+  - id: D1-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `first_own_frame(traceback_text: str, project_dir: str) -> tuple[str, int] | None`. Return the file path and line number of the **last** frame line (`  File "<path>", line <n>, in <name>`) whose path starts with `project_dir`. That is the first frame in your code when you read from the bottom. Return `None` if no frame is in your code. For chained tracebacks, use the last traceback in the text.
+    starter: |
+      def first_own_frame(traceback_text, project_dir):
+          for line in traceback_text.splitlines():
+              if project_dir in line:
+                  return line
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: first_own_frame
+          typed: true
+          docstring: true
+          message: "Give `first_own_frame` type hints and a docstring."
+      tests:
+        - id: bottom_up
+          code: |
+            tb = '''Traceback (most recent call last):
+              File "/repo/run.py", line 3, in <module>
+                main()
+              File "/repo/qa.py", line 19, in check
+                x = f(y)
+              File "/usr/lib/python3.13/site-packages/lib.py", line 88, in f
+                raise ValueError("bad")
+            ValueError: bad
+            '''
+            assert first_own_frame(tb, "/repo/") == ("/repo/qa.py", 19)
+          message: "Skip library frames and return the last frame inside project_dir, not the first."
+        - id: none_found
+          code: |
+            tb = '''Traceback (most recent call last):
+              File "/usr/lib/python3.13/lib.py", line 5, in f
+            ValueError: bad
+            '''
+            assert first_own_frame(tb, "/repo/") is None
+          message: "Return None when no frame is in your code."
+        - id: chained
+          code: |
+            tb = '''Traceback (most recent call last):
+              File "/repo/a.py", line 2, in f
+            KeyError: 'k'
+
+            During handling of the above exception, another exception occurred:
+
+            Traceback (most recent call last):
+              File "/repo/b.py", line 9, in g
+              File "/repo/c.py", line 4, in h
+            NameError: name 'x' is not defined
+            '''
+            assert first_own_frame(tb, "/repo/") == ("/repo/c.py", 4)
+          message: "Use the last traceback in the text, and its last frame in your code."
+    solution: |
+      import re
+
+      FRAME_PATTERN = re.compile(r'^\s*File "(?P<path>[^"]+)", line (?P<line>\d+)')
+
+
+      def first_own_frame(traceback_text: str, project_dir: str) -> tuple[str, int] | None:
+          """Find the frame to start from when reading a traceback bottom up.
+
+          Args:
+              traceback_text: Full traceback text, possibly chained.
+              project_dir: Path prefix of your own code.
+
+          Returns:
+              (path, line) of the last frame inside project_dir, or None.
+          """
+          last_block = traceback_text.split("Traceback (most recent call last):")[-1]
+          found: tuple[str, int] | None = None
+          for line in last_block.splitlines():
+              match = FRAME_PATTERN.match(line)
+              if match and match["path"].startswith(project_dir):
+                  found = (match["path"], int(match["line"]))
+          return found
+    seeded_bugs:
+      - |
+        import re
+
+        FRAME_PATTERN = re.compile(r'^\s*File "(?P<path>[^"]+)", line (?P<line>\d+)')
+
+
+        def first_own_frame(traceback_text: str, project_dir: str) -> tuple[str, int] | None:
+            """Returns the top frame, reading top down."""
+            for line in traceback_text.splitlines():
+                match = FRAME_PATTERN.match(line)
+                if match and match["path"].startswith(project_dir):
+                    return (match["path"], int(match["line"]))
+            return None
+      - |
+        import re
+
+        FRAME_PATTERN = re.compile(r'^\s*File "(?P<path>[^"]+)", line (?P<line>\d+)')
+
+
+        def first_own_frame(traceback_text: str, project_dir: str) -> tuple[str, int] | None:
+            """Ignores project_dir: returns the very last frame."""
+            found: tuple[str, int] | None = None
+            for line in traceback_text.splitlines():
+                match = FRAME_PATTERN.match(line)
+                if match:
+                    found = (match["path"], int(match["line"]))
+            return found
+    wrong_answers:
+      - answer: |
+          import re
+
+          FRAME_PATTERN = re.compile(r'^\s*File "(?P<path>[^"]+)", line (?P<line>\d+)')
+
+
+          def first_own_frame(traceback_text: str, project_dir: str) -> tuple[str, int] | None:
+              """Returns the top frame, reading top down."""
+              for line in traceback_text.splitlines():
+                  match = FRAME_PATTERN.match(line)
+                  if match and match["path"].startswith(project_dir):
+                      return (match["path"], int(match["line"]))
+              return None
+        triggers: bottom_up
+    hints:
+      - "Split on 'Traceback (most recent call last):' and keep the last part."
+      - "Match frame lines with a regular expression."
+      - "Keep overwriting the result, so the last match wins."
+    explanation: |
+      Reading bottom up is the same as keeping the last matching frame. Library frames never match your prefix.
+
+  - id: D1-L1-E5
+    type: refactor
+    difficulty: 4
+    language: python
+    prompt: |
+      Refactor `row_count_bounds` so a missing key raises `ValueError` naming the contract id and the missing key, chained to the original `KeyError` with `from`. Add type hints and a docstring.
+    starter: |
+      def row_count_bounds(contract):
+          try:
+              return contract["row_count_min"], contract["row_count_max"]
+          except Exception:
+              raise ValueError("bad contract")
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: row_count_bounds
+          typed: true
+          docstring: true
+          message: "Give `row_count_bounds` type hints and a docstring."
+      tests:
+        - id: ok
+          code: |
+            assert row_count_bounds({"contract_id": "nat_v2", "row_count_min": 1, "row_count_max": 9}) == (1, 9)
+          message: "Return (min, max) for a complete contract."
+        - id: chained
+          code: |
+            try:
+                row_count_bounds({"contract_id": "nat_v2", "row_count_min": 1})
+            except ValueError as err:
+                assert isinstance(err.__cause__, KeyError), "not chained with from"
+                assert "nat_v2" in str(err) and "row_count_max" in str(err), str(err)
+            else:
+                raise AssertionError("no ValueError")
+          message: "Raise ValueError naming the contract and the key, with `from err` so the KeyError is the direct cause."
+        - id: narrow
+          code: |
+            try:
+                row_count_bounds(None)
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("TypeError was swallowed")
+          message: "Catch only KeyError. Other errors, such as passing None, must surface unchanged."
+    solution: |
+      def row_count_bounds(contract: dict[str, object]) -> tuple[object, object]:
+          """Row count bounds from a data contract.
+
+          Args:
+              contract: Parsed contract with contract_id, row_count_min and row_count_max.
+
+          Returns:
+              (row_count_min, row_count_max).
+
+          Raises:
+              ValueError: If a bound is missing.
+          """
+          try:
+              return contract["row_count_min"], contract["row_count_max"]
+          except KeyError as err:
+              contract_id = contract.get("contract_id", "<unknown>")
+              raise ValueError(f"contract {contract_id} is missing key {err.args[0]}") from err
+    seeded_bugs:
+      - |
+        def row_count_bounds(contract: dict[str, object]) -> tuple[object, object]:
+            """No chain."""
+            try:
+                return contract["row_count_min"], contract["row_count_max"]
+            except KeyError as err:
+                raise ValueError(f"contract {contract.get('contract_id')} is missing key {err.args[0]}") from None
+      - |
+        def row_count_bounds(contract: dict[str, object]) -> tuple[object, object]:
+            """Catches everything."""
+            try:
+                return contract["row_count_min"], contract["row_count_max"]
+            except Exception as err:
+                raise ValueError(f"contract is missing key {err}") from err
+    wrong_answers:
+      - answer: |
+          def row_count_bounds(contract: dict[str, object]) -> tuple[object, object]:
+              """No chain."""
+              try:
+                  return contract["row_count_min"], contract["row_count_max"]
+              except KeyError as err:
+                  raise ValueError(f"contract {contract.get('contract_id')} is missing key {err.args[0]}") from None
+        triggers: chained
+    hints:
+      - "Catch `KeyError as err`, nothing wider."
+      - "`err.args[0]` is the missing key."
+      - "End the raise with `from err`."
+    explanation: |
+      A narrow except, a message with the facts, and an explicit chain. The next reader sees both tracebacks joined by "direct cause".
+
+recap:
+  - front: "Order for reading a traceback"
+    back: "Last line (what), frame above it (where), then up to the first frame in your own code."
+  - front: "'The above exception was the direct cause...'"
+    back: "Someone chained with raise ... from err. The first traceback is the root cause."
+  - front: "'During handling of the above exception...'"
+    back: "The except block raised a new error. Fix the handler and the original error."
+  - front: "Re-raising with context"
+    back: "Catch the narrow exception, add facts to the message, and chain with from err."
+
+claims:
+  - claim: "Python 3.11+ prints caret or tilde markers under the failing expression; 3.12 and 3.13 add 'Did you forget to import' to NameError for standard modules; 3.11 does not."
+    status: verified
+    source: "Local runs on CPython 3.11.15, 3.12.3 and 3.13.12, September 2026."
+  - claim: "raise ... from err prints 'The above exception was the direct cause of the following exception'; an error inside an except block prints 'During handling of the above exception, another exception occurred'."
+    status: verified
+    source: "Local runs on CPython 3.11.15 and 3.13.12, September 2026."
+  - claim: "round(None, 4) raises TypeError: type NoneType doesn't define __round__ method."
+    status: verified
+    source: "Local run on CPython 3.13.12, September 2026."

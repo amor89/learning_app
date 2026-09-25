@@ -1,0 +1,321 @@
+id: D1-L3
+title: Py4J and Spark Connect errors
+
+concept: |
+  PySpark talks to the Spark engine in one of two ways, and each shapes the errors you see. Facts below were checked on PySpark 4.0.4 and the Databricks docs in September 2026.
+
+  **Spark Classic** runs your Python next to a JVM driver through **Py4J**. PySpark converts most engine errors into Python classes such as `AnalysisException`. Some still arrive raw, as `py4j.protocol.Py4JJavaError`:
+
+  ```text
+  Py4JJavaError: An error occurred while calling
+  z:org.apache.spark.api.python.PythonRDD.collectAndServe.
+  : org.apache.spark.SparkException: Job aborted due to stage failure ...
+  Caused by: org.apache.spark.api.python.PythonException: Traceback ...
+    File "/repo/job.py", line 5, in <lambda>
+  ZeroDivisionError: division by zero
+  ```
+
+  Skip the Java frames. Search for the **last `Caused by:`** line and the Python traceback inside it. That is your bug.
+
+  **Spark Connect** sends a query plan to a remote server over gRPC. Databricks **serverless compute uses Spark Connect**, and supports only Spark Connect APIs. Three differences matter when you debug:
+
+  - **Analysis is deferred.** Classic Spark rejects a misspelt column when you call `select`. Spark Connect accepts the `select` and raises `AnalysisException` at the action, or when you read `df.columns` or `df.schema`. A `try` around the `select` catches nothing.
+  - **Error classes live in `pyspark.errors.exceptions.connect`.** They subclass `SparkConnectGrpcException` and the familiar base classes, so `except pyspark.errors.AnalysisException` still works. The message ends with a `JVM stacktrace:` section from the server.
+  - **JVM-only attributes fail.** `spark.sparkContext` raises `[JVM_ATTRIBUTE_NOT_SUPPORTED]`. RDD code, such as `sc.parallelize`, does not run on serverless.
+
+  Two habits follow. Catch `pyspark.errors` classes, never `Py4JJavaError`, so the same code works on both. And place error handling around the **action**, where both modes raise, not around the transformation.
+
+why_it_matters: |
+  A notebook wrapped `df.select(col(name))` in `try/except AnalysisException` to skip columns missing from older waves. It worked on a classic cluster. After the team moved the job to serverless, the `except` never fired: the `select` succeeded, and the `write` failed with the same `AnalysisException` two cells later. Checking `name in df.columns` before the `select` works in both modes.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      from py4j.protocol import Py4JJavaError
+      from pyspark.sql import functions as F
+
+      try:
+          selected = df.select(F.col(optional_column))
+      except Py4JJavaError:
+          selected = df
+      selected.write.mode("append").saveAsTable(target_table)
+    annotations:
+      - find: "from py4j.protocol import Py4JJavaError"
+        note: "Py4J exists only in Spark Classic. Serverless has no Py4J."
+      - find: "    selected = df.select(F.col(optional_column))"
+        note: "Under Spark Connect this line never raises. The error arrives at the write."
+  strong:
+    code: |
+      from pyspark.errors import AnalysisException
+      from pyspark.sql import functions as F
+
+      columns = [c for c in (key_column, optional_column) if c in df.columns]
+      selected = df.select(*[F.col(c) for c in columns])
+      try:
+          selected.write.mode("append").saveAsTable(target_table)
+      except AnalysisException as err:
+          raise RuntimeError(f"write to {target_table} failed: {err.getCondition()}") from err
+    annotations:
+      - find: "columns = [c for c in (key_column, optional_column) if c in df.columns]"
+        note: "Check the schema explicitly. Works the same in Classic and Connect."
+      - find: "except AnalysisException as err:"
+        note: "A pyspark.errors class, caught around the action, where both modes raise."
+  takeaway: |
+    Find the last "Caused by" in a Py4J error. Under Spark Connect, expect errors at the action, and catch pyspark.errors classes.
+
+exercises:
+  - id: D1-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A raw `Py4JJavaError` fills 200 lines, mostly Java frames. Where is the cause of a Python UDF failure?
+    options:
+      - {id: a, text: "After the last 'Caused by:', in the Python traceback it contains"}
+      - {id: b, text: "In the first Java frame"}
+      - {id: c, text: "In the line 'An error occurred while calling'"}
+      - {id: d, text: "It is not shown. You must read the executor logs"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The JVM wraps the Python worker's exception. The innermost cause holds the Python traceback."}
+      - {id: r2, text: "Java always prints the cause first."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Java frames show Spark's internals, not your code."
+      - answer: c
+        feedback: "That line names the JVM method Python called, such as collectAndServe."
+      - answer: d
+        feedback: "The Python traceback is inside the message, after 'Caused by: org.apache.spark.api.python.PythonException'."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. The cause comes last, nested inside the outer exception."
+    hints:
+      - "Wrapped exceptions nest."
+      - "Look for 'Caused by:'."
+      - "The last one."
+    explanation: |
+      Search the message for the last "Caused by:" and read its Python traceback bottom up.
+
+  - id: D1-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      This runs on **serverless** (Spark Connect). The DataFrame has no column `region`. What does it print?
+    code: |
+      from pyspark.errors import AnalysisException
+      from pyspark.sql import functions as F
+
+      try:
+          out = df.select(F.col("region"))
+          print("select ok")
+      except AnalysisException:
+          print("caught")
+    answer: "select ok"
+    wrong_answers:
+      - answer: "caught"
+        feedback: "That is Spark Classic, which analyses eagerly. Spark Connect defers analysis to the action."
+    hints:
+      - "When does Spark Connect resolve column names?"
+      - "At execution, or when you read the schema."
+      - "No action runs here."
+    explanation: |
+      Spark Connect builds the plan without resolving names, so the `select` succeeds. `out.count()` or `out.columns` would raise.
+
+  - id: D1-L3-E3
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Which `except` clause catches a missing-column error on both a classic cluster and serverless?
+    options:
+      - {id: a, text: "except pyspark.errors.AnalysisException"}
+      - {id: b, text: "except py4j.protocol.Py4JJavaError"}
+      - {id: c, text: "except pyspark.errors.exceptions.connect.SparkConnectGrpcException"}
+      - {id: d, text: "except KeyError"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Both modes raise a subclass of pyspark.errors.AnalysisException."}
+      - {id: r2, text: "AnalysisException is a Py4J class."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Py4J exists only in Spark Classic, and PySpark converts most errors before you see them."
+      - answer: c
+        feedback: "That class exists only under Spark Connect."
+      - answer: d
+        feedback: "Column errors are not Python KeyErrors."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. It is a pyspark.errors class, with Classic and Connect subclasses."
+    hints:
+      - "Which package is shared by both modes?"
+      - "pyspark.errors."
+      - "AnalysisException."
+    explanation: |
+      Catch the base classes in `pyspark.errors`. Your code then works in both modes.
+
+  - id: D1-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `python_cause(message: str) -> str | None`. Given the text of a Py4J error, return the last line of the Python traceback in the **last** `Caused by: org.apache.spark.api.python.PythonException` section: the first non-blank line that does not start with whitespace, `Traceback` or `File`, after that marker. Return `None` if there is no such section.
+    starter: |
+      def python_cause(message):
+          return message.splitlines()[-1]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: python_cause
+          typed: true
+          docstring: true
+          message: "Give `python_cause` type hints and a docstring."
+      tests:
+        - id: found
+          code: |
+            msg = (
+                "An error occurred while calling z:PythonRDD.collectAndServe.\n"
+                ": org.apache.spark.SparkException: Job aborted\n"
+                "Caused by: org.apache.spark.api.python.PythonException: Traceback (most recent call last):\n"
+                '  File "/repo/job.py", line 5, in <lambda>\n'
+                "ZeroDivisionError: division by zero\n"
+                "\tat org.apache.spark.api.python.BasePythonRunner.handle(PythonRunner.scala:1)\n"
+            )
+            assert python_cause(msg) == "ZeroDivisionError: division by zero"
+          message: "Return the exception line after the PythonException marker, skipping frames and Java lines."
+        - id: last_section
+          code: |
+            msg = (
+                "Caused by: org.apache.spark.api.python.PythonException: Traceback (most recent call last):\n"
+                "KeyError: 'a'\n"
+                "Caused by: org.apache.spark.api.python.PythonException: Traceback (most recent call last):\n"
+                '  File "/repo/udf.py", line 3, in ratio\n'
+                "TypeError: unsupported operand\n"
+            )
+            assert python_cause(msg) == "TypeError: unsupported operand"
+          message: "Use the last PythonException section."
+        - id: none
+          code: |
+            assert python_cause("[UNRESOLVED_COLUMN.WITH_SUGGESTION] ... SQLSTATE: 42703") is None
+          message: "No PythonException section: return None."
+    solution: |
+      MARKER = "Caused by: org.apache.spark.api.python.PythonException:"
+
+
+      def python_cause(message: str) -> str | None:
+          """Python exception line inside the last PythonException of a Py4J error.
+
+          Args:
+              message: Full error text.
+
+          Returns:
+              The exception line, such as "ZeroDivisionError: division by zero", or None.
+          """
+          if MARKER not in message:
+              return None
+          section = message.rsplit(MARKER, 1)[1]
+          for line in section.splitlines()[1:]:
+              if not line.strip() or line[0].isspace():
+                  continue
+              if line.startswith(("Traceback", "File")):
+                  continue
+              return line
+          return None
+    seeded_bugs:
+      - |
+        MARKER = "Caused by: org.apache.spark.api.python.PythonException:"
+
+
+        def python_cause(message: str) -> str | None:
+            """Uses the first section."""
+            if MARKER not in message:
+                return None
+            section = message.split(MARKER, 2)[1]
+            for line in section.splitlines()[1:]:
+                if not line.strip() or line[0].isspace() or line.startswith(("Traceback", "File")):
+                    continue
+                return line
+            return None
+    wrong_answers:
+      - answer: |
+          MARKER = "Caused by: org.apache.spark.api.python.PythonException:"
+
+
+          def python_cause(message: str) -> str | None:
+              """Uses the first section."""
+              if MARKER not in message:
+                  return None
+              section = message.split(MARKER, 2)[1]
+              for line in section.splitlines()[1:]:
+                  if not line.strip() or line[0].isspace() or line.startswith(("Traceback", "File")):
+                      continue
+                  return line
+              return None
+        triggers: last_section
+    hints:
+      - "`message.rsplit(MARKER, 1)[1]` gives the text after the last marker."
+      - "Skip the rest of the marker line, then indented lines."
+      - "Java frames start with a tab, which is whitespace."
+    explanation: |
+      The innermost cause is last. `rsplit` with a limit of 1 finds it directly.
+
+  - id: D1-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A notebook written for a classic cluster moves to serverless. Plan the changes to its error handling.
+    slots:
+      - id: optional
+        label: "Optional columns in older waves"
+        options:
+          - {id: schema, text: "Check `name in df.columns` before selecting"}
+          - {id: try_select, text: "Wrap each select in try/except"}
+        answer: schema
+      - id: except_class
+        label: "Exception class to catch"
+        options:
+          - {id: pyspark, text: "pyspark.errors.AnalysisException"}
+          - {id: py4j, text: "py4j.protocol.Py4JJavaError"}
+        answer: pyspark
+      - id: rdd
+        label: "A helper that uses sc.parallelize"
+        options:
+          - {id: rewrite, text: "Rewrite it with the DataFrame API"}
+          - {id: keep, text: "Keep it: serverless runs RDD code"}
+        answer: rewrite
+    model_answer: |
+      - Spark Connect defers analysis, so a try around a select catches nothing. An explicit schema check works in both modes.
+      - pyspark.errors classes exist in both modes. Py4J exists only in Classic.
+      - Serverless supports only Spark Connect APIs, not RDDs.
+    wrong_answers:
+      - answer: {optional: try_select}
+        feedback: "Under Spark Connect the select succeeds and the error moves to the action."
+      - answer: {except_class: py4j}
+        feedback: "Serverless has no Py4J."
+      - answer: {rdd: keep}
+        feedback: "Spark RDD APIs are not supported on serverless compute."
+    hints:
+      - "When does Connect resolve names?"
+      - "Which package exists in both modes?"
+      - "What does serverless support?"
+    explanation: |
+      Explicit schema checks, pyspark.errors classes, and the DataFrame API only.
+
+recap:
+  - front: "Finding the cause in a Py4JJavaError"
+    back: "Search for the last 'Caused by:'. A Python UDF error holds a Python traceback there."
+  - front: "Spark Connect and missing columns"
+    back: "Analysis is deferred. The error comes at the action or when you read df.columns or df.schema."
+  - front: "Exception class that works on Classic and Connect"
+    back: "pyspark.errors.AnalysisException (and other pyspark.errors classes). Not Py4JJavaError."
+  - front: "Serverless compute and the Spark API"
+    back: "Spark Connect only. No RDD APIs. spark.sparkContext raises JVM_ATTRIBUTE_NOT_SUPPORTED."
+
+claims:
+  - claim: "Classic: raw Py4JJavaError for RDD Python failures with 'Caused by: org.apache.spark.api.python.PythonException' holding the Python traceback; eager analysis at select. Connect: analysis deferred to action or schema access; errors in pyspark.errors.exceptions.connect subclass SparkConnectGrpcException and are caught by pyspark.errors.AnalysisException; message includes 'JVM stacktrace:'; spark.sparkContext raises JVM_ATTRIBUTE_NOT_SUPPORTED."
+    status: verified
+    source: "Local runs on PySpark 4.0.4, classic local[1] and remote('local[1]'), September 2026."
+  - claim: "Serverless compute supports only Spark Connect APIs, not RDD APIs, and defers analysis and name resolution to execution time."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/compute/serverless/limitations and https://docs.databricks.com/aws/en/spark/connect-vs-classic (checked 2026-09-25)"

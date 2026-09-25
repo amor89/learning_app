@@ -1,0 +1,317 @@
+id: D2-L1
+title: breakpoint() and pdb, stop and look
+
+concept: |
+  A traceback shows where code failed. A **debugger** shows the values at that moment. Python ships one: **pdb**.
+
+  **Stop at a line.** Put `breakpoint()` in your code. When Python reaches it, pdb opens a prompt, `(Pdb)`, with every local variable in scope. Setting the environment variable `PYTHONBREAKPOINT=0` turns every `breakpoint()` call into a no-op, so a forgotten one cannot hang a scheduled job. Remove them before you commit anyway.
+
+  **Stop where it crashed.** Run a script under pdb with post-mortem on:
+
+  ```text
+  python -m pdb -c continue run_qa.py
+  ...
+  ZeroDivisionError: float division by zero
+  Uncaught exception. Entering post mortem debugging
+  > /repo/run_qa.py(2)weighted_pct()
+  -> ratio = reach / base
+  (Pdb) p reach, base
+  (5.0, 0.0)
+  ```
+
+  You land in the frame that raised, with its variables intact. Checked on Python 3.13.
+
+  The commands you use most:
+
+  | Command | Does |
+  | --- | --- |
+  | `p expr`, `pp expr` | Print, or pretty-print, a value |
+  | `w` | Show the stack, newest frame last |
+  | `u`, `d` | Move up to the caller, or down again |
+  | `n` | Run the next line, stepping over calls |
+  | `s` | Step into a call |
+  | `c` | Continue to the next breakpoint |
+  | `l` | List source around the current line |
+  | `q` | Quit |
+
+  A useful pattern: after a crash, `p` the inputs of the failing frame. If they look wrong, `u` to the caller and `p` what it passed. Repeat until you find the first frame where a value went bad. That is the frame to fix.
+
+  **In Databricks notebooks**, the built-in interactive debugger gives breakpoints, stepping and a variable view for Python cells. It runs on serverless and on recent runtimes, after you turn it on in your editor settings.
+
+  **In Spark code** a debugger stops only the driver. Code inside a UDF runs on executors, where your breakpoint never fires. Test UDF logic as a plain Python function first.
+
+why_it_matters: |
+  A weighted-reach function returned 0.0 for one subgroup. An analyst added eleven print statements over two hours and still missed it. A post-mortem pdb session on a forced failure showed in one command that `base` was the unweighted count, passed in by a caller that swapped two arguments. `u`, then `p`, found the caller.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def weighted_pct(reach: float, base: float) -> float:
+          """Weighted percentage."""
+          print("DEBUG reach", reach)
+          print("DEBUG base", base)
+          breakpoint()
+          return round(reach / base * 100, 1)
+    annotations:
+      - find: '    print("DEBUG reach", reach)'
+        note: "Print debugging leaves noise in job logs and shows only what you guessed to print."
+      - find: "    breakpoint()"
+        note: "Committed by mistake, it waits for input in a job that nobody is watching."
+  strong:
+    code: |
+      def weighted_pct(reach: float, base: float) -> float | None:
+          """Weighted percentage, or None when the base is zero."""
+          if base == 0:
+              return None
+          return round(reach / base * 100, 1)
+
+      # To investigate a failure, run: python -m pdb -c continue run_qa.py
+      # then: p reach, base   u   p rows
+    annotations:
+      - find: "    if base == 0:"
+        note: "The fix the debugging session pointed to: guard the division."
+      - find: "# To investigate a failure, run: python -m pdb -c continue run_qa.py"
+        note: "Debug from outside the code. Nothing to remove before you commit."
+  takeaway: |
+    Let the crash open the debugger, print the failing frame's inputs, then walk up until the values go wrong.
+
+exercises:
+  - id: D2-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A scheduled job runs with `PYTHONBREAKPOINT=0`. The code contains `breakpoint()`. What happens at that line?
+    options:
+      - {id: a, text: "Nothing: the call does nothing and the job continues"}
+      - {id: b, text: "The job waits for input forever"}
+      - {id: c, text: "The job fails with a RuntimeError"}
+      - {id: d, text: "pdb opens and quits at once"}
+    answer: a
+    reasons:
+      - {id: r1, text: "PYTHONBREAKPOINT=0 makes breakpoint() a no-op."}
+      - {id: r2, text: "Scheduled jobs never run pdb."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That is what happens without the variable. With 0, the call is ignored."
+      - answer: c
+        feedback: "No error. The call returns immediately."
+      - answer: d
+        feedback: "pdb never starts."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Without the variable, a scheduled job would stop at the breakpoint."
+    hints:
+      - "The variable controls what breakpoint() calls."
+      - "0 means disabled."
+      - "The job continues."
+    explanation: |
+      Set PYTHONBREAKPOINT=0 in job environments as a safety net, and still remove breakpoints before committing.
+
+  - id: D2-L1-E2
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      You are in a post-mortem pdb session in `weighted_pct`. Complete the commands.
+    template: |
+      (Pdb) [[g1]] reach, base        # print the inputs
+      (Pdb) [[g2]]                    # move to the caller's frame
+      (Pdb) p rows
+    gaps:
+      g1: {accepted: [p, pp]}
+      g2: {accepted: [u, up]}
+    wrong_answers:
+      - answer: {g2: d}
+        feedback: "`d` moves down, towards the newest frame. You are already there. Use `u`."
+    hints:
+      - "Print is one letter."
+      - "Up is one letter."
+      - "`p` and `u`."
+    explanation: |
+      `p` shows values. `u` moves to the caller, where the bad value came from.
+
+  - id: D2-L1-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order a debugging session for a function that returns a wrong number.
+    items:
+      - {id: repro, text: "Reproduce with the smallest input that gives the wrong number"}
+      - {id: stop, text: "Stop in the function with breakpoint() or post-mortem pdb"}
+      - {id: inspect, text: "Print the inputs, walk up with u until a value is first wrong"}
+      - {id: fix, text: "Fix that frame and add a test with the small input"}
+      - {id: clean, text: "Remove the breakpoint and run the tests"}
+    answer: [repro, stop, inspect, fix, clean]
+    wrong_answers:
+      - answer: [stop, repro, inspect, fix, clean]
+        feedback: "Reproduce first, with small data, so each run is fast and you know the right answer."
+      - answer: [repro, stop, inspect, clean, fix]
+        feedback: "Fix and add the test while you know the cause, then clean up."
+    hints:
+      - "What makes each run fast?"
+      - "Find the first wrong value."
+      - "Clean up last."
+    explanation: |
+      Small reproduction, stop, walk up to the first wrong value, fix with a test, clean up.
+
+  - id: D2-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Post-mortem debugging reads the local variables of the frame that raised. Write `crash_locals(fn: Callable[..., object], *args: object) -> dict[str, object] | None` that calls `fn(*args)`. If it raises, return a copy of the local variables of the **innermost** frame of the traceback (the one pdb lands in). If it does not raise, return `None`. Import `Callable` from `collections.abc`.
+    starter: |
+      def crash_locals(fn, *args):
+          try:
+              fn(*args)
+          except Exception:
+              return locals()
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: crash_locals
+          typed: true
+          docstring: true
+          message: "Give `crash_locals` type hints and a docstring."
+      tests:
+        - id: innermost
+          code: |
+            def weighted_pct(reach, base):
+                ratio = reach / base
+                return ratio
+            def report(rows):
+                return [weighted_pct(r, b) for r, b in rows]
+            found = crash_locals(report, [(1.0, 2.0), (5.0, 0.0)])
+            assert found == {"reach": 5.0, "base": 0.0}, found
+          message: "Return the locals of the innermost frame, where the error was raised, not the caller's or your own."
+        - id: no_error
+          code: |
+            assert crash_locals(lambda x: x + 1, 1) is None
+          message: "Return None when the call succeeds."
+    solution: |
+      from collections.abc import Callable
+
+
+      def crash_locals(fn: Callable[..., object], *args: object) -> dict[str, object] | None:
+          """Local variables of the frame that raised, as pdb post-mortem shows them.
+
+          Args:
+              fn: Function to call.
+              *args: Arguments for fn.
+
+          Returns:
+              A copy of the innermost frame's locals, or None if fn did not raise.
+          """
+          try:
+              fn(*args)
+          except Exception as err:
+              tb = err.__traceback__
+              while tb is not None and tb.tb_next is not None:
+                  tb = tb.tb_next
+              return dict(tb.tb_frame.f_locals) if tb is not None else None
+          return None
+    seeded_bugs:
+      - |
+        from collections.abc import Callable
+
+
+        def crash_locals(fn: Callable[..., object], *args: object) -> dict[str, object] | None:
+            """Returns the outermost frame after crash_locals itself."""
+            try:
+                fn(*args)
+            except Exception as err:
+                tb = err.__traceback__
+                if tb is not None and tb.tb_next is not None:
+                    tb = tb.tb_next
+                return dict(tb.tb_frame.f_locals) if tb is not None else None
+            return None
+    wrong_answers:
+      - answer: |
+          from collections.abc import Callable
+
+
+          def crash_locals(fn: Callable[..., object], *args: object) -> dict[str, object] | None:
+              """Returns the outermost frame after crash_locals itself."""
+              try:
+                  fn(*args)
+              except Exception as err:
+                  tb = err.__traceback__
+                  if tb is not None and tb.tb_next is not None:
+                      tb = tb.tb_next
+                  return dict(tb.tb_frame.f_locals) if tb is not None else None
+              return None
+        triggers: innermost
+    hints:
+      - "`err.__traceback__` is the outermost traceback entry."
+      - "Follow `tb_next` until it is None."
+      - "`tb.tb_frame.f_locals` holds that frame's variables."
+    explanation: |
+      A traceback is a linked list from your call down to the raise. pdb post-mortem opens at its last entry.
+
+  - id: D2-L1-E5
+    type: spot_bug
+    difficulty: 3
+    language: python
+    prompt: |
+      This function is ready for a scheduled job, except for one line. Tap it, then remove it and anything else left from debugging.
+    code: |
+      def unweighted_base(rows: list[dict[str, object]]) -> int:
+          """Count in-scope respondents."""
+          in_scope = [r for r in rows if r["in_scope"] is True]
+          breakpoint()
+          return len(in_scope)
+    bug_lines: [4]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_breakpoint
+          kind: forbids_call
+          name: breakpoint
+          message: "breakpoint() still waits for input in an unattended job."
+        - id: no_print
+          kind: forbids_call
+          name: print
+          message: "Remove debug prints too."
+      tests:
+        - id: works
+          code: |
+            assert unweighted_base([{"in_scope": True}, {"in_scope": False}]) == 1
+          message: "Keep the counting logic."
+    fix_solution: |
+      def unweighted_base(rows: list[dict[str, object]]) -> int:
+          """Count in-scope respondents."""
+          in_scope = [r for r in rows if r["in_scope"] is True]
+          return len(in_scope)
+    wrong_answers:
+      - lines: [3]
+        feedback: "`is True` is correct for a Python bool flag in a dict. The problem is the next line."
+    hints:
+      - "Which line would stop an unattended job?"
+      - "A debugging call."
+      - "Line 4."
+    explanation: |
+      A leftover `breakpoint()` blocks a job waiting for input that never comes. ruff rule T100 flags it.
+
+recap:
+  - front: "Open pdb where a script crashed"
+    back: "python -m pdb -c continue script.py. You land in the frame that raised."
+  - front: "pdb: print, stack, up, next, step, continue"
+    back: "p, w, u, n, s, c."
+  - front: "PYTHONBREAKPOINT=0"
+    back: "Makes breakpoint() a no-op. A safety net for jobs, not a reason to commit breakpoints."
+  - front: "Why a breakpoint in a Spark UDF never fires"
+    back: "UDFs run on executors. The debugger stops only the driver. Test UDF logic as plain Python."
+
+claims:
+  - claim: "python -m pdb -c continue enters post-mortem at the raising frame and prints 'Uncaught exception. Entering post mortem debugging'; PYTHONBREAKPOINT=0 disables breakpoint(); commands p, w, u, d, n, s, c, l, q."
+    status: verified
+    source: "Local runs on CPython 3.13.12, September 2026."
+  - claim: "Databricks notebooks have a built-in interactive debugger for Python, available on serverless and recent runtimes, turned on in editor settings."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/notebooks/debugger (checked 2026-09-25)"
+  - claim: "ruff rule T100 flags debugger calls such as breakpoint()."
+    status: verified
+    source: "ruff 0.16.9 run in this repo reports 'T100 Trace found: `breakpoint` used'."

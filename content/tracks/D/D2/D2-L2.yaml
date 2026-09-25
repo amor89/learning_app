@@ -1,0 +1,368 @@
+id: D2-L2
+title: Logging levels that help at 3 a.m.
+
+concept: |
+  A job that failed overnight leaves you its logs and nothing else. Good logs answer three questions fast: what ran, with what inputs, and where it stopped. Python's `logging` module does this better than `print`.
+
+  **One logger per module:**
+
+  ```python
+  import logging
+
+  logger = logging.getLogger(__name__)
+  ```
+
+  **Levels**, lowest to highest, with their numbers:
+
+  | Level | Number | Use it for |
+  | --- | --- | --- |
+  | DEBUG | 10 | Detail you need only while investigating |
+  | INFO | 20 | Normal progress: step started, rows written |
+  | WARNING | 30 | Unexpected but handled: a WARN check |
+  | ERROR | 40 | A step failed |
+  | CRITICAL | 50 | The pipeline cannot continue |
+
+  A logger passes on records at or above its effective level. The root logger's default is **WARNING**, so `logger.info(...)` prints nothing until you configure logging. Checked on Python 3.13:
+
+  - `logging.basicConfig(level=logging.INFO)` configures the root logger **once**. A second call does nothing, unless you pass `force=True`.
+  - `logger.exception("...")` inside an `except` block logs at ERROR and appends the traceback.
+  - Pass values as arguments: `logger.info("wrote %d rows to %s", n, table)`. The string is built only if the record is emitted. ruff rule G004 flags f-strings in logging calls.
+
+  **Logging is not control flow.** `logger.critical(...)` records a message. It does not stop anything. Your standard says a CRITICAL check **raises**. Log, then raise.
+
+  **Logging is not your run log.** Text logs are for people debugging. The Delta run log table, with one structured row per run, is for queries and dashboards. Write both.
+
+  Every log line in a pipeline should carry the identifiers that let you find the data: tracker, wave, table, run id.
+
+why_it_matters: |
+  A silver job logged "Processing..." and "Done" at INFO for every wave, and nothing else. When wave W14 produced 30% fewer rows, the logs could not say which step dropped them. Adding one INFO line per step, with the row count, tracker and wave, turned the next investigation from a day of reruns into a two-minute log search.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import logging
+
+      def run_checks(results: list[dict[str, str]], wave_id: str) -> None:
+          """Report check results."""
+          for r in results:
+              if r["status"] == "FAIL" and r["severity"] == "CRITICAL":
+                  logging.critical(f"check failed: {r['check']}")
+              print("checked", r["check"])
+    annotations:
+      - find: "logging.critical(f\"check failed: {r['check']}\")"
+        note: "Logs CRITICAL and carries on. The pipeline continues with bad data. The f-string is built even when filtered (G004)."
+      - find: 'print("checked", r["check"])'
+        note: "print has no level, no logger name and no wave id."
+  strong:
+    code: |
+      import logging
+
+      logger = logging.getLogger(__name__)
+
+
+      class CriticalCheckFailed(RuntimeError):
+          """A CRITICAL data check failed and the pipeline must stop."""
+
+
+      def run_checks(results: list[dict[str, str]], wave_id: str) -> None:
+          """Log each check result and stop on a CRITICAL failure."""
+          for r in results:
+              logger.info("wave %s check %s status %s", wave_id, r["check"], r["status"])
+              if r["status"] == "FAIL" and r["severity"] == "CRITICAL":
+                  logger.critical("wave %s CRITICAL check %s failed", wave_id, r["check"])
+                  raise CriticalCheckFailed(f"{r['check']} failed for wave {wave_id}")
+    annotations:
+      - find: "logger = logging.getLogger(__name__)"
+        note: "A named logger per module. The name shows up in every record."
+      - find: 'logger.info("wave %s check %s status %s", wave_id, r["check"], r["status"])'
+        note: "Identifiers in every line, formatted only when emitted."
+      - find: 'raise CriticalCheckFailed(f"{r[''check'']} failed for wave {wave_id}")'
+        note: "Log, then raise. The level describes. The exception stops."
+  takeaway: |
+    One named logger per module, levels that match severity, identifiers in every line, and a raise after every CRITICAL.
+
+exercises:
+  - id: D2-L2-E1
+    type: predict_output
+    difficulty: 1
+    language: python
+    prompt: |
+      Nothing has configured logging. What does this print?
+    code: |
+      import logging
+
+      logger = logging.getLogger("qa")
+      logger.info("rows written")
+      logger.warning("weight sum low")
+    answer: "weight sum low"
+    wrong_answers:
+      - answer: "rows written\nweight sum low"
+        feedback: "The default effective level is WARNING, so the INFO record is dropped."
+      - answer: "WARNING:qa:weight sum low"
+        feedback: "That is basicConfig's default format. Without configuration, Python's last-resort handler prints the message only."
+    hints:
+      - "What is the root logger's default level?"
+      - "WARNING."
+      - "Only the warning appears, as bare text."
+    explanation: |
+      With no configuration, records at WARNING and above go to stderr as the bare message. INFO is dropped.
+
+  - id: D2-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A notebook calls `logging.basicConfig(level=logging.WARNING)` in its first cell, then `logging.basicConfig(level=logging.DEBUG)` later. What is the root level after the second call?
+    options:
+      - {id: a, text: "WARNING: the second call does nothing"}
+      - {id: b, text: "DEBUG"}
+      - {id: c, text: "An error is raised"}
+      - {id: d, text: "Both handlers are active"}
+    answer: a
+    reasons:
+      - {id: r1, text: "basicConfig does nothing if the root logger already has handlers, unless force=True."}
+      - {id: r2, text: "Logging levels can never be lowered."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Only with force=True, or with logger.setLevel."
+      - answer: c
+        feedback: "It returns silently, which is why this surprises people."
+      - answer: d
+        feedback: "No second handler is added."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. setLevel or force=True lower the level fine."
+    hints:
+      - "Does basicConfig reconfigure?"
+      - "Only the first call counts."
+      - "force=True changes that."
+    explanation: |
+      Pass `force=True`, or set levels on named loggers with `setLevel`.
+
+  - id: D2-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Log the failure with its traceback, then stop the pipeline.
+    template: |
+      try:
+          validate(df)
+      except ContractError:
+          logger.[[g1]]("contract failed for wave %s", wave_id)
+          [[g2]]
+    gaps:
+      g1: {accepted: [exception]}
+      g2: {accepted: [raise]}
+    wrong_answers:
+      - answer: {g1: error}
+        feedback: "error logs the message without the traceback. exception adds it."
+      - answer: {g2: pass}
+        feedback: "Swallowing the error lets the pipeline continue with invalid data."
+    hints:
+      - "Which logger method adds the traceback?"
+      - "A bare statement re-raises the current exception."
+      - "`exception` and `raise`."
+    explanation: |
+      `logger.exception` logs at ERROR with the traceback. A bare `raise` re-raises the same exception.
+
+  - id: D2-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `log_check(logger: logging.Logger, check: str, status: str, severity: str, wave_id: str) -> None`. Log at INFO for `"PASS"`, WARNING for `"WARN"`, ERROR for `"FAIL"` with non-CRITICAL severity, and CRITICAL for `"FAIL"` with `"CRITICAL"` severity, then raise `RuntimeError`. Every message contains the wave id and check name. Use %-style arguments, not f-strings, in the logging calls. Raise `ValueError` for an unknown status.
+    starter: |
+      import logging
+
+
+      def log_check(logger, check, status, severity, wave_id):
+          logger.info(f"{check} {status}")
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: log_check
+          typed: true
+          docstring: true
+          message: "Give `log_check` type hints and a docstring."
+        - id: no_fstring_logging
+          kind: forbids_pattern
+          pattern: "logger\\.\\w+\\(\\s*f[\"']"
+          message: "Pass values as logging arguments, not in an f-string (ruff G004)."
+      tests:
+        - id: levels
+          code: |
+            import logging
+            records = []
+            class H(logging.Handler):
+                def emit(self, record):
+                    records.append((record.levelno, record.getMessage()))
+            lg = logging.getLogger("t_levels"); lg.setLevel(logging.DEBUG); lg.addHandler(H()); lg.propagate = False
+            log_check(lg, "row_count", "PASS", "CRITICAL", "W01")
+            log_check(lg, "weight_cv", "WARN", "MEDIUM", "W01")
+            log_check(lg, "categorical", "FAIL", "HIGH", "W01")
+            assert [lvl for lvl, _ in records] == [20, 30, 40], records
+            assert all("W01" in m and c in m for (_, m), c in zip(records, ["row_count", "weight_cv", "categorical"])), records
+          message: "PASS is INFO, WARN is WARNING, a non-critical FAIL is ERROR. Include the wave and check in each message."
+        - id: critical_raises
+          code: |
+            import logging
+            records = []
+            class H(logging.Handler):
+                def emit(self, record):
+                    records.append(record.levelno)
+            lg = logging.getLogger("t_crit"); lg.setLevel(logging.DEBUG); lg.addHandler(H()); lg.propagate = False
+            try:
+                log_check(lg, "weight_sum", "FAIL", "CRITICAL", "W02")
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("no RuntimeError")
+            assert records == [50], records
+          message: "A CRITICAL failure logs at CRITICAL and then raises RuntimeError."
+        - id: unknown
+          code: |
+            import logging
+            try:
+                log_check(logging.getLogger("t_unk"), "x", "MAYBE", "LOW", "W01")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError")
+          message: "Unknown statuses raise ValueError."
+    solution: |
+      import logging
+
+      STATUS_LEVELS = {"PASS": logging.INFO, "WARN": logging.WARNING, "FAIL": logging.ERROR}
+
+
+      def log_check(
+          logger: logging.Logger, check: str, status: str, severity: str, wave_id: str
+      ) -> None:
+          """Log one check result at a level matching its outcome.
+
+          Args:
+              logger: Module logger.
+              check: Check name.
+              status: "PASS", "WARN" or "FAIL".
+              severity: Severity of the check, such as "CRITICAL".
+              wave_id: Wave being checked.
+
+          Raises:
+              ValueError: If status is unknown.
+              RuntimeError: If a CRITICAL check failed.
+          """
+          if status not in STATUS_LEVELS:
+              raise ValueError(f"unknown status: {status}")
+          if status == "FAIL" and severity == "CRITICAL":
+              logger.critical("wave %s check %s failed (CRITICAL)", wave_id, check)
+              raise RuntimeError(f"CRITICAL check {check} failed for wave {wave_id}")
+          logger.log(STATUS_LEVELS[status], "wave %s check %s %s", wave_id, check, status)
+    seeded_bugs:
+      - |
+        import logging
+
+
+        def log_check(logger: logging.Logger, check: str, status: str, severity: str, wave_id: str) -> None:
+            """Logs CRITICAL but does not stop."""
+            levels = {"PASS": logging.INFO, "WARN": logging.WARNING, "FAIL": logging.ERROR}
+            if status not in levels:
+                raise ValueError(status)
+            if status == "FAIL" and severity == "CRITICAL":
+                logger.critical("wave %s check %s failed", wave_id, check)
+                return
+            logger.log(levels[status], "wave %s check %s %s", wave_id, check, status)
+      - |
+        import logging
+
+
+        def log_check(logger: logging.Logger, check: str, status: str, severity: str, wave_id: str) -> None:
+            """Everything at INFO."""
+            if status not in ("PASS", "WARN", "FAIL"):
+                raise ValueError(status)
+            logger.info("wave %s check %s %s", wave_id, check, status)
+            if status == "FAIL" and severity == "CRITICAL":
+                raise RuntimeError(check)
+    wrong_answers:
+      - answer: |
+          import logging
+
+
+          def log_check(logger: logging.Logger, check: str, status: str, severity: str, wave_id: str) -> None:
+              """Logs CRITICAL but does not stop."""
+              levels = {"PASS": logging.INFO, "WARN": logging.WARNING, "FAIL": logging.ERROR}
+              if status not in levels:
+                  raise ValueError(status)
+              if status == "FAIL" and severity == "CRITICAL":
+                  logger.critical("wave %s check %s failed", wave_id, check)
+                  return
+              logger.log(levels[status], "wave %s check %s %s", wave_id, check, status)
+        triggers: critical_raises
+    hints:
+      - "A dict from status to level keeps the branches short."
+      - "`logger.log(level, msg, *args)` logs at any level."
+      - "Handle the CRITICAL case first: log, then raise."
+    explanation: |
+      Levels describe. Exceptions stop. A CRITICAL failure needs both.
+
+  - id: D2-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Set the logging for a silver job that runs nightly on Databricks.
+    slots:
+      - id: level
+        label: "Level in production"
+        options:
+          - {id: info, text: "INFO, with DEBUG switched on by a job parameter when investigating"}
+          - {id: debug, text: "DEBUG always"}
+        answer: info
+      - id: content
+        label: "Each step's log line"
+        options:
+          - {id: ids, text: "Step name, tracker, wave, row count, run id"}
+          - {id: done, text: "'Step done'"}
+        answer: ids
+      - id: record
+        label: "Run history for dashboards"
+        options:
+          - {id: table, text: "One structured row per run in the Delta run log table"}
+          - {id: parse, text: "Parse the text logs"}
+        answer: table
+    model_answer: |
+      - INFO keeps logs readable. A parameter enables DEBUG without a code change.
+      - Identifiers and counts let you find the step that dropped rows.
+      - Structured history belongs in a table. Text logs are for people.
+    wrong_answers:
+      - answer: {level: debug}
+        feedback: "DEBUG every night buries the lines you need under detail you rarely read."
+      - answer: {content: done}
+        feedback: "'Done' cannot tell you which wave or how many rows."
+      - answer: {record: parse}
+        feedback: "Log text changes. A run log table with a fixed schema is queryable."
+    hints:
+      - "What do you read at 3 a.m.?"
+      - "Which identifiers find the data?"
+      - "Where does history for dashboards live?"
+    explanation: |
+      INFO by default, identifiers everywhere, and a structured run log alongside the text.
+
+recap:
+  - front: "Logging levels and numbers"
+    back: "DEBUG 10, INFO 20, WARNING 30, ERROR 40, CRITICAL 50. Default effective level: WARNING."
+  - front: "basicConfig called twice"
+    back: "The second call does nothing, unless force=True."
+  - front: "logger.exception"
+    back: "Logs at ERROR with the traceback. Call it inside an except block."
+  - front: "Does logger.critical stop the pipeline?"
+    back: "No. Log, then raise."
+
+claims:
+  - claim: "Default effective level WARNING; unconfigured output is the bare message; basicConfig second call no-op unless force=True; logger.exception logs at ERROR with traceback; level numbers 10 to 50."
+    status: verified
+    source: "Local run on CPython 3.13.12, September 2026."
+  - claim: "ruff rule G004 flags f-strings in logging calls."
+    status: verified
+    source: "ruff 0.16.9 run in this repo reports 'G004 Logging statement uses f-string'."

@@ -1,0 +1,330 @@
+id: D1-L2
+title: Spark errors, the condition and the real cause
+
+concept: |
+  A Spark error message is long, but it has a fixed shape. In PySpark 4.0 (Databricks Runtime 17.3 LTS) most errors start with an **error condition** in square brackets and end with a **SQLSTATE**:
+
+  ```text
+  [UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or function
+  parameter with name `final_wieght` cannot be resolved. Did you mean one
+  of the following? [`final_weight`, `age`, `wave_id`, `respondent_id`].
+  SQLSTATE: 42703
+  ```
+
+  Read three things:
+
+  - **The condition** names the problem. Search for it in the Databricks error conditions reference.
+  - **The SQLSTATE class**, its first two characters. Class **42** is a syntax error or access rule violation: your code names something that does not exist. Class **22** is a data exception: the code is valid but a value is not.
+  - **The origin line.** Runtime errors show `== DataFrame ==` and `"cast" was called from ...` with your file and line.
+
+  **When the error appears.** Transformations are lazy, so a data error appears at the **action** (`collect`, `count`, `write`), not at the line that caused it. The origin line points you back. In classic Spark, a missing column fails at once, when you call `select`.
+
+  **Python UDF errors** arrive as `PythonException` wrapping a normal Python traceback. Read that inner traceback bottom up (lesson D1-L1).
+
+  **Shadowed built-ins** give a misleading message. Your `data_contracts.py` imports `sum` from `pyspark.sql.functions`. Then `sum(1 for c in checks)` raises `[NOT_COLUMN_OR_STR] Argument `col` should be a Column or str, got generator`. The code never meant to call Spark. Import `functions as F`.
+
+  **ANSI mode** is on by default in Spark 4.0 and Databricks Runtime 17.0 and above. A cast of `'abc'` to `INT` now raises `[CAST_INVALID_INPUT]` instead of returning null. Use `try_cast` where bad values are expected, and count the nulls it produces.
+
+  In code, catch `pyspark.errors.AnalysisException` and read `err.getCondition()` and `err.getSqlState()`, not the message text.
+
+why_it_matters: |
+  After a runtime upgrade to Databricks Runtime 17.3 LTS, a silver job that had run for two years failed with `[CAST_INVALID_INPUT] The value 'n/a' ... cannot be cast to "INT"`. The engineer's first thought was a Spark bug. The SQLSTATE started with 22, a data exception: the data had always held 'n/a', and the old runtime had turned it into null without a word. The new error exposed a data quality problem that was two years old.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      from pyspark.sql.functions import col, sum
+
+      silver = bronze.withColumn("age", col("age").cast("int"))
+      passed = sum(1 for c in checks if c.status == "PASS")
+      silver.write.mode("append").saveAsTable("research_silver.nat_respondents")
+    annotations:
+      - find: "from pyspark.sql.functions import col, sum"
+        note: "Shadows Python's sum. The next line fails with NOT_COLUMN_OR_STR."
+      - find: 'silver = bronze.withColumn("age", col("age").cast("int"))'
+        note: "Under ANSI mode, one bad value fails the whole write, several lines later."
+  strong:
+    code: |
+      from pyspark.sql import functions as F
+
+      silver = bronze.withColumn("age", F.col("age").try_cast("int"))
+      bad_ages = bronze.filter(F.col("age").isNotNull() & F.col("age").try_cast("int").isNull()).count()
+      passed = sum(1 for c in checks if c.status == "PASS")
+      silver.write.mode("append").saveAsTable("research_silver.nat_respondents")
+    annotations:
+      - find: "from pyspark.sql import functions as F"
+        note: "Python's sum stays Python's sum."
+      - find: 'silver = bronze.withColumn("age", F.col("age").try_cast("int"))'
+        note: "Bad values become null on purpose."
+      - find: 'bad_ages = bronze.filter(F.col("age").isNotNull() & F.col("age").try_cast("int").isNull()).count()'
+        note: "Then you count them, so nothing disappears silently."
+  takeaway: |
+    Read the condition, the SQLSTATE class and the origin line. Class 42 means fix the code. Class 22 means look at the data.
+
+exercises:
+  - id: D1-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A job fails with `[UNRESOLVED_COLUMN.WITH_SUGGESTION] ... name `final_wieght` cannot be resolved. Did you mean one of the following? [`final_weight`, ...]. SQLSTATE: 42703`. What do you fix?
+    options:
+      - {id: a, text: "The column name in the code: final_wieght is a typo for final_weight"}
+      - {id: b, text: "The data: some rows lack final_weight"}
+      - {id: c, text: "The cluster: restart it"}
+      - {id: d, text: "The table permissions"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Class 42 errors mean the code names something that does not exist. The message suggests the right name."}
+      - {id: r2, text: "Spark always suggests the column you meant."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Missing values are nulls, not an unresolved column. The name itself is wrong."
+      - answer: c
+        feedback: "The error is in the query plan. A restart runs the same plan."
+      - answer: d
+        feedback: "A permission error has a different condition. This one says the name cannot be resolved."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. The suggestions are the closest names, not always the right one. Check them."
+    hints:
+      - "What does SQLSTATE class 42 mean?"
+      - "Compare the name in the message with the suggestions."
+      - "A typo."
+    explanation: |
+      Unresolved names are code errors. Read the suggestion list, then fix the name.
+
+  - id: D1-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      `pass_rate` in your `data_contracts.py` runs `sum(1 for c in self.checks if c.status == "PASS")` and fails with `[NOT_COLUMN_OR_STR] Argument `col` should be a Column or str, got generator`. What is the cause?
+    options:
+      - {id: a, text: "`sum` is PySpark's sum, imported by name, which shadows Python's built-in"}
+      - {id: b, text: "self.checks is a DataFrame"}
+      - {id: c, text: "Generators are not allowed in dataclasses"}
+      - {id: d, text: "The status column is missing"}
+    answer: a
+    reasons:
+      - {id: r1, text: "`from pyspark.sql.functions import sum` replaces the built-in in that module, so the generator goes to Spark's sum."}
+      - {id: r2, text: "PySpark disables Python built-ins in notebooks."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "self.checks is a list of CheckResult objects. The function receiving it is the problem."
+      - answer: c
+        feedback: "Generators work anywhere. Look at the imports."
+      - answer: d
+        feedback: "No column is involved. The code never meant to call Spark."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. PySpark does not disable anything. The import replaced the name."
+    hints:
+      - "Which sum is being called?"
+      - "Look at the module's imports."
+      - "Import functions as F."
+    explanation: |
+      Import `functions as F`. Python's `sum`, `min`, `max`, `round`, `abs` and `filter` then keep their meaning.
+
+  - id: D1-L2-E3
+    type: spot_bug
+    difficulty: 3
+    language: pyspark
+    prompt: |
+      This job fails on line 5 with `[CAST_INVALID_INPUT] The value 'n/a' of the type "STRING" cannot be cast to "INT"` and `"cast" was called from ... line 3`. Tap the line that causes it, then fix it so bad ages become null. Keep `functions as F`.
+    code: |
+      from pyspark.sql import functions as F
+
+      silver = bronze.withColumn("age", F.col("age").cast("int"))
+      silver = silver.withColumn("wave_id", F.lit(wave_id))
+      silver.write.mode("append").saveAsTable("research_silver.nat_respondents")
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: try_cast
+          kind: requires_call
+          name: try_cast
+          message: "Use F.col(\"age\").try_cast(\"int\") so malformed values become null."
+        - id: no_cast
+          kind: forbids_call
+          name: cast
+          message: "cast still raises under ANSI mode on 'n/a'."
+    fix_solution: |
+      from pyspark.sql import functions as F
+
+      silver = bronze.withColumn("age", F.col("age").try_cast("int"))
+      silver = silver.withColumn("wave_id", F.lit(wave_id))
+      silver.write.mode("append").saveAsTable("research_silver.nat_respondents")
+    wrong_answers:
+      - lines: [5]
+        feedback: "The error appears at the write because that is the action. The origin line says cast, on line 3."
+      - lines: [4]
+        feedback: "Adding a literal cannot fail on 'n/a'."
+    hints:
+      - "Actions trigger the work. Where was the failing expression written?"
+      - "The message names the origin: cast."
+      - "try_cast returns null instead of failing."
+    explanation: |
+      The write triggers the plan, so the error surfaces there. The origin line points at the cast. Use `try_cast`, then count the nulls it creates.
+
+  - id: D1-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `triage(message: str) -> tuple[str | None, str]` for Spark error messages. Extract the error condition, the text in the first `[...]` at the start of the message, or `None`. Then classify by the SQLSTATE at the end (`SQLSTATE: 42703`): class `"42"` gives `"code"`, class `"22"` gives `"data"`, anything else or no SQLSTATE gives `"unknown"`.
+    starter: |
+      def triage(message):
+          if "42" in message:
+              return None, "code"
+          return None, "data"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: triage
+          typed: true
+          docstring: true
+          message: "Give `triage` type hints and a docstring."
+      tests:
+        - id: code_error
+          code: |
+            msg = "[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column ... `final_wieght` cannot be resolved. SQLSTATE: 42703"
+            assert triage(msg) == ("UNRESOLVED_COLUMN.WITH_SUGGESTION", "code")
+          message: "Class 42 is a code error. Extract the condition inside the first brackets."
+        - id: data_error
+          code: |
+            msg = "[CAST_INVALID_INPUT] The value 'n/a' of the type \"STRING\" cannot be cast to \"INT\". SQLSTATE: 22018"
+            assert triage(msg) == ("CAST_INVALID_INPUT", "data")
+          message: "Class 22 is a data exception."
+        - id: digits_elsewhere
+          code: |
+            msg = "[DIVIDE_BY_ZERO] Division by zero in wave 42. SQLSTATE: 22012"
+            assert triage(msg) == ("DIVIDE_BY_ZERO", "data")
+          message: "Read the class from the SQLSTATE, not from any '42' in the message."
+        - id: no_state
+          code: |
+            assert triage("Py4JJavaError: An error occurred while calling o59.collect") == (None, "unknown")
+          message: "No brackets and no SQLSTATE: (None, 'unknown')."
+    solution: |
+      import re
+
+      CONDITION_PATTERN = re.compile(r"^\s*\[([A-Z0-9_.]+)\]")
+      SQLSTATE_PATTERN = re.compile(r"SQLSTATE:\s*([0-9A-Z]{5})")
+      CLASS_LABELS = {"42": "code", "22": "data"}
+
+
+      def triage(message: str) -> tuple[str | None, str]:
+          """Error condition and a first-pass category for a Spark error message.
+
+          Args:
+              message: The error message text.
+
+          Returns:
+              (condition or None, "code", "data" or "unknown").
+          """
+          condition_match = CONDITION_PATTERN.match(message)
+          condition = condition_match.group(1) if condition_match else None
+          state_match = SQLSTATE_PATTERN.search(message)
+          if state_match is None:
+              return condition, "unknown"
+          return condition, CLASS_LABELS.get(state_match.group(1)[:2], "unknown")
+    seeded_bugs:
+      - |
+        import re
+
+
+        def triage(message: str) -> tuple[str | None, str]:
+            """Looks for 42 anywhere."""
+            m = re.match(r"^\s*\[([A-Z0-9_.]+)\]", message)
+            condition = m.group(1) if m else None
+            if "42" in message:
+                return condition, "code"
+            if "22" in message:
+                return condition, "data"
+            return condition, "unknown"
+    wrong_answers:
+      - answer: |
+          import re
+
+
+          def triage(message: str) -> tuple[str | None, str]:
+              """Looks for 42 anywhere."""
+              m = re.match(r"^\s*\[([A-Z0-9_.]+)\]", message)
+              condition = m.group(1) if m else None
+              if "42" in message:
+                  return condition, "code"
+              if "22" in message:
+                  return condition, "data"
+              return condition, "unknown"
+        triggers: digits_elsewhere
+    hints:
+      - "Match the condition with `^\\s*\\[([A-Z0-9_.]+)\\]`."
+      - "Search for `SQLSTATE:\\s*([0-9A-Z]{5})`."
+      - "The class is the first two characters of the SQLSTATE."
+    explanation: |
+      A first-pass triage sends class 42 to the code and class 22 to the data. Parse the structured parts, never loose substrings.
+
+  - id: D1-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Write the first-response steps for your team's runbook when a Spark job fails.
+    slots:
+      - id: first
+        label: "First thing to read"
+        options:
+          - {id: condition, text: "The error condition, the SQLSTATE and the origin line"}
+          - {id: java, text: "The Java stack trace from the top"}
+        answer: condition
+      - id: class22
+        label: "SQLSTATE class 22 after a runtime upgrade"
+        options:
+          - {id: data, text: "Query the source for the value in the message, then decide between fixing the data and try_cast with a null count"}
+          - {id: ansi_off, text: "Set spark.sql.ansi.enabled to false"}
+        answer: data
+      - id: catch
+        label: "Handling errors in code"
+        options:
+          - {id: typed, text: "Catch AnalysisException and branch on err.getCondition()"}
+          - {id: text, text: "Catch Exception and search the message for words"}
+        answer: typed
+    model_answer: |
+      - The condition and SQLSTATE give the category in seconds. The origin line gives the place.
+      - Class 22 means real bad data. Switching ANSI off hides it again.
+      - Conditions are stable identifiers. Message wording changes between releases.
+    wrong_answers:
+      - answer: {first: java}
+        feedback: "The JVM stack is Spark's internals. The condition and origin line point at your code."
+      - answer: {class22: ansi_off}
+        feedback: "That returns to silent nulls. The bad values are still there, uncounted."
+      - answer: {catch: text}
+        feedback: "Message text changes between versions. Conditions do not."
+    hints:
+      - "Which part of the message is structured?"
+      - "What did ANSI mode expose?"
+      - "What stays stable across releases?"
+    explanation: |
+      Condition, SQLSTATE class, origin line. Then fix code or investigate data, depending on the class.
+
+recap:
+  - front: "Shape of a Spark 4 error message"
+    back: "[ERROR_CONDITION] message ... SQLSTATE: xxxxx, often with an origin line under == DataFrame ==."
+  - front: "SQLSTATE class 42 vs 22"
+    back: "42: syntax error or access rule violation, fix the code. 22: data exception, look at the data."
+  - front: "Why a data error appears at write()"
+    back: "Transformations are lazy. The action runs the plan. The origin line shows where the expression was written."
+  - front: "NOT_COLUMN_OR_STR ... got generator"
+    back: "Python's sum is shadowed by pyspark.sql.functions.sum. Import functions as F."
+
+claims:
+  - claim: "PySpark 4.0.4 error texts: UNRESOLVED_COLUMN.WITH_SUGGESTION with SQLSTATE 42703; CAST_INVALID_INPUT with SQLSTATE 22018 and an origin line; PythonException wrapping a Python traceback; NOT_COLUMN_OR_STR for a generator passed to shadowed sum; getCondition() and getSqlState() on AnalysisException; Column.try_cast exists."
+    status: verified
+    source: "Local runs on PySpark 4.0.4, September 2026."
+  - claim: "ANSI mode is enabled by default in Apache Spark 4.0 and Databricks Runtime 17.0 and above."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-ansi-compliance (checked 2026-09-25)"
+  - claim: "SQLSTATE class 22 is data exception; class 42 is syntax error or access rule violation."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/error-messages/sqlstates (checked 2026-09-25)"

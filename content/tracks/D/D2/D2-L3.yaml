@@ -1,0 +1,310 @@
+id: D2-L3
+title: explain(), the Spark UI and the query profile
+
+concept: |
+  A slow Spark job often shows why in its **plan**. Read it before you tune anything.
+
+  **`df.explain()`** prints the physical plan without running the query. `df.explain("formatted")` numbers each operator and lists its details below. The other modes are `"simple"` (the default), `"extended"`, `"codegen"` and `"cost"`. Read the tree from the **bottom up**: the scan is at the bottom, the result at the top.
+
+  What to look for (examples from PySpark 4.0.4):
+
+  | In the plan | Means |
+  | --- | --- |
+  | `PartitionFilters: [(wave_id = 3)]` | Only matching partitions are read. Good. |
+  | `PushedFilters: [GreaterThan(w,1.0)]` | The filter runs inside the file reader. Good. |
+  | `PushedFilters: []` on a filtered query | Nothing was pushed down. Check the filter's column and type. |
+  | `Exchange hashpartitioning(...)` | A shuffle: data moves across the cluster. Each one costs time. |
+  | `BroadcastHashJoin` | The small side is copied to every executor. No shuffle of the large side. |
+  | `SortMergeJoin` | Both sides are shuffled and sorted. Normal for two large tables. |
+  | `CartesianProduct` or `BroadcastNestedLoopJoin` | Every row meets every row. Usually a missing join condition. |
+  | `BatchEvalPython` | A Python UDF. Rows leave the JVM for a Python worker. |
+
+  `AdaptiveSparkPlan isFinalPlan=false` means adaptive query execution will adjust the plan at run time, for example switching a join to broadcast. `explain()` shows the starting plan.
+
+  **After the run**, look at what happened. On classic compute, the **Spark UI** shows jobs, stages, tasks and the SQL tab with row counts per operator. On **serverless**, the Spark UI is not available. Use the **query profile**, which shows each operator with its time spent, rows and memory peak, and a Top operators panel.
+
+  In the UI or profile, compare **rows out** of each join with rows in. A join whose output exceeds its larger input is duplicating rows (lesson D3-L1). Look for one task far slower than the rest of its stage: that is skew.
+
+why_it_matters: |
+  A gold job's runtime grew from 4 minutes to 70 over a month. Nobody had changed the code. `explain()` showed `BroadcastNestedLoopJoin`: a join on a range condition, fine while the dimension held 50 rows, painful at 4,000. The plan named the problem in one line. Rewriting the range join as an equi-join on a precomputed band key brought it back to 5 minutes.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      from pyspark.sql import functions as F
+
+      joined = respondents.crossJoin(regions).filter(
+          F.col("postcode_area") == F.col("area_code")
+      )
+      joined.write.mode("overwrite").saveAsTable("research_gold.nat_regions")
+    annotations:
+      - find: "joined = respondents.crossJoin(regions).filter("
+        note: "A cross join first, then a filter. Check the plan before you trust the optimiser to rewrite it."
+      - find: 'joined.write.mode("overwrite").saveAsTable("research_gold.nat_regions")'
+        note: "Runs without ever reading the plan."
+  strong:
+    code: |
+      from pyspark.sql import functions as F
+
+      joined = respondents.join(
+          F.broadcast(regions), respondents["postcode_area"] == regions["area_code"], "left"
+      )
+      joined.explain("formatted")
+      # Expect BroadcastHashJoin, no CartesianProduct, one scan of respondents.
+      joined.write.mode("overwrite").saveAsTable("research_gold.nat_regions")
+    annotations:
+      - find: 'F.broadcast(regions), respondents["postcode_area"] == regions["area_code"], "left"'
+        note: "An explicit equi-join with the small side broadcast."
+      - find: 'joined.explain("formatted")'
+        note: "Read the plan once, when you write the code, and again when data volumes change."
+  takeaway: |
+    Read the plan bottom up, look for pushed filters, shuffles, join types and Python UDFs, then confirm rows per operator in the Spark UI or query profile.
+
+exercises:
+  - id: D2-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A job's plan contains `CartesianProduct`. What is the most likely cause?
+    options:
+      - {id: a, text: "A join without an equality condition, so every row meets every row"}
+      - {id: b, text: "A broadcast join"}
+      - {id: c, text: "A Python UDF"}
+      - {id: d, text: "Partition pruning"}
+    answer: a
+    reasons:
+      - {id: r1, text: "A Cartesian product pairs every row with every row. It comes from a cross join or a join condition Spark cannot use as an equi-join."}
+      - {id: r2, text: "Spark uses Cartesian products for all small tables."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Broadcast joins show as BroadcastHashJoin."
+      - answer: c
+        feedback: "Python UDFs show as BatchEvalPython or ArrowEvalPython."
+      - answer: d
+        feedback: "Pruning shows as PartitionFilters on the scan."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Small tables get BroadcastHashJoin when there is an equality condition."
+    hints:
+      - "What does Cartesian mean?"
+      - "Every pair of rows."
+      - "Check the join condition."
+    explanation: |
+      Find the join that produced it and give it an equality condition on the keys.
+
+  - id: D2-L3-E2
+    type: spot_bug
+    difficulty: 2
+    language: text
+    prompt: |
+      This is the formatted plan for `spark.read.parquet(path).filter(F.col("w") > 1.0).groupBy("wave_id").agg(F.sum("w"))`. Tap the line that shows a shuffle.
+    code: |
+      AdaptiveSparkPlan (6)
+      +- HashAggregate (5)
+         +- Exchange (4)
+            +- HashAggregate (3)
+               +- Filter (2)
+                  +- Scan parquet  (1)
+    bug_lines: [3]
+    wrong_answers:
+      - lines: [6]
+        feedback: "The scan reads files. The shuffle moves data between executors, which is an Exchange."
+      - lines: [2]
+        feedback: "HashAggregate aggregates. The final aggregate needs the data shuffled first, by the Exchange below it."
+    hints:
+      - "Which operator moves data across the cluster?"
+      - "Its name means swap."
+      - "Exchange."
+    explanation: |
+      `Exchange hashpartitioning(wave_id, 200)` shuffles partial sums so each wave's rows meet on one executor for the final sum.
+
+  - id: D2-L3-E3
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Your job runs on **serverless** compute. Where do you see time spent and rows per operator after it runs?
+    options:
+      - {id: a, text: "The query profile"}
+      - {id: b, text: "The Spark UI's SQL tab"}
+      - {id: c, text: "df.explain('cost')"}
+      - {id: d, text: "The driver logs"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The Spark UI is not available on serverless. Databricks points you to the query profile."}
+      - {id: r2, text: "The query profile is the only tool that works in Databricks."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Correct for classic compute. Serverless has no Spark UI."
+      - answer: c
+        feedback: "explain shows the plan before running, not what happened."
+      - answer: d
+        feedback: "Logs do not show per-operator metrics."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Classic compute has the Spark UI too."
+    hints:
+      - "Is the Spark UI available on serverless?"
+      - "No."
+      - "Its replacement."
+    explanation: |
+      On serverless, use the query profile. On classic compute, the Spark UI's SQL tab shows the same kind of detail.
+
+  - id: D2-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `plan_warnings(plan: str, max_exchanges: int = 2) -> list[str]` that reads the text of `df.explain()` and returns warnings, in this order, each at most once: `"cross join"` if the plan contains `CartesianProduct` or `BroadcastNestedLoopJoin`, `"python udf"` if it contains `BatchEvalPython` or `ArrowEvalPython`, and `"many shuffles"` if the word `Exchange` appears more than `max_exchanges` times, not counting `BroadcastExchange`.
+    starter: |
+      def plan_warnings(plan, max_exchanges=2):
+          warnings = []
+          if "Cartesian" in plan:
+              warnings.append("cross join")
+          return warnings
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: plan_warnings
+          typed: true
+          docstring: true
+          message: "Give `plan_warnings` type hints and a docstring."
+      tests:
+        - id: cross_and_udf
+          code: |
+            plan = "Project\n+- BatchEvalPython [dbl(w)]\n   +- BroadcastNestedLoopJoin BuildRight, Inner\n"
+            assert plan_warnings(plan) == ["cross join", "python udf"]
+          message: "BroadcastNestedLoopJoin is a cross join too, and BatchEvalPython is a Python UDF. Keep the order."
+        - id: broadcast_not_shuffle
+          code: |
+            plan = "BroadcastHashJoin\n:- BroadcastExchange HashedRelation\n+- Exchange hashpartitioning\n:- BroadcastExchange x\n+- BroadcastExchange y\n"
+            assert plan_warnings(plan, max_exchanges=1) == []
+          message: "BroadcastExchange is not a shuffle. Count only plain Exchange operators."
+        - id: shuffles
+          code: |
+            plan = "Exchange a\nExchange b\nExchange c\n"
+            assert plan_warnings(plan) == ["many shuffles"]
+          message: "Three shuffles is more than the default of 2."
+        - id: clean
+          code: |
+            assert plan_warnings("HashAggregate\n+- Exchange hashpartitioning\n") == []
+          message: "No warnings for a normal plan."
+    solution: |
+      import re
+
+      CROSS_JOIN_OPERATORS = ("CartesianProduct", "BroadcastNestedLoopJoin")
+      PYTHON_UDF_OPERATORS = ("BatchEvalPython", "ArrowEvalPython")
+      SHUFFLE_PATTERN = re.compile(r"(?<!Broadcast)\bExchange\b")
+
+
+      def plan_warnings(plan: str, max_exchanges: int = 2) -> list[str]:
+          """Warnings for common problems in a Spark physical plan.
+
+          Args:
+              plan: Text of df.explain().
+              max_exchanges: Number of shuffles allowed before warning.
+
+          Returns:
+              Warnings in a fixed order, each at most once.
+          """
+          warnings: list[str] = []
+          if any(op in plan for op in CROSS_JOIN_OPERATORS):
+              warnings.append("cross join")
+          if any(op in plan for op in PYTHON_UDF_OPERATORS):
+              warnings.append("python udf")
+          if len(SHUFFLE_PATTERN.findall(plan)) > max_exchanges:
+              warnings.append("many shuffles")
+          return warnings
+    seeded_bugs:
+      - |
+        def plan_warnings(plan: str, max_exchanges: int = 2) -> list[str]:
+            """Counts BroadcastExchange as a shuffle."""
+            warnings: list[str] = []
+            if "CartesianProduct" in plan or "BroadcastNestedLoopJoin" in plan:
+                warnings.append("cross join")
+            if "BatchEvalPython" in plan or "ArrowEvalPython" in plan:
+                warnings.append("python udf")
+            if plan.count("Exchange") > max_exchanges:
+                warnings.append("many shuffles")
+            return warnings
+    wrong_answers:
+      - answer: |
+          def plan_warnings(plan: str, max_exchanges: int = 2) -> list[str]:
+              """Counts BroadcastExchange as a shuffle."""
+              warnings: list[str] = []
+              if "CartesianProduct" in plan or "BroadcastNestedLoopJoin" in plan:
+                  warnings.append("cross join")
+              if "BatchEvalPython" in plan or "ArrowEvalPython" in plan:
+                  warnings.append("python udf")
+              if plan.count("Exchange") > max_exchanges:
+                  warnings.append("many shuffles")
+              return warnings
+        triggers: broadcast_not_shuffle
+    hints:
+      - "Keep the operator names in constants."
+      - "A negative lookbehind, `(?<!Broadcast)`, excludes BroadcastExchange."
+      - "Append warnings in the stated order."
+    explanation: |
+      A plan linter in a test catches a cross join the day it appears, not the day the dimension grows.
+
+  - id: D2-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A gold job on classic compute slowed from 5 to 40 minutes. Plan the investigation.
+    slots:
+      - id: first
+        label: "First step"
+        options:
+          - {id: plan, text: "Run explain('formatted') and read the joins and exchanges"}
+          - {id: size, text: "Double the cluster size"}
+        answer: plan
+      - id: runtime
+        label: "Checking what happened at run time"
+        options:
+          - {id: ui, text: "Spark UI SQL tab: rows per operator, and task times within each stage"}
+          - {id: rerun, text: "Rerun the job and time it"}
+        answer: ui
+      - id: skew
+        label: "One task in a stage takes 30 minutes, the rest 20 seconds"
+        options:
+          - {id: skew, text: "Data skew on the join or group key: check the key's distribution"}
+          - {id: slow_node, text: "A slow machine: restart the cluster"}
+        answer: skew
+    model_answer: |
+      - The plan shows join types and shuffles for free, before you spend compute.
+      - Rows per operator show where rows multiply. Task times show skew.
+      - One very slow task among fast ones is the signature of a skewed key.
+    wrong_answers:
+      - answer: {first: size}
+        feedback: "A bigger cluster makes a cross join or a skewed key slightly less slow, at double the cost."
+      - answer: {runtime: rerun}
+        feedback: "A rerun tells you it is still slow, not why."
+      - answer: {skew: slow_node}
+        feedback: "Skew follows the data, not the machine. It returns after a restart."
+    hints:
+      - "What is free to check?"
+      - "Where are rows and task times?"
+      - "What does one slow task mean?"
+    explanation: |
+      Plan first, then runtime metrics, then the data behind any outlier.
+
+recap:
+  - front: "Read a physical plan in which direction?"
+    back: "Bottom up: scan at the bottom, result at the top."
+  - front: "PartitionFilters and PushedFilters"
+    back: "Filters applied while reading. Empty PushedFilters on a filtered query means no pushdown."
+  - front: "Plan operators that signal trouble"
+    back: "CartesianProduct or BroadcastNestedLoopJoin (cross join), BatchEvalPython (Python UDF), many Exchange (shuffles)."
+  - front: "Spark UI on serverless"
+    back: "Not available. Use the query profile: time spent, rows and memory per operator."
+
+claims:
+  - claim: "explain modes simple, extended, codegen, cost, formatted; plans show PartitionFilters, PushedFilters, Exchange hashpartitioning, BroadcastHashJoin, SortMergeJoin, CartesianProduct, BatchEvalPython, AdaptiveSparkPlan isFinalPlan=false."
+    status: verified
+    source: "Local runs on PySpark 4.0.4, September 2026."
+  - claim: "The Spark UI is not available on serverless; use the query profile, which shows time spent, rows and memory per operator and a Top operators panel."
+    status: verified
+    source: "https://docs.databricks.com/aws/en/compute/serverless/limitations and https://docs.databricks.com/aws/en/sql/user/queries/query-profile (checked 2026-09-25)"
