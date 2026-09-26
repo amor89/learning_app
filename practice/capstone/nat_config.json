@@ -1,0 +1,22 @@
+{
+  "tracker_id": "NAT",
+  "column_map": {
+    "RESP_ID": "respondent_id",
+    "WAVE": "wave_id",
+    "TRACKER": "tracker_id",
+    "AGE_GRP": "age_group",
+    "REGION": "region",
+    "INSCOPE": "in_scope",
+    "REACH": "reach_flag",
+    "WGT": "final_weight"
+  },
+  "type_map": {
+    "in_scope": "boolean",
+    "reach_flag": "int",
+    "final_weight": "double"
+  },
+  "merge_keys": ["respondent_id", "wave_id"],
+  "weight_sum_min": 1.0,
+  "weight_sum_max": 100000.0,
+  "max_null_weights": 0
+}

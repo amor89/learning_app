@@ -1,0 +1,460 @@
+id: X1-L1
+title: "Capstone 1: refactor the NAT pipeline"
+
+concept: |
+  This capstone brings Track A together. You start from `practice/capstone/before_pipeline.py`: a notebook exported as one script, the way many pipelines begin. It runs, and it breaks almost every rule in `CLAUDE.md`. You finish with `practice/exercises/x1_pipeline.py`, refactored to the standard and passing 11 acceptance tests on a local SparkSession.
+
+  **What the starting code gets wrong** (each one is a lesson you have done):
+
+  - A SparkSession created at import time, and a hard-coded column map (A1).
+  - Bronze written with `mode("overwrite")`, and counted before the write (A2).
+  - No missing-column check before renames, and casts that hide bad values (A2, D3).
+  - A MERGE with no deduplication of the source (A3).
+  - A gold `groupBy` that drops `tracker_id`, a `sum(when(...))` that gives null, and an unguarded division (A5, D4).
+  - Checks stored as text in a mutable default list, with repeated `count()` calls (A6, D3).
+  - A run log with no schema, `uuid` and `datetime` never imported, and `utcnow()` (A7, D1).
+  - A secret placeholder in code (A10).
+
+  **What you deliver:** ten functions with fixed names and signatures, listed in the skeleton. The acceptance tests in `practice/tests/test_x1_pipeline.py` import them. They check behaviour, not style, so run ruff and mypy as well.
+
+  **How to work.** Read the brief and the tests first. Implement one function at a time, in the order of the pipeline: config, bronze, silver, gold, checks, run log. Run the tests after each function. Compare with `practice/solutions/x1_pipeline.py` only once your tests pass.
+
+  The exercises below practise the pure-Python parts in the browser. The Spark parts run on your laptop. Setup is in `practice/README.md`.
+
+why_it_matters: |
+  Refactoring a working pipeline is harder than writing a new one. The old code produces numbers people rely on, and every change risks moving them. Acceptance tests with known answers let you change structure without changing results. This is how you will improve real pipelines at work: one tested function at a time, never a rewrite in one go.
+
+worked_example:
+  language: pyspark
+  weak:
+    code: |
+      def run(path, wave_id, checks=[]):
+          df = spark.read.option("header", True).csv(path)
+          n = df.count()
+          df.write.mode("overwrite").saveAsTable("nat_raw")
+    annotations:
+      - find: "def run(path, wave_id, checks=[]):"
+        note: "One function does everything, with no types and a mutable default."
+      - find: '    df.write.mode("overwrite").saveAsTable("nat_raw")'
+        note: "Overwrite on bronze, after a separate count that scans the source again."
+  strong:
+    code: |
+      def ingest_bronze(
+          spark: SparkSession, df: DataFrame, table: str, source_file: str, delivery_version: int
+      ) -> int:
+          """Append a delivery to bronze. Bronze is append-only."""
+          audited = add_audit_columns(df, source_file, delivery_version, str(uuid.uuid4()))
+          audited.write.format("delta").mode("append").saveAsTable(table)
+          return last_write_rows(spark, table)
+    annotations:
+      - find: '    audited.write.format("delta").mode("append").saveAsTable(table)'
+        note: "Append with audit columns."
+      - find: "    return last_write_rows(spark, table)"
+        note: "Rows written come from the Delta history, not a second scan."
+  takeaway: |
+    Refactor one function at a time, in pipeline order, with acceptance tests running after every change.
+
+exercises:
+  - id: X1-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Before you change a line of the starting pipeline, what do you do first?
+    options:
+      - {id: a, text: "Read the acceptance tests and run them, so you know what 'done' means"}
+      - {id: b, text: "Rewrite the whole script in one go"}
+      - {id: c, text: "Run ruff --fix on it"}
+      - {id: d, text: "Delete the defects you recognise"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Tests define the target behaviour. Running them first shows where you start and proves each later step."}
+      - {id: r2, text: "Tests are always written after refactoring."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "A rewrite in one go changes everything at once, so you cannot tell which change broke a number."
+      - answer: c
+        feedback: "Formatting helps later. It does not tell you what the code must do."
+      - answer: d
+        feedback: "Deleting code without tests risks removing behaviour someone relies on."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Tests come first, so they can check each step."
+    hints:
+      - "How will you know you are done?"
+      - "The acceptance tests."
+      - "Read and run them first."
+    explanation: |
+      Tests first, then one function at a time.
+
+  - id: X1-L1-E2
+    type: spot_bug
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      These lines come from the starting pipeline. Tap the line that destroys earlier deliveries.
+    code: |
+      df = spark.read.option("header", True).csv(path)
+      n = df.count()
+      df.write.mode("overwrite").saveAsTable("nat_raw")
+      for src, tgt in COLUMN_MAP.items():
+          df = df.withColumnRenamed(src, tgt)
+    bug_lines: [3]
+    wrong_answers:
+      - lines: [2]
+        feedback: "The extra count costs a scan, but it does not destroy data. The write below it does."
+      - lines: [5]
+        feedback: "A silent rename is a problem, but earlier deliveries survive it."
+    hints:
+      - "Which line changes a table?"
+      - "Bronze is append-only."
+      - "The write mode."
+    explanation: |
+      `mode("overwrite")` replaces every earlier delivery in bronze. Use `mode("append")` with audit columns.
+
+  - id: X1-L1-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the refactor so each step can be tested before the next depends on it.
+    items:
+      - {id: config, text: "load_config with validation"}
+      - {id: bronze, text: "ingest_bronze with audit columns"}
+      - {id: silver, text: "transform_silver and upsert_silver"}
+      - {id: gold, text: "compute_gold"}
+      - {id: checks, text: "run_checks and enforce"}
+      - {id: log, text: "build_run_record and log_run"}
+    answer: [config, bronze, silver, gold, checks, log]
+    wrong_answers:
+      - answer: [bronze, silver, gold, checks, log, config]
+        feedback: "Every later step reads the config. Build and validate it first."
+      - answer: [config, bronze, gold, silver, checks, log]
+        feedback: "Gold is computed from silver. Silver comes first."
+    hints:
+      - "What does every step need?"
+      - "Follow the data: bronze, silver, gold."
+      - "Checks and logging wrap the finished layers."
+    explanation: |
+      Config, then the layers in data order, then checks and the run log.
+
+  - id: X1-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `validate_config(raw: dict[str, object]) -> dict[str, object]`, the pure-Python core of `load_config`. Required keys: `tracker_id`, `column_map`, `type_map`, `merge_keys`, `weight_sum_min`, `weight_sum_max`, `max_null_weights`. Raise `ValueError` naming every missing key, in that order. Also raise `ValueError` if `merge_keys` is empty or `weight_sum_min` exceeds `weight_sum_max`. Return `raw` unchanged when valid.
+    starter: |
+      def validate_config(raw):
+          return raw
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: validate_config
+          typed: true
+          docstring: true
+          message: "Give `validate_config` type hints and a docstring."
+      tests:
+        - id: valid
+          code: |
+            good = {"tracker_id": "NAT", "column_map": {}, "type_map": {}, "merge_keys": ["respondent_id", "wave_id"],
+                    "weight_sum_min": 1.0, "weight_sum_max": 10.0, "max_null_weights": 0}
+            assert validate_config(good) is good
+          message: "Return the config unchanged when it is valid."
+        - id: missing
+          code: |
+            try:
+                validate_config({"tracker_id": "NAT", "column_map": {}})
+            except ValueError as err:
+                text = str(err)
+                assert "type_map" in text and "max_null_weights" in text, text
+            else:
+                raise AssertionError("no ValueError")
+          message: "Name every missing key in one error, so the config is fixed in one go."
+        - id: bad_values
+          code: |
+            base = {"tracker_id": "NAT", "column_map": {}, "type_map": {}, "merge_keys": ["k"],
+                    "weight_sum_min": 1.0, "weight_sum_max": 10.0, "max_null_weights": 0}
+            for change in ({"merge_keys": []}, {"weight_sum_min": 20.0}):
+                try:
+                    validate_config({**base, **change})
+                except ValueError:
+                    continue
+                raise AssertionError(f"accepted {change}")
+          message: "Empty merge keys and min above max are invalid."
+    solution: |
+      REQUIRED_CONFIG_KEYS = (
+          "tracker_id",
+          "column_map",
+          "type_map",
+          "merge_keys",
+          "weight_sum_min",
+          "weight_sum_max",
+          "max_null_weights",
+      )
+
+
+      def validate_config(raw: dict[str, object]) -> dict[str, object]:
+          """Check a pipeline config before any step uses it.
+
+          Args:
+              raw: Parsed JSON config.
+
+          Returns:
+              The same config, if valid.
+
+          Raises:
+              ValueError: If keys are missing or values are impossible.
+          """
+          missing = [key for key in REQUIRED_CONFIG_KEYS if key not in raw]
+          if missing:
+              raise ValueError(f"config is missing keys: {missing}")
+          if not raw["merge_keys"]:
+              raise ValueError("merge_keys must not be empty")
+          if float(raw["weight_sum_min"]) > float(raw["weight_sum_max"]):  # type: ignore[arg-type]
+              raise ValueError("weight_sum_min exceeds weight_sum_max")
+          return raw
+    seeded_bugs:
+      - |
+        def validate_config(raw: dict[str, object]) -> dict[str, object]:
+            """Stops at the first missing key."""
+            for key in ("tracker_id", "column_map", "type_map", "merge_keys", "weight_sum_min", "weight_sum_max", "max_null_weights"):
+                if key not in raw:
+                    raise ValueError(f"missing {key}")
+            if not raw["merge_keys"] or float(raw["weight_sum_min"]) > float(raw["weight_sum_max"]):
+                raise ValueError("bad values")
+            return raw
+    wrong_answers:
+      - answer: |
+          def validate_config(raw: dict[str, object]) -> dict[str, object]:
+              """Stops at the first missing key."""
+              for key in ("tracker_id", "column_map", "type_map", "merge_keys", "weight_sum_min", "weight_sum_max", "max_null_weights"):
+                  if key not in raw:
+                      raise ValueError(f"missing {key}")
+              if not raw["merge_keys"] or float(raw["weight_sum_min"]) > float(raw["weight_sum_max"]):
+                  raise ValueError("bad values")
+              return raw
+        triggers: missing
+    hints:
+      - "Collect all missing keys before raising."
+      - "Keep the required keys in a constant."
+      - "Then check the two value rules."
+    explanation: |
+      Fail fast, and fail once with every problem listed. A config fixed one key per run wastes a morning.
+
+  - id: X1-L1-E5
+    type: write_function
+    difficulty: 4
+    language: python
+    prompt: |
+      Write `enforce(results: list[dict[str, str]]) -> None`. Each result has `check_name`, `status` (`"PASS"`, `"FAIL"` or `"WARN"`) and `severity` (`"CRITICAL"` or `"WARN"`). Raise `RuntimeError` naming every failed CRITICAL check, in order. WARN results and passes never raise.
+    starter: |
+      def enforce(results):
+          for r in results:
+              if r["status"] != "PASS":
+                  raise RuntimeError(r["check_name"])
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: enforce
+          typed: true
+          docstring: true
+          message: "Give `enforce` type hints and a docstring."
+      tests:
+        - id: warn_passes
+          code: |
+            enforce([{"check_name": "cast_failures", "status": "WARN", "severity": "WARN"},
+                     {"check_name": "row_count", "status": "PASS", "severity": "CRITICAL"}])
+          message: "WARN results log and continue. They must not raise."
+        - id: all_named
+          code: |
+            try:
+                enforce([{"check_name": "null_weights", "status": "FAIL", "severity": "CRITICAL"},
+                         {"check_name": "cast_failures", "status": "WARN", "severity": "WARN"},
+                         {"check_name": "key_uniqueness", "status": "FAIL", "severity": "CRITICAL"}])
+            except RuntimeError as err:
+                assert "null_weights" in str(err) and "key_uniqueness" in str(err), str(err)
+                assert "cast_failures" not in str(err)
+            else:
+                raise AssertionError("no RuntimeError")
+          message: "Name every failed CRITICAL check in one error, and only those."
+    solution: |
+      def enforce(results: list[dict[str, str]]) -> None:
+          """Stop the pipeline when a CRITICAL check failed.
+
+          Args:
+              results: Structured check results.
+
+          Raises:
+              RuntimeError: Naming every failed CRITICAL check.
+          """
+          failed = [
+              r["check_name"] for r in results if r["severity"] == "CRITICAL" and r["status"] == "FAIL"
+          ]
+          if failed:
+              raise RuntimeError(f"CRITICAL checks failed: {failed}")
+    seeded_bugs:
+      - |
+        def enforce(results: list[dict[str, str]]) -> None:
+            """Raises on WARN too."""
+            failed = [r["check_name"] for r in results if r["status"] != "PASS"]
+            if failed:
+                raise RuntimeError(f"failed: {failed}")
+      - |
+        def enforce(results: list[dict[str, str]]) -> None:
+            """Stops at the first failure."""
+            for r in results:
+                if r["severity"] == "CRITICAL" and r["status"] == "FAIL":
+                    raise RuntimeError(r["check_name"])
+    wrong_answers:
+      - answer: |
+          def enforce(results: list[dict[str, str]]) -> None:
+              """Raises on WARN too."""
+              failed = [r["check_name"] for r in results if r["status"] != "PASS"]
+              if failed:
+                  raise RuntimeError(f"failed: {failed}")
+        triggers: warn_passes
+    hints:
+      - "Filter on severity and status together."
+      - "Collect names, then raise once."
+      - "WARN never raises."
+    explanation: |
+      CRITICAL halts, WARN logs and continues: the severity rule from your standard, in five lines.
+
+  - id: X1-L1-E6
+    type: refactor
+    difficulty: 5
+    language: python
+    prompt: |
+      Refactor the starting pipeline's run log record into `build_run_record(pipeline_name: str, tracker_id: str, wave_id: str, layer: str, rows_processed: int, status: str, error_message: str | None = None) -> dict[str, object]`. Return the keys `run_id`, `pipeline_name`, `tracker_id`, `wave_id`, `layer`, `rows_processed`, `status`, `error_message` and `run_timestamp`. `run_id` is a new UUID string. `run_timestamp` is an aware UTC datetime.
+    starter: |
+      def build_run_record(pipeline_name, tracker_id, wave_id, layer, rows_processed, status, error_message: str = None):
+          return {"run_id": str(uuid.uuid4()), "wave_id": wave_id, "rows": rows_processed,
+                  "status": status, "error_message": error_message,
+                  "ts": datetime.utcnow().isoformat()}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: build_run_record
+          typed: true
+          docstring: true
+          message: "Give `build_run_record` type hints (error_message: str | None) and a docstring."
+        - id: no_utcnow
+          kind: forbids_call
+          name: utcnow
+          message: "utcnow() is deprecated and naive."
+      tests:
+        - id: keys
+          code: |
+            r = build_run_record("nat_silver_pipeline", "NAT", "W14", "silver", 10, "SUCCESS")
+            assert set(r) == {"run_id", "pipeline_name", "tracker_id", "wave_id", "layer", "rows_processed", "status", "error_message", "run_timestamp"}, sorted(r)
+            assert r["error_message"] is None and r["rows_processed"] == 10
+          message: "Return exactly the nine run log keys."
+        - id: ids_and_time
+          code: |
+            a = build_run_record("p", "NAT", "W14", "silver", 1, "SUCCESS")
+            b = build_run_record("p", "NAT", "W14", "silver", 1, "SUCCESS")
+            assert a["run_id"] != b["run_id"] and len(a["run_id"]) == 36
+            ts = a["run_timestamp"]
+            assert ts.tzinfo is not None and ts.utcoffset().total_seconds() == 0
+          message: "A new UUID string per call, and an aware UTC datetime, not a string."
+    solution: |
+      import uuid
+      from datetime import datetime, timezone
+
+
+      def build_run_record(
+          pipeline_name: str,
+          tracker_id: str,
+          wave_id: str,
+          layer: str,
+          rows_processed: int,
+          status: str,
+          error_message: str | None = None,
+      ) -> dict[str, object]:
+          """One run log record with a new run id and an aware UTC timestamp.
+
+          Args:
+              pipeline_name: Job name, such as nat_silver_pipeline.
+              tracker_id: Tracker processed.
+              wave_id: Wave processed.
+              layer: bronze, silver or gold.
+              rows_processed: Rows written by the run.
+              status: Outcome of the run.
+              error_message: Error text for a failed run.
+
+          Returns:
+              The record, ready for a schema-typed append.
+          """
+          return {
+              "run_id": str(uuid.uuid4()),
+              "pipeline_name": pipeline_name,
+              "tracker_id": tracker_id,
+              "wave_id": wave_id,
+              "layer": layer,
+              "rows_processed": rows_processed,
+              "status": status,
+              "error_message": error_message,
+              "run_timestamp": datetime.now(timezone.utc),
+          }
+    seeded_bugs:
+      - |
+        import uuid
+        from datetime import datetime
+
+
+        def build_run_record(pipeline_name: str, tracker_id: str, wave_id: str, layer: str, rows_processed: int, status: str, error_message: str | None = None) -> dict[str, object]:
+            """Naive timestamp."""
+            return {"run_id": str(uuid.uuid4()), "pipeline_name": pipeline_name, "tracker_id": tracker_id,
+                    "wave_id": wave_id, "layer": layer, "rows_processed": rows_processed, "status": status,
+                    "error_message": error_message, "run_timestamp": datetime.now()}
+    wrong_answers:
+      - answer: |
+          import uuid
+          from datetime import datetime
+
+
+          def build_run_record(pipeline_name: str, tracker_id: str, wave_id: str, layer: str, rows_processed: int, status: str, error_message: str | None = None) -> dict[str, object]:
+              """Naive timestamp."""
+              return {"run_id": str(uuid.uuid4()), "pipeline_name": pipeline_name, "tracker_id": tracker_id,
+                      "wave_id": wave_id, "layer": layer, "rows_processed": rows_processed, "status": status,
+                      "error_message": error_message, "run_timestamp": datetime.now()}
+        triggers: ids_and_time
+    hints:
+      - "Import uuid and datetime, timezone."
+      - "error_message: str | None = None."
+      - "datetime.now(timezone.utc), kept as a datetime."
+    explanation: |
+      Three defects fixed in one function: missing imports, a lying type hint and a deprecated, naive timestamp.
+
+recap:
+  - front: "Capstone 1 workflow"
+    back: "Read and run the acceptance tests, then refactor one function at a time in pipeline order."
+  - front: "Where the capstone files live"
+    back: "Start: practice/capstone/before_pipeline.py. Yours: practice/exercises/x1_pipeline.py. Tests: practice/tests/test_x1_pipeline.py."
+  - front: "When to open the reference solution"
+    back: "Only after your tests pass. Then compare structure, not just results."
+
+practical:
+  platform: laptop
+  title: "Capstone 1: refactor the NAT pipeline on your laptop"
+  intro: |
+    You need Java 17 or 21 and the `spark` dependency group (see practice/README.md). The acceptance tests run on a local SparkSession with Delta Lake.
+  steps:
+    - "Read practice/capstone/before_pipeline.py and list every defect you see. Compare your list with the concept section."
+    - "Read practice/tests/test_x1_pipeline.py. Write down, in one line each, what the 11 tests require."
+    - "Run `pytest practice/tests/test_x1_pipeline.py`. Every test fails with NotImplementedError. That is your starting point."
+    - "Implement load_config and PipelineConfig.__post_init__. Run the two config tests until they pass."
+    - "Implement ingest_bronze, then transform_silver and upsert_silver, then compute_gold. Run the tests after each function."
+    - "Implement run_checks and enforce, then build_run_record, log_run and get_unprocessed_waves."
+    - "Run `ruff check practice` and `mypy`. Fix every finding."
+    - "When all 11 tests pass, compare your module with practice/solutions/x1_pipeline.py. Note two things the reference does differently and why."
+
+claims:
+  - claim: "The reference solution passes all 11 acceptance tests, and each of five deliberate defects (overwrite on bronze, missing tracker in the gold grain, unfiltered silver waves, cast instead of try_cast, no source dedup before MERGE) fails at least one test."
+    status: verified
+    source: "Local run on PySpark 4.0.4 and delta-spark 4.0.1, September 2026."

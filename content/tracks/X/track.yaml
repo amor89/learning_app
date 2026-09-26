@@ -1,0 +1,13 @@
+id: X
+title: Capstones
+summary: Three projects that combine the tracks, each checked against tests or a hidden key.
+checklist:
+  - Read the brief and restate the goal before you touch code.
+  - Work to the CLAUDE.md standard, not to the starting code.
+  - Run the acceptance tests before and after each change.
+  - Record every Copilot or assistant output you rely on, with how you checked it.
+  - Compare your work with the reference or key only after you submit.
+modules:
+  - {id: X1, title: "Capstone 1: refactor a messy pipeline", tags: [M16-18, current-work], summary: "Refactor a notebook-style pipeline to the standard, with tests on a local SparkSession."}
+  - {id: X2, title: "Capstone 2: a unified Fabric solution", tags: [M16-18, current-work], summary: "Mirror Databricks gold into OneLake, build a Direct Lake model and verify Copilot output."}
+  - {id: X3, title: "Capstone 3: review an AI-generated pull request", tags: [all-months], summary: "Review a pull request an assistant wrote, graded against a hidden key."}
