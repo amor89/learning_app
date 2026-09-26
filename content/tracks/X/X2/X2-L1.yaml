@@ -1,0 +1,319 @@
+id: X2-L1
+title: "Capstone 2: a unified Fabric solution"
+
+concept: |
+  This capstone brings Track C together, with Track A gold tables as the source. You build one reporting path in Fabric and log every Copilot output you use.
+
+  **The brief.** Regional analysts need a weekly reach report on the NAT tracker. The gold table `nat_metrics` lives in Unity Catalog on Azure Databricks. Build:
+
+  1. A **mirrored Azure Databricks catalog** item for the gold schema. No data moves: Fabric mirrors the catalog structure and reads the Delta files through shortcuts (C3-L3).
+  2. A **Direct Lake on OneLake** semantic model over the mirrored tables, with a star schema and `DIVIDE` in every ratio measure (C6).
+  3. A **Power BI report** with a wave slicer and a region slicer, drafted with Copilot.
+  4. **Access** rebuilt in Fabric. Unity Catalog grants and row filters do not carry over, so analysts are Viewers and OneLake security roles limit rows where needed (C9-L2).
+  5. A **verification log**: one row per Copilot output you kept, with how you checked it (C8-L3).
+
+  **Constraints to design around** (Microsoft Learn, checked September 2026):
+
+  - Tables with row filters or column masks, views and materialized views do not mirror. Publish a gold table that is safe to share.
+  - One connection credential reads every mirrored table.
+  - Direct Lake on OneLake never falls back to DirectQuery. A table over the SKU guardrail fails to frame, so compact gold with `OPTIMIZE`.
+  - Copilot in Power BI is GA. Copilot output can be inaccurate, and a person able to judge it reviews it.
+
+  **What you deliver:** the workspace items, your verification log (template in the lab sheet), and a one-page design note answering the design exercise below. You need a Fabric capacity with Copilot enabled for step 3. Without one, do steps 1, 2, 4 and 5 and draft the measures by hand.
+
+why_it_matters: |
+  Most real reporting work crosses platforms: data engineered in one place, modelled and consumed in another. Each boundary drops something: permissions, freshness guarantees, a filter. This capstone makes you find each boundary on purpose, decide what to rebuild on the far side, and prove that the numbers in the report match the numbers in gold.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Mirror: gold schema including v_regional_reach (a view) and nat_metrics (row filter on region)
+      Model: Direct Lake on SQL endpoint, behaviour Automatic
+      Measures: accepted from Copilot as generated
+      Access: "Unity Catalog already restricts regions"
+    annotations:
+      - find: "Mirror: gold schema including v_regional_reach (a view) and nat_metrics (row filter on region)"
+        note: "Neither object mirrors: views and tables with row filters are unsupported."
+      - find: "Measures: accepted from Copilot as generated"
+        note: "No check against gold. Copilot output can be inaccurate."
+      - find: 'Access: "Unity Catalog already restricts regions"'
+        note: "Unity Catalog permissions do not carry over to Fabric."
+  strong:
+    code: |
+      Mirror: gold schema with nat_metrics_shareable (no row filter), auto-sync on
+      Model: Direct Lake on OneLake, star schema, DIVIDE in every ratio
+      Measures: Copilot drafts, each checked against a SQL total from gold, logged
+      Access: analysts as Viewers, OneLake security role per region on the fact table
+    annotations:
+      - find: "Mirror: gold schema with nat_metrics_shareable (no row filter), auto-sync on"
+        note: "A gold table designed to be mirrored."
+      - find: "Measures: Copilot drafts, each checked against a SQL total from gold, logged"
+        note: "Every kept output has a check and a log row."
+      - find: "Access: analysts as Viewers, OneLake security role per region on the fact table"
+        note: "Row rules rebuilt on the Fabric side."
+  takeaway: |
+    Decide what each boundary drops, rebuild it on the far side, and prove the report matches gold.
+
+exercises:
+  - id: X2-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Your gold schema holds `nat_metrics` (a Delta table with no policies), `v_regional_reach` (a view) and `nat_metrics_secure` (a row filter on region). Which appear in the mirrored catalog?
+    options:
+      - {id: a, text: "nat_metrics only"}
+      - {id: b, text: "All three"}
+      - {id: c, text: "nat_metrics and v_regional_reach"}
+      - {id: d, text: "nat_metrics and nat_metrics_secure, with the row filter applied"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Views and tables with row filters or column masks are not supported for Unity Catalog mirroring."}
+      - {id: r2, text: "Only tables whose names start with nat_ are mirrored."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Views and tables with row filters do not mirror."
+      - answer: c
+        feedback: "Views are not supported."
+      - answer: d
+        feedback: "Tables with row filters do not mirror, and Unity Catalog policies are not carried over."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Names do not matter. Object type and policies do."
+    hints:
+      - "Lesson C3-L3."
+      - "Which object types are unsupported?"
+      - "Views and filtered tables."
+    explanation: |
+      Plan a gold table that is safe to mirror, and rebuild row rules in Fabric.
+
+  - id: X2-L1-E2
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the build.
+    items:
+      - {id: gold, text: "Publish nat_metrics_shareable in gold and run OPTIMIZE"}
+      - {id: mirror, text: "Create the mirrored Azure Databricks catalog item"}
+      - {id: model, text: "Build the Direct Lake on OneLake semantic model"}
+      - {id: access, text: "Set Viewer roles and OneLake security roles"}
+      - {id: report, text: "Draft the report with Copilot and log each checked output"}
+    answer: [gold, mirror, model, access, report]
+    wrong_answers:
+      - answer: [mirror, gold, model, access, report]
+        feedback: "Mirror what is ready: publish and compact the shareable table first."
+      - answer: [gold, mirror, model, report, access]
+        feedback: "Set access before analysts see the report. A report shared early leaks every row."
+    hints:
+      - "What must exist before mirroring?"
+      - "Model before report."
+      - "Access before sharing."
+    explanation: |
+      Source, mirror, model, access, then the report.
+
+  - id: X2-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: dax
+    prompt: |
+      Complete the reach share measure the report uses, so a zero base shows an empty cell and the wave and region slicers still apply.
+    template: |
+      Region share =
+      VAR this_region = SUM ( fact_reach[weighted_reach] )
+      VAR all_regions = CALCULATE ( SUM ( fact_reach[weighted_reach] ), ALL ( [[g1]] ) )
+      RETURN [[g2]] ( this_region, all_regions )
+    gaps:
+      g1: {accepted: [dim_region]}
+      g2: {accepted: [DIVIDE], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: fact_reach}
+        feedback: "ALL ( fact_reach ) removes the wave slicer too. Remove only the region filter."
+    hints:
+      - "Which filter should the denominator ignore?"
+      - "Region only."
+      - "`dim_region` and `DIVIDE`."
+    explanation: |
+      The denominator keeps the wave filter and drops only the region filter. DIVIDE returns BLANK on a zero base.
+
+  - id: X2-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `log_problems(entries: list[dict[str, str]]) -> list[str]` that checks the Copilot verification log. Each entry needs non-empty `output_id`, `prompt`, `check_method` and `result`. `check_method` must be one of `"known_data"`, `"second_method"` or `"read_through"`. `result` must be `"pass"` or `"fail"`. Return one message per problem, formatted `"<output_id>: <problem>"` with problems `missing <field>`, `unknown check_method` or `unknown result`, in entry order. Use `"?"` as the id when `output_id` is missing or empty. An entry with result `"fail"` also adds `"<output_id>: failed check, do not publish"`.
+    starter: |
+      def log_problems(entries):
+          return []
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: log_problems
+          typed: true
+          docstring: true
+          message: "Give `log_problems` type hints and a docstring."
+      tests:
+        - id: clean
+          code: |
+            entries = [{"output_id": "M1", "prompt": "reach share measure", "check_method": "second_method", "result": "pass"}]
+            assert log_problems(entries) == []
+          message: "A complete, passing entry has no problems."
+        - id: missing_and_unknown
+          code: |
+            entries = [
+                {"output_id": "M2", "prompt": "", "check_method": "looked fine", "result": "pass"},
+                {"prompt": "visual title", "check_method": "read_through", "result": "maybe"},
+            ]
+            assert log_problems(entries) == ["M2: missing prompt", "M2: unknown check_method", "?: missing output_id", "?: unknown result"], log_problems(entries)
+          message: "Report missing fields and unknown values in entry order, with '?' for a missing id."
+        - id: failed
+          code: |
+            entries = [{"output_id": "M3", "prompt": "yoy change", "check_method": "known_data", "result": "fail"}]
+            assert log_problems(entries) == ["M3: failed check, do not publish"]
+          message: "A failed check is flagged so it is not published."
+    solution: |
+      REQUIRED_FIELDS = ("output_id", "prompt", "check_method", "result")
+      CHECK_METHODS = frozenset({"known_data", "second_method", "read_through"})
+      RESULTS = frozenset({"pass", "fail"})
+
+
+      def log_problems(entries: list[dict[str, str]]) -> list[str]:
+          """Problems in a Copilot verification log.
+
+          Args:
+              entries: One dict per Copilot output kept in the solution.
+
+          Returns:
+              Messages such as "M2: missing prompt", in entry order.
+          """
+          problems: list[str] = []
+          for entry in entries:
+              output_id = entry.get("output_id") or "?"
+              for name in REQUIRED_FIELDS:
+                  if not entry.get(name):
+                      problems.append(f"{output_id}: missing {name}")
+              method = entry.get("check_method")
+              if method and method not in CHECK_METHODS:
+                  problems.append(f"{output_id}: unknown check_method")
+              result = entry.get("result")
+              if result and result not in RESULTS:
+                  problems.append(f"{output_id}: unknown result")
+              if result == "fail":
+                  problems.append(f"{output_id}: failed check, do not publish")
+          return problems
+    seeded_bugs:
+      - |
+        def log_problems(entries: list[dict[str, str]]) -> list[str]:
+            """Accepts any check method."""
+            problems: list[str] = []
+            for entry in entries:
+                output_id = entry.get("output_id") or "?"
+                for name in ("output_id", "prompt", "check_method", "result"):
+                    if not entry.get(name):
+                        problems.append(f"{output_id}: missing {name}")
+                result = entry.get("result")
+                if result and result not in ("pass", "fail"):
+                    problems.append(f"{output_id}: unknown result")
+                if result == "fail":
+                    problems.append(f"{output_id}: failed check, do not publish")
+            return problems
+    wrong_answers:
+      - answer: |
+          def log_problems(entries: list[dict[str, str]]) -> list[str]:
+              """Accepts any check method."""
+              problems: list[str] = []
+              for entry in entries:
+                  output_id = entry.get("output_id") or "?"
+                  for name in ("output_id", "prompt", "check_method", "result"):
+                      if not entry.get(name):
+                          problems.append(f"{output_id}: missing {name}")
+                  result = entry.get("result")
+                  if result and result not in ("pass", "fail"):
+                      problems.append(f"{output_id}: unknown result")
+                  if result == "fail":
+                      problems.append(f"{output_id}: failed check, do not publish")
+              return problems
+        triggers: missing_and_unknown
+    hints:
+      - "Keep allowed values in constants."
+      - "Missing and empty both count as missing: `not entry.get(name)`."
+      - "Check fields in order, then check_method, then result."
+    explanation: |
+      "Looked fine" is not a check method. A log that allows it records opinions, not verification.
+
+  - id: X2-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Write your design note's key decisions.
+    slots:
+      - id: mode
+        label: "Semantic model storage mode"
+        options:
+          - {id: dl_onelake, text: "Direct Lake on OneLake, with OPTIMIZE keeping gold under the file guardrail"}
+          - {id: import, text: "Import mode with a nightly refresh"}
+        answer: dl_onelake
+      - id: rows
+        label: "Limiting analysts to their region"
+        options:
+          - {id: onelake_roles, text: "Viewers plus OneLake security roles filtering region on the fact table"}
+          - {id: uc_filter, text: "The Unity Catalog row filter on the source table"}
+        answer: onelake_roles
+      - id: verify
+        label: "Accepting a Copilot-drafted measure"
+        options:
+          - {id: compare, text: "Compare it with a SQL total from gold on a fixed wave, and log the check"}
+          - {id: looks, text: "Accept it if the visual looks plausible"}
+        answer: compare
+    model_answer: |
+      - Direct Lake on OneLake reads the mirrored Delta files without a copy and never falls back. Compaction keeps it within guardrails.
+      - Unity Catalog policies do not carry over, and filtered tables do not mirror. Rebuild row rules with OneLake security.
+      - Every kept Copilot output is checked against an independent number and logged.
+    wrong_answers:
+      - answer: {mode: import}
+        feedback: "Import copies the data and adds a refresh to fail. Direct Lake reads the mirrored files directly."
+      - answer: {rows: uc_filter}
+        feedback: "Tables with row filters do not mirror, and Unity Catalog permissions do not apply in Fabric."
+      - answer: {verify: looks}
+        feedback: "Plausible is not verified. Compare with a number from gold."
+    hints:
+      - "Which mode reads mirrored Delta without a copy?"
+      - "Where do row rules live after mirroring?"
+      - "What makes a Copilot output verified?"
+    explanation: |
+      Direct Lake on OneLake, OneLake security for rows, and a logged check for every Copilot output.
+
+recap:
+  - front: "Capstone 2 path"
+    back: "Shareable gold table, mirrored catalog, Direct Lake on OneLake model, Fabric access, Copilot report, verification log."
+  - front: "What does not cross the mirror"
+    back: "Views, tables with row filters or masks, and Unity Catalog permissions."
+  - front: "A verification log row"
+    back: "Output id, prompt, check method (known data, second method, read-through), result. Failed checks are not published."
+
+practical:
+  platform: fabric
+  title: "Capstone 2: build and verify the NAT reach report"
+  intro: |
+    Run this in a Fabric trial workspace connected to an Azure Databricks workspace with Unity Catalog. Copilot needs a paid F2 or higher capacity (lesson C8-L1). Keep your verification log as a table with columns: output_id, prompt, output summary, check_method, check detail, result, checked_by, date.
+  steps:
+    - "In Databricks, create gold table `nat_metrics_shareable` with no row filter or column mask, holding only data every analyst may see. Run OPTIMIZE on it."
+    - "In Fabric, create a mirrored Azure Databricks catalog item for the gold schema. Confirm that nat_metrics_shareable appears and that any view or filtered table does not."
+    - "Create a semantic model in Direct Lake on OneLake mode over the mirrored tables. Build a star schema with dim_region and dim_wave."
+    - "Add measures for weighted reach and region share with DIVIDE. For each measure Copilot drafts, compare the value for one wave with a SQL total from gold, and log the result."
+    - "Give analysts the Viewer role. Create a OneLake security role per region that filters the fact table, and test it with a test account."
+    - "Draft the report pages with Copilot. Log each visual you keep, with the check you used."
+    - "Run log_problems (exercise 4) on your log. Fix every problem before sharing the report."
+    - "Write a one-page design note covering storage mode, row security and verification, and the decisions from exercise 5."
+
+claims:
+  - claim: "Unity Catalog mirroring: metadata only via shortcuts; views, materialized views, streaming and tables with row filters or column masks are unsupported; UC permissions do not carry over; one connection credential."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/mirroring/azure-databricks (see lesson C3-L3)"
+  - claim: "Direct Lake on OneLake never falls back to DirectQuery; guardrails by SKU."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/direct-lake-overview (see lesson C6-L3)"
+  - claim: "Copilot in Power BI is GA; Copilot requires paid F2+ or P1+; output can be inaccurate and needs review."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/fundamentals/copilot-ai-feature-state and copilot-privacy-security (see lessons C8-L1 and C8-L3)"

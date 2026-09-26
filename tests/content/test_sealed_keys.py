@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 LESSONS = Path(__file__).resolve().parents[2] / "site" / "content" / "lessons"
 ANSWER_FIELDS = {
     "answer",
@@ -21,10 +23,11 @@ ANSWER_FIELDS = {
 }
 
 
-def test_d7_answers_are_sealed() -> None:
-    """Every D7 exercise keeps its answer fields inside `sealed`."""
-    files = sorted(LESSONS.glob("D7-*.json"))
-    assert files, "no D7 lessons built"
+@pytest.mark.parametrize("module", ["D7", "X3"])
+def test_hidden_key_answers_are_sealed(module: str) -> None:
+    """Every exercise in a hidden-key module keeps its answer fields inside `sealed`."""
+    files = sorted(LESSONS.glob(f"{module}-*.json"))
+    assert files, f"no {module} lessons built"
     for path in files:
         for exercise in json.loads(path.read_text(encoding="utf-8"))["exercises"]:
             leaked = ANSWER_FIELDS & exercise.keys()

@@ -42,7 +42,7 @@ SITE = ROOT / "site"
 OUT = SITE / "content"
 DOWNLOADS = SITE / "downloads"
 TEST_FIXTURE = ROOT / "tests" / "app" / "exercises.generated.json"
-HIDDEN_KEY_MODULES = {"D7"}
+HIDDEN_KEY_MODULES = {"D7", "X3"}
 XP_PER_LEVEL = 10
 
 

@@ -1,0 +1,347 @@
+id: X3-L1
+title: "Capstone 3: review an AI-generated pull request"
+
+concept: |
+  This capstone brings Track D together. An assistant has opened pull request #214 against your pipeline repository. The full PR is in `practice/capstone/pr_review/PR.md`, with a review template beside it. The exercises below show the same five files, one per exercise, and a final verdict. The answer key stays hidden until you submit.
+
+  **The PR's description** says: "All tests pass. The code follows the team standard and has been tested thoroughly." Treat every sentence as a claim to check, not a fact (lesson D6-L1).
+
+  **Review each file with the full routine:**
+
+  1. **Goal.** What does this change say it does? The docstring or the description tells you.
+  2. **Read-through.** Names, types, side effects and scope (D6-L1).
+  3. **Known data.** Work one small case by hand. Does the code give your answer (D6-L2)?
+  4. **Assumptions.** What must be true of the data for this to work? Is it true (D6-L3)?
+  5. **Standard.** Nulls and truthiness, join grain, MERGE keys, tests that repeat the code, secrets (D3, D5, D7).
+
+  **For every finding, record four things:** the line, the defect, whether it blocks the merge, and the fix you request. A finding without a requested fix is a complaint, not a review.
+
+  **Grading.** Each file is a spot-the-bug exercise. Tapping the right line counts as a bug found. A fix that passes the checker counts as a fix proposed. The last exercise asks for your verdict and the reasons behind it.
+
+  Aim to find all five before you open a hint. Then compare your written review with the explanations. The defects missed most often in real reviews are the ones that run cleanly: a truthiness test, an inner join, a MERGE key and a test that repeats the code.
+
+why_it_matters: |
+  More of the code you review will be written by assistants. It arrives with confident descriptions and passing tests. A reviewer who checks the claims, works an example by hand and reads the tests as critically as the code is what keeps those pull requests from quietly corrupting a pipeline.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      Review: LGTM, tests pass.
+    annotations:
+      - find: "Review: LGTM, tests pass."
+        note: "Repeats the author's claim. No finding, no check, no fix."
+  strong:
+    code: |
+      Finding 1 (blocking): qa_statistical.py line 3 treats a 0.0 share as missing.
+        Checked: stability_status(0.0, 0.12) returns SKIP, expected WARN.
+        Fix: test `is not None` on both shares, and add a test for 0.0.
+      Verdict: request changes. 4 blocking findings, 1 security finding.
+    annotations:
+      - find: "  Checked: stability_status(0.0, 0.12) returns SKIP, expected WARN."
+        note: "A worked example proves the finding."
+      - find: "Verdict: request changes. 4 blocking findings, 1 security finding."
+        note: "The verdict follows from the findings."
+  takeaway: |
+    Every finding names the line, the defect, the severity, the check and the fix. The verdict follows from the findings.
+
+exercises:
+  - id: X3-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      PR #214's description says "All tests pass. The code follows the team standard and has been tested thoroughly." What do you do with these sentences?
+    options:
+      - {id: a, text: "Treat each as a claim, and check it against the diff and the tests"}
+      - {id: b, text: "Accept them and review only the style"}
+      - {id: c, text: "Ignore the description entirely"}
+      - {id: d, text: "Approve, since the suite is green"}
+    answer: a
+    reasons:
+      - {id: r1, text: "A description states intent. Only the diff and the tests show what the code does."}
+      - {id: r2, text: "Assistants always write false descriptions."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Style is the least of it. The claims are what you must check."
+      - answer: c
+        feedback: "The description tells you the goal, and its claims tell you what to verify."
+      - answer: d
+        feedback: "A green suite proves only what its tests check. Read them."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Descriptions are often honest and still wrong about what the code does."
+    hints:
+      - "Lesson D6-L1: read before you trust."
+      - "What evidence backs each sentence?"
+      - "Check each claim."
+    explanation: |
+      The description gives the goal. Each claim in it gets checked like any other assertion.
+
+  - id: X3-L1-E2
+    type: spot_bug
+    difficulty: 1
+    language: python
+    prompt: |
+      File 1, `qa_statistical.py`. Goal from the docstring: WARN if the share moved more than the tolerance, SKIP only if a share is missing. Find the defect and fix it.
+    code: |
+      def stability_status(current_pct: float | None, prior_pct: float | None, tolerance: float = 0.10) -> str:
+          """Return WARN if the share moved more than tolerance, PASS if not, SKIP if missing."""
+          if current_pct and prior_pct:
+              return "WARN" if abs(current_pct - prior_pct) > tolerance else "PASS"
+          return "SKIP"
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_truthiness
+          kind: forbids_bare_truthiness
+          names: [current_pct, prior_pct]
+          message: "Still a truthiness test. Compare with `is not None`."
+      tests:
+        - id: zero
+          code: |
+            assert stability_status(0.0, 0.12) == "WARN"
+          message: "A drop to 0.0 must WARN."
+        - id: missing
+          code: |
+            assert stability_status(None, 0.12) == "SKIP"
+          message: "A missing share still returns SKIP."
+    fix_solution: |
+      def stability_status(current_pct: float | None, prior_pct: float | None, tolerance: float = 0.10) -> str:
+          """Return WARN if the share moved more than tolerance, PASS if not, SKIP if missing."""
+          if current_pct is not None and prior_pct is not None:
+              return "WARN" if abs(current_pct - prior_pct) > tolerance else "PASS"
+          return "SKIP"
+    wrong_answers:
+      - lines: [4]
+        feedback: "The comparison is right. The line above stops a 0.0 share reaching it."
+    hints:
+      - "Work stability_status(0.0, 0.12) by hand."
+      - "0.0 is falsy."
+      - "`is not None` on both."
+    explanation: |
+      Blocking. Reference defect 8 in a new form: the largest possible drop is never flagged.
+
+  - id: X3-L1-E3
+    type: spot_bug
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      File 2, `gold_metrics.py`. Goal from the docstring: one row per gold row, with region names attached. Gold has region codes missing from the lookup. Find the defect and fix it.
+    code: |
+      from pyspark.sql import functions as F
+
+      def add_region_names(gold: DataFrame, regions: DataFrame) -> DataFrame:
+          """Attach region names. One row per gold row."""
+          return gold.join(regions, "region_code")
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: left_join
+          kind: requires_pattern
+          pattern: "join\\(\\s*(F\\.broadcast\\()?regions\\)?\\s*,\\s*[\"']region_code[\"']\\s*,\\s*(how\\s*=\\s*)?[\"']left[\"']"
+          message: "Use a left join: gold.join(regions, \"region_code\", \"left\")."
+    fix_solution: |
+      from pyspark.sql import functions as F
+
+      def add_region_names(gold: DataFrame, regions: DataFrame) -> DataFrame:
+          """Attach region names. One row per gold row."""
+          return gold.join(regions, "region_code", "left")
+    wrong_answers:
+      - lines: [1]
+        feedback: "The import follows the standard."
+    hints:
+      - "What happens to gold rows whose code is not in regions?"
+      - "The default join type is inner."
+      - "Use a left join."
+    explanation: |
+      Blocking. An inner join drops gold rows with unknown codes and breaks the grain the docstring promises. Also ask for a uniqueness check on the lookup, so a left join cannot duplicate rows.
+
+  - id: X3-L1-E4
+    type: spot_bug
+    difficulty: 3
+    language: sql
+    prompt: |
+      File 3, `silver_merge.sql`. Silver's grain is one row per respondent per wave. Find the defect and fix it.
+    code: |
+      MERGE INTO research.research_silver.nat_respondents AS t
+      USING research.research_bronze.nat_latest AS s
+      ON t.respondent_id = s.respondent_id
+      WHEN MATCHED THEN UPDATE SET *
+      WHEN NOT MATCHED THEN INSERT *;
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: both_keys
+          type: required
+          pattern: "ON\\s+t\\.respondent_id\\s*=\\s*s\\.respondent_id\\s+AND\\s+t\\.wave_id\\s*=\\s*s\\.wave_id|ON\\s+t\\.wave_id\\s*=\\s*s\\.wave_id\\s+AND\\s+t\\.respondent_id\\s*=\\s*s\\.respondent_id"
+          message: "Match on both grain keys: respondent_id and wave_id."
+    fix_solution: |
+      MERGE INTO research.research_silver.nat_respondents AS t
+      USING research.research_bronze.nat_latest AS s
+      ON t.respondent_id = s.respondent_id AND t.wave_id = s.wave_id
+      WHEN MATCHED THEN UPDATE SET *
+      WHEN NOT MATCHED THEN INSERT *;
+    wrong_answers:
+      - lines: [4]
+        feedback: "Updating matched rows is right, once the match uses the full key."
+    hints:
+      - "What is silver's grain?"
+      - "Which key is missing from the ON clause?"
+      - "wave_id."
+    explanation: |
+      Blocking. Matching on respondent alone overwrites a respondent's earlier waves with the new wave's row, and fails outright when a respondent has several waves in silver. Ask for source deduplication on both keys too.
+
+  - id: X3-L1-E5
+    type: spot_bug
+    difficulty: 3
+    language: python
+    prompt: |
+      File 4, `test_qa_statistical.py`. The description says "all tests pass". Find the line that makes this test worthless, and rewrite the test with hand-worked expected values, including the 0.0 case.
+    code: |
+      def test_stability_status():
+          current, prior, tol = 0.30, 0.10, 0.10
+          expected = "WARN" if abs(current - prior) > tol else "PASS"
+          assert stability_status(current, prior, tol) == expected
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_formula
+          kind: forbids_pattern
+          pattern: "abs\\("
+          message: "The expected value must not repeat the formula. Write the answer by hand."
+        - id: literal_warn
+          kind: requires_pattern
+          pattern: "==\\s*[\"']WARN[\"']"
+          message: "Assert a literal expected value, such as == \"WARN\"."
+        - id: zero_case
+          kind: requires_pattern
+          pattern: "stability_status\\(\\s*0\\.0\\s*,"
+          message: "Add the case that the code gets wrong: a current share of 0.0."
+    fix_solution: |
+      def test_stability_status():
+          assert stability_status(0.30, 0.10, 0.10) == "WARN"
+          assert stability_status(0.12, 0.10, 0.10) == "PASS"
+          assert stability_status(0.0, 0.12, 0.10) == "WARN"
+          assert stability_status(None, 0.12, 0.10) == "SKIP"
+    wrong_answers:
+      - lines: [4]
+        feedback: "The assert compares with `expected`. The problem is how `expected` was computed, one line up."
+    hints:
+      - "Where does the expected value come from?"
+      - "From the same formula as the code."
+      - "Write literal answers, including 0.0."
+    explanation: |
+      Blocking. A self-confirming test (D5-L3) cannot catch the defect in file 1. The hand-worked 0.0 case fails against the current code, which is exactly what a test should do.
+
+  - id: X3-L1-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      File 5, `wave_api.py`. Find the security defect and fix it: read the token from the environment variable `SURVEY_API_TOKEN` at call time.
+    code: |
+      import requests
+
+      API_TOKEN = "tok_EXAMPLE_not_real_0000"
+
+      def fetch_wave(wave_id: str) -> dict[str, object]:
+          """Fetch wave metadata from the survey platform."""
+          headers = {"Authorization": f"Bearer {API_TOKEN}"}
+          return requests.get(f"https://survey.example/api/waves/{wave_id}", headers=headers, timeout=30).json()
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_literal
+          kind: forbids_pattern
+          pattern: "tok_EXAMPLE"
+          message: "Remove the literal token from the code."
+        - id: from_env
+          kind: requires_pattern
+          pattern: "os\\.environ\\[\\s*[\"']SURVEY_API_TOKEN[\"']\\s*\\]|os\\.environ\\.get\\(\\s*[\"']SURVEY_API_TOKEN[\"']|os\\.getenv\\(\\s*[\"']SURVEY_API_TOKEN[\"']"
+          message: "Read os.environ[\"SURVEY_API_TOKEN\"] inside the function."
+        - id: imports_os
+          kind: requires_import
+          module: os
+          message: "Import os."
+    fix_solution: |
+      import os
+
+      import requests
+
+      def fetch_wave(wave_id: str) -> dict[str, object]:
+          """Fetch wave metadata from the survey platform."""
+          headers = {"Authorization": f"Bearer {os.environ['SURVEY_API_TOKEN']}"}
+          return requests.get(f"https://survey.example/api/waves/{wave_id}", headers=headers, timeout=30).json()
+    wrong_answers:
+      - lines: [8]
+        feedback: "The request has a timeout and reads the token from a variable. The variable is the problem."
+    hints:
+      - "Which line puts a credential into Git?"
+      - "A literal token."
+      - "Read it from the environment at call time."
+    explanation: |
+      Blocking, and a security finding. Even a placeholder invites someone to paste the real token. On Databricks, use a secret scope instead.
+
+  - id: X3-L1-E7
+    type: design
+    difficulty: 5
+    prompt: |
+      Write the verdict section of your review.
+    slots:
+      - id: verdict
+        label: "Verdict"
+        options:
+          - {id: changes, text: "Request changes"}
+          - {id: approve_comments, text: "Approve with comments"}
+          - {id: approve, text: "Approve"}
+        answer: changes
+      - id: claims
+        label: "The description's 'all tests pass'"
+        options:
+          - {id: unsupported, text: "True but meaningless: the only test repeats the code, so passing proves nothing"}
+          - {id: supported, text: "Supports approval: the suite is green"}
+        answer: unsupported
+      - id: ask
+        label: "What you ask the author for"
+        options:
+          - {id: fixes_tests, text: "Fixes for all five findings, hand-worked tests including 0.0 and a multi-wave respondent, and the assumptions behind each change"}
+          - {id: rewrite, text: "A complete rewrite of the PR"}
+        answer: fixes_tests
+    model_answer: |
+      - Five findings, all blocking, one of them a security issue: request changes.
+      - A green suite made of a self-confirming test says nothing about the code.
+      - Ask for specific fixes and the tests that prove them, not a rewrite that starts the review over.
+    wrong_answers:
+      - answer: {verdict: approve_comments}
+        feedback: "Comments are for non-blocking points. A wrong MERGE key and a committed token block the merge."
+      - answer: {verdict: approve}
+        feedback: "Five blocking defects, including a secret in code."
+      - answer: {claims: supported}
+        feedback: "The only test repeats the formula, so it passes whatever the formula does."
+      - answer: {ask: rewrite}
+        feedback: "A rewrite discards what is right and restarts the review. Ask for targeted fixes and tests."
+    hints:
+      - "How many findings block the merge?"
+      - "What does the only test actually check?"
+      - "Targeted fixes or a restart?"
+    explanation: |
+      Request changes, name the unsupported claims, and ask for targeted fixes with hand-worked tests.
+
+recap:
+  - front: "Five parts of a review finding"
+    back: "Line, defect, blocking or not, how you checked it, and the fix you request."
+  - front: "Defects this PR hid"
+    back: "Truthiness of 0.0, an inner join breaking grain, a MERGE missing wave_id, a self-confirming test, a token in code."
+  - front: "Treating a PR description"
+    back: "Every sentence is a claim. 'All tests pass' needs the tests to be read."
+
+claims:
+  - claim: "Each hunk's behaviour follows from lessons verified earlier: truthiness of 0.0 (D3-L3), inner join drops unmatched rows (D3-L1), MERGE grain keys (A3, D4), self-confirming tests (D5-L3), secrets from the environment (D5-L3)."
+    status: verified
+    source: "Local runs recorded in the claims of the lessons named, September 2026."
