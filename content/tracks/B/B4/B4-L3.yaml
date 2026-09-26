@@ -172,12 +172,6 @@ exercises:
     bug_lines: [7]
     fix_checker:
       kind: python
-      setup: |
-        import os
-        import tempfile
-        import polars as pl
-        PATH = os.path.join(tempfile.mkdtemp(), "x.parquet")
-        pl.DataFrame({"wave": ["w1", "w1", "w2"], "weight": [1.0, 3.0, 9.0]}).write_parquet(PATH)
       ast_rules:
         - id: lazy
           kind: requires_pattern
@@ -187,11 +181,10 @@ exercises:
           kind: forbids_pattern
           pattern: "read_parquet"
           message: "read_parquet still loads every wave."
-      tests:
-        - id: value
-          code: |
-            assert wave_mean(PATH, "w1") == 2.0
-          message: "The mean for the wave must be correct."
+        - id: filter_before_collect
+          kind: requires_pattern
+          pattern: "scan_parquet\\([^)]*\\)[\\s\\S]*\\.filter\\([\\s\\S]*\\.collect\\("
+          message: "Filter the lazy frame before collect(), so only one wave is read."
     fix_solution: |
       import polars as pl
 

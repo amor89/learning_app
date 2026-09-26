@@ -105,9 +105,9 @@ Every Track C lesson cites a row in this table. Each row was checked on the Micr
 ## Known platform behaviours to verify before teaching
 
 - Serverless compute does not support DataFrame or SQL cache APIs, and the Spark UI is not available. Verified on docs.databricks.com/aws/en/compute/serverless/limitations (checked 2026-09-25). Affects A5 and D2 practicals.
-- `owner` is a reserved table property in Spark and fails in `SET TBLPROPERTIES`. Unverified. Affects `reference/pipelines/unity_catalog.sql` and A4.
+- `owner` is a reserved table property in Spark and fails in `SET TBLPROPERTIES` (`UNSUPPORTED_FEATURE.SET_TABLE_PROPERTY`). Verified locally, see the table below. Affects `reference/pipelines/unity_catalog.sql` and A4.
 - MERGE fails with a multiple-source-rows error when two source rows match one target row. Verified locally by `practice/tests/test_a3_l1_merge.py` on delta-spark 4.0.1.
-- Spark 4.0 turns ANSI mode on by default, so an invalid `cast` raises an error instead of returning null. Unverified for DBR 17.3 LTS. Affects A2 and D3.
+- Spark 4.0 turns ANSI mode on by default, so an invalid `cast` raises `CAST_INVALID_INPUT` instead of returning null. Verified: enabled by default in Apache Spark 4.0 and Databricks Runtime 17.0 and above (docs.databricks.com/aws/en/sql/language-manual/sql-ref-ansi-compliance, checked 2026-09-25) and locally on PySpark 4.0.4. Affects A2, D1 and D3.
 
 ## Track A facts
 
@@ -170,3 +170,19 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 | PyTorch 2.14: `Tensor.to` returns a copy, `Module.to` is in place, gradients accumulate, weights-only `torch.load`, same-seed CPU runs identical. | Verified | Local, torch 2.14.0 CPU |
 | PyTorch `worker_init_fn` seeding and `CUBLAS_WORKSPACE_CONFIG` for deterministic CUDA. | Search only | PyTorch reproducibility notes |
 | sentence-transformers `encode(..., normalize_embeddings=True)`, 384 dimensions for all-MiniLM-L6-v2. | Unverified | Library docs and model card; not run |
+
+## Track D facts (checked September 2026)
+
+| Fact | Status | Source |
+|---|---|---|
+| Python 3.12 and 3.13 add "Did you forget to import" to NameError; 3.11 does not. Chained traceback wording for `raise ... from` and for errors inside `except`. | Verified | Local runs on CPython 3.11.15, 3.12.3, 3.13.12 |
+| PySpark 4.0.4 error conditions: `UNRESOLVED_COLUMN.WITH_SUGGESTION` (42703), `CAST_INVALID_INPUT` (22018), `NOT_COLUMN_OR_STR`, `PATH_NOT_FOUND`; `getCondition()` and `getSqlState()` | Verified | Local |
+| Spark Connect (`remote("local[1]")`): analysis deferred to action or schema access; errors in `pyspark.errors.exceptions.connect` caught by `pyspark.errors.AnalysisException`; `sparkContext` raises `JVM_ATTRIBUTE_NOT_SUPPORTED` | Verified | Local, with `pyspark[connect]==4.0.4` in a scratch environment |
+| Serverless compute: Spark Connect APIs only, no RDDs, Spark UI replaced by the query profile | Verified | docs.databricks.com compute/serverless/limitations, spark/connect-vs-classic |
+| SQLSTATE class 22 data exception, class 42 syntax error or access rule violation | Verified | docs.databricks.com error-messages/sqlstates |
+| pandas 3.0.2: `merge` matches null keys; `!=` keeps missing; `validate="many_to_one"` raises `MergeError`; `read_csv` treats `n/a` as missing; chained assignment warns and does nothing; no `append` or `applymap` | Verified | Local, Pyodide pins |
+| ruff 0.16.9 rules T100 (breakpoint), G004 (f-string in logging), B006, F821, E712 | Verified | Local |
+| `SELECT * EXCEPT (col)` in Databricks SQL | Verified | docs.databricks.com sql-ref-syntax-qry-star |
+| PSI cut-offs 0.1 and 0.25 | Unverified convention | Taught as a rule of thumb only |
+
+| Pyodide 314.0.7 Polars 1.33.1 cannot collect file scans (`scan_parquet`, `scan_csv`): "invalid build. Missing feature new-streaming". `write_parquet` also fails (no `sink_parquet`). In-memory lazy frames work. B4-L3-E4 checks its fix statically for this reason. | Verified | Real browser run from the CDN, September 2026 |

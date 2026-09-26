@@ -165,7 +165,7 @@ exercises:
     prompt: |
       Goal: gold shows 0 unweighted reach for a subgroup where nobody was reached. The reference code uses `sum(when(col("reach_flag") == 1, 1)).alias("unweighted_reach")`. What does gold show?
     options:
-      - {id: a, text: "null"}
+      - {id: a, text: "NULL"}
       - {id: b, text: "0"}
       - {id: c, text: "The subgroup's row count"}
       - {id: d, text: "An error"}

@@ -2,7 +2,7 @@
 
 A personal, offline-capable course with four tracks: Databricks pipeline engineering, Python for data science, Microsoft Fabric, and finding errors in code. It runs as a static site on GitHub Pages and installs on an iPhone home screen.
 
-Status: Phase 4 complete. Track A (Databricks pipeline engineering) has all 30 lessons, Track B (Python for data science) all 54, and Track C (Microsoft Fabric) all 30, each checked against Microsoft Learn in September 2026. Track D has one sample lesson.
+Status: Phase 5 complete. All four tracks are written: Track A (Databricks pipeline engineering) 30 lessons, Track B (Python for data science) 54, Track C (Microsoft Fabric) 30, checked against Microsoft Learn, and Track D (Finding errors in code) 24, with 25 seeded review snippets and a hidden answer key in D7.
 
 ## Layout
 

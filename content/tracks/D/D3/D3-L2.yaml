@@ -101,7 +101,7 @@ exercises:
       - {id: a, text: "2026-07-01"}
       - {id: b, text: "2026-06-30"}
       - {id: c, text: "It depends on the cluster's operating system clock"}
-      - {id: d, text: "null"}
+      - {id: d, text: "NULL"}
     answer: a
     reasons:
       - {id: r1, text: "TIMESTAMP is an instant. to_date uses the session time zone, where 23:30 UTC is 00:30 on 1 July in BST."}

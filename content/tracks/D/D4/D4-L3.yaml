@@ -68,7 +68,7 @@ exercises:
     prompt: |
       In gold, `F.sum(F.when(F.col("reach_flag") == 1, 1))` gives what for a subgroup where no one was reached?
     options:
-      - {id: a, text: "null"}
+      - {id: a, text: "NULL"}
       - {id: b, text: "0"}
       - {id: c, text: "An error"}
       - {id: d, text: "The subgroup is dropped"}
