@@ -53,7 +53,7 @@ packages = ["checkers", "learnkit"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["reference", "site", ".venv", "practice/capstone/before_pipeline.py"]
+extend-exclude = ["reference", "site", ".venv", "practice/capstone/before_pipeline.py", "practice/capstone/pr_review"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF"]
@@ -64,7 +64,7 @@ ignore = ["N812"]
 strict = true
 python_version = "3.11"
 files = ["learnkit", "checkers", "scripts", "practice"]
-exclude = ["practice/exercises/", "practice/capstone/before_pipeline.py"]
+exclude = ["practice/exercises/", "practice/capstone/before_pipeline.py", "practice/capstone/pr_review"]
 # Pygments and nbformat ship without full type hints.
 untyped_calls_exclude = ["pygments", "nbformat"]
 

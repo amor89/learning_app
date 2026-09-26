@@ -94,3 +94,27 @@ jobs:
         run: node tests/app/all_lessons.mjs http://localhost:8000/
       - name: Smoke test (Pyodide steps skipped without a local Pyodide copy)
         run: node tests/app/smoke.mjs http://localhost:8000/
+
+  deploy:
+    # Publishes site/ to GitHub Pages after every gate passes on main.
+    # One-time setup: Settings > Pages > Build and deployment > Source: GitHub Actions.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [checks, parity, practice, browser]
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v5

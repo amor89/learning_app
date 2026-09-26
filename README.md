@@ -2,7 +2,33 @@
 
 A personal, offline-capable course with four tracks: Databricks pipeline engineering, Python for data science, Microsoft Fabric, and finding errors in code. It runs as a static site on GitHub Pages and installs on an iPhone home screen.
 
-Status: Phase 5 complete. All four tracks are written: Track A (Databricks pipeline engineering) 30 lessons, Track B (Python for data science) 54, Track C (Microsoft Fabric) 30, checked against Microsoft Learn, and Track D (Finding errors in code) 24, with 25 seeded review snippets and a hidden answer key in D7.
+Status: Phase 6 complete. All four tracks and three capstones are written: Track A (Databricks pipeline engineering) 30 lessons, Track B (Python for data science) 54, Track C (Microsoft Fabric) 30, checked against Microsoft Learn, Track D (Finding errors in code) 24, and the Capstones track with 3 projects.
+
+## Install on your iPhone
+
+1. Open the site in **Safari**.
+2. Tap the **Share** button, then **Add to Home Screen**, then **Add**.
+3. Open the app from the Home Screen icon. It runs full screen.
+4. While online, run one Python exercise, and open the lessons you want offline. The app caches its shell on first launch, each lesson when you open it, and Pyodide with each Python package the first time an exercise needs it.
+
+Your progress lives in Safari's storage on the phone. Export it from **Settings** in the app before you clear Safari data or change phone, and import it on the new device.
+
+The automated layout tests run in Chromium at 390px. Check a few lessons on the phone itself after each release: code blocks wrap, exercise buttons are reachable, and a Python exercise runs.
+
+## Deploy to GitHub Pages
+
+The `deploy` job in `.github/workflows/ci.yml` publishes `site/` after every gate passes on `main`.
+
+1. In the repository, open **Settings > Pages** and set **Source** to **GitHub Actions**. Do this once.
+2. Merge your branch into `main`. The site appears at `https://<user>.github.io/<repository>/`.
+
+## Capstones
+
+| Capstone | Where | Checked by |
+|---|---|---|
+| 1. Refactor a messy pipeline | `practice/capstone/before_pipeline.py` to `practice/exercises/x1_pipeline.py` | 11 acceptance tests: `pytest practice/tests/test_x1_pipeline.py` |
+| 2. Unified Fabric solution | Lesson X2-L1 and its lab sheet | Your verification log, checked by the exercise 4 function, and the design note |
+| 3. Review an AI-generated pull request | `practice/capstone/pr_review/PR.md` and lesson X3-L1 | A hidden answer key in the app |
 
 ## Layout
 

@@ -2,7 +2,7 @@
 // Usage: node tests/app/smoke.mjs <base-url> [pyodide-url] [screenshot-dir]
 // The base URL serves site/. The optional Pyodide URL points at a local copy of the
 // Pyodide distribution, for environments that cannot reach the CDN.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -32,8 +32,11 @@ async function noHorizontalScroll(label) {
 // Dashboard
 await page.goto(`${base}${query}#/`);
 await page.getByRole("heading", { name: "Dashboard" }).waitFor();
-check(await page.locator(".card.track").count() === 4, "dashboard lists four tracks");
-check(await page.locator(".module-chip").count() === 46, "dashboard shows 46 module chips");
+const index = JSON.parse(readFileSync(new URL("../../site/content/index.json", import.meta.url), "utf8"));
+const trackCount = index.tracks.length;
+const moduleCount = index.tracks.reduce((n, t) => n + t.modules.length, 0);
+check(await page.locator(".card.track").count() === trackCount, `dashboard lists ${trackCount} tracks`);
+check(await page.locator(".module-chip").count() === moduleCount, `dashboard shows ${moduleCount} module chips`);
 await noHorizontalScroll("dashboard");
 await page.screenshot({ path: `${shots}/01-dashboard.png`, fullPage: true });
 
