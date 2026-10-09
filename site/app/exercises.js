@@ -210,9 +210,48 @@ const BUILDERS = {
   },
 };
 
-function codeBuilder(ex, draft) {
+// What to do before you type: steps, the behaviour the checks test, and
+// opt-in examples (test code, the shape of the answer, the full checklist).
+function briefPanel(brief, example, title = "Before you start") {
+  if (!brief) return null;
+  const list = (tag, items) => h(tag, {}, items.map((html) => h("li", { html })));
+  const more = (summary, ...content) => h("details", { class: "more" }, h("summary", {}, summary), ...content);
+  return h(
+    "section",
+    { class: "brief", "aria-label": title },
+    h("h4", {}, title),
+    list("ol", brief.steps_html),
+    brief.must_html.length ? h("div", {}, h("p", { class: "brief-label" }, "Your code must pass these checks"), list("ul", brief.must_html)) : null,
+    brief.shape.length
+      ? more(
+          "Show the shape of the answer",
+          h("p", { class: "muted small" }, brief.shape_note),
+          brief.shape.map((d) => h("div", { class: "shape" }, codeBlock(d.lines), d.summary_html ? h("p", { class: "small", html: d.summary_html }) : null)),
+        )
+      : null,
+    brief.checks.length
+      ? more(
+          "Show the checks as code",
+          h("p", { class: "muted small" }, "The checker runs each block after your code. A block passes when it raises nothing."),
+          brief.checks.map((c) => h("div", { class: "check" }, h("p", { class: "small", html: c.message_html }), codeBlock(c.lines))),
+        )
+      : null,
+    brief.include_html.length || brief.avoid_html.length
+      ? more(
+          "Show the full checklist",
+          h("p", { class: "muted small" }, "The checker also reads your code for these points. They give part of the answer away."),
+          brief.include_html.length ? h("div", {}, h("p", { class: "brief-label" }, "Include"), list("ul", brief.include_html)) : null,
+          brief.avoid_html.length ? h("div", {}, h("p", { class: "brief-label" }, "Avoid"), list("ul", brief.avoid_html)) : null,
+        )
+      : null,
+    example ? more("Show the strong code from the worked example", codeBlock(example.strong.lines)) : null,
+  );
+}
+
+function codeBuilder(ex, draft, frame) {
   draft.code ??= ex.starter ?? "";
   return {
+    brief: briefPanel(ex.brief, frame.example),
     body: editor(draft.code, (v) => (draft.code = v)),
     answer: () => draft.code,
     check: (full, answer) => gradeCode(full.checker, answer, ex.packages),
@@ -240,7 +279,13 @@ function spotBugBuilder(ex, draft, frame) {
         },
       }),
       draft.linesOk && ex.fix_checker
-        ? h("div", { class: "fix" }, h("p", {}, h("strong", {}, "Now fix the code.")), editor(draft.fix, (v) => (draft.fix = v), "Fix editor"))
+        ? h(
+            "div",
+            { class: "fix" },
+            h("p", {}, h("strong", {}, "Now fix the code.")),
+            briefPanel(ex.fix_brief, null, "Before you fix it"),
+            editor(draft.fix, (v) => (draft.fix = v), "Fix editor"),
+          )
         : null,
     );
   };
@@ -271,13 +316,13 @@ function spotBugBuilder(ex, draft, frame) {
 }
 BUILDERS.spot_bug = spotBugBuilder;
 
-export function renderExercise(app, ex, position, total, onChange) {
+export function renderExercise(app, ex, position, total, onChange, context = {}) {
   const draft = (app.drafts[ex.id] ??= {});
   const status = () => app.state.ex[ex.id] ?? { attempts: 0, hints: 0, passed: null, solution: false };
   const feedback = h("div", { class: "feedback", role: "status", "aria-live": "polite" });
   const hints = h("ol", { class: "hints" });
   const solutionBox = h("div", { class: "solution", hidden: true });
-  const frame = { announce: (msg) => (feedback.textContent = msg) };
+  const frame = { announce: (msg) => (feedback.textContent = msg), example: context.example };
   const builder = BUILDERS[ex.type](ex, draft, frame);
 
   const checkBtn = h("button", { type: "button", class: "btn" }, ex.type.match(/write|refactor/) ? "Run checks" : "Check");
@@ -360,6 +405,7 @@ export function renderExercise(app, ex, position, total, onChange) {
       h("p", { class: "muted small" }, `${TYPE_LABELS[ex.type]} · Level ${ex.difficulty} · ${ex.xp} XP`, " ", badge),
     ),
     h("div", { class: "prompt", html: ex.prompt_html }),
+    builder.brief ?? null,
     builder.body,
     h("div", { class: "actions" }, checkBtn, hintBtn, solveBtn),
     feedback,

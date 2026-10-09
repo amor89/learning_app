@@ -93,6 +93,13 @@ if (pyodide) {
   await page.goto(`${base}${query}#/lesson/D3-L3`);
   await page.getByRole("heading", { name: /Mutable defaults/ }).waitFor();
   await page.getByRole("button", { name: "Exercise 5" }).click();
+  const briefFirst = await page.evaluate(() => {
+    const brief = document.querySelector(".exercise .brief");
+    const editor = document.querySelector(".exercise textarea.editor");
+    return Boolean(brief && editor && brief.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+  check(briefFirst, "code exercise shows its brief before the editor");
+  check(await page.locator(".exercise .brief li").count() >= 3, "brief lists the steps and the checks");
   const area = page.locator("textarea.editor");
   await area.fill([
     "def compare_waves(current: dict[str, float | None], prior: dict[str, float | None], tolerance: float = 0.10) -> list[str]:",

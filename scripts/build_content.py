@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT))
 
 from pygments.formatters import HtmlFormatter  # noqa: E402
 
+from learnkit.brief import Brief, code_brief, fix_brief  # noqa: E402
 from learnkit.loader import Course, ModuleContent, load_course  # noqa: E402
 from learnkit.models import (  # noqa: E402
     CodeExercise,
@@ -61,6 +62,25 @@ def render_sample(sample: CodeSample, language: str) -> dict[str, Any]:
     }
 
 
+def render_brief(brief: Brief, language: str) -> dict[str, Any]:
+    """Render the pre-editor brief with inline Markdown and highlighted code."""
+    return {
+        "steps_html": [md_inline(s) for s in brief.steps],
+        "must_html": [md_inline(m) for m in brief.must],
+        "checks": [
+            {"message_html": md_inline(c.message), "lines": code_lines(c.code, "python")}
+            for c in brief.checks
+        ],
+        "shape": [
+            {"lines": code_lines(d.code, language), "summary_html": md_inline(d.summary)}
+            for d in brief.shape
+        ],
+        "shape_note": brief.shape_note,
+        "include_html": [md_inline(m) for m in brief.include],
+        "avoid_html": [md_inline(m) for m in brief.avoid],
+    }
+
+
 def render_exercise(ex: Exercise, hide_key: bool) -> dict[str, Any]:
     """Serialise one exercise for the browser.
 
@@ -75,8 +95,13 @@ def render_exercise(ex: Exercise, hide_key: bool) -> dict[str, Any]:
     if isinstance(ex, CodeExercise):
         data.pop("wrong_answers", None)
         data["solution_lines"] = code_lines(ex.solution, ex.language)
+        data["brief"] = render_brief(code_brief(ex, show_shape=not hide_key), ex.language)
     if isinstance(ex, SpotBugExercise) and ex.fix_solution:
         data["fix_solution_lines"] = code_lines(ex.fix_solution, ex.language)
+    if isinstance(ex, SpotBugExercise):
+        brief = fix_brief(ex)
+        if brief:
+            data["fix_brief"] = render_brief(brief, ex.language)
     if isinstance(ex, DesignExercise):
         data["model_answer_html"] = md_to_html(ex.model_answer)
     if isinstance(ex, McqExercise):
@@ -259,9 +284,15 @@ def all_exercises(course: Course) -> list[Exercise]:
 
 
 def content_version() -> str:
-    """Hash of every content and checker file, so the app can spot new builds."""
+    """Hash of every content, checker and renderer file, so the app can spot new builds."""
     digest = hashlib.sha256()
-    for path in sorted([*ROOT.glob("content/**/*.yaml"), *ROOT.glob("checkers/*.py")]):
+    sources = [
+        *ROOT.glob("content/**/*.yaml"),
+        *ROOT.glob("checkers/*.py"),
+        *ROOT.glob("learnkit/*.py"),
+        Path(__file__),
+    ]
+    for path in sorted(sources):
         digest.update(path.read_bytes())
     return digest.hexdigest()[:12]
 

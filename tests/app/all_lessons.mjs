@@ -23,6 +23,8 @@ for (const lesson of lessons) {
   for (let i = 1; i <= lesson.exercises.length; i += 1) {
     await page.getByRole("button", { name: `Exercise ${i}`, exact: true }).click();
     await page.locator(".exercise").waitFor();
+    // Open every collapsed brief section, so its code counts towards the width.
+    await page.evaluate(() => document.querySelectorAll(".exercise details").forEach((d) => (d.open = true)));
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
     if (width > 390) failures.push(`${lesson.id} exercise ${i}: page width ${width}px`);
     const strayNull = await page.evaluate(() => {
