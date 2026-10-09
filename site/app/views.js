@@ -228,7 +228,7 @@ export async function lessonView(app, lessonId) {
   const show = (i) => {
     current = i;
     fill(stage, 
-      renderExercise(app, exercises[i], i + 1, exercises.length, refresh),
+      renderExercise(app, exercises[i], i + 1, exercises.length, refresh, { example: lesson.example }),
       h("div", { class: "pager" },
         h("button", { type: "button", class: "btn secondary", disabled: i === 0, onclick: () => show(i - 1) }, "Previous"),
         h("button", { type: "button", class: "btn secondary", disabled: i === exercises.length - 1, onclick: () => show(i + 1) }, "Next"),

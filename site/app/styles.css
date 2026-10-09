@@ -299,6 +299,18 @@ select { font-family: var(--sans); padding: 8px; min-height: 44px; width: 100%; 
 .solution { border-top: 1px dashed var(--border); margin-top: 12px; padding-top: 4px; }
 .pager { display: flex; justify-content: space-between; gap: 8px; margin: 12px 0; }
 .fix { margin-top: 10px; }
+.brief { background: var(--surface-2); border-radius: 8px; padding: 4px 12px 8px; margin: 10px 0; }
+.brief h4 { margin: 8px 0 4px; }
+.brief ol, .brief ul { padding-left: 1.3em; margin: 4px 0 8px; }
+.brief li { margin-bottom: 4px; }
+.brief-label { font-weight: 600; margin: 8px 0 2px; }
+.brief .more { border-top: 1px solid var(--border); padding: 4px 0; }
+.brief .more summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--accent); font-weight: 600; }
+.brief .shape, .brief .check { margin-bottom: 8px; }
+/* Short reference snippets wrap instead of scrolling, so a phone shows the whole line. */
+.brief .code .ln { min-width: 0; }
+.brief .code .ln code { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.brief .shape p, .brief .check p { margin: 4px 0; }
 
 .recap { display: grid; gap: 8px; }
 .recap-card, .flashcard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
@@ -323,5 +335,5 @@ h1[tabindex="-1"]:focus { outline: none; }
 /* Long unbroken tokens (code, error names) must wrap on a 390px screen. */
 fieldset { min-width: 0; }
 .slot, .design > *, .choice > * { min-width: 0; }
-.choice span, .slot span, .order-text, .prompt, .feedback, .hints li, .explanation, .takeaway, .notes li { overflow-wrap: anywhere; }
+.choice span, .slot span, .order-text, .prompt, .feedback, .hints li, .explanation, .takeaway, .notes li, .brief li, .brief p { overflow-wrap: anywhere; }
 :not(pre) > code { overflow-wrap: anywhere; }

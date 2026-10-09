@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
+from learnkit.brief import Definition, code_brief
 from learnkit.loader import Course, ModuleContent
 from learnkit.models import (
     CodeExercise,
@@ -157,6 +158,11 @@ def shuffled_items(ex: OrderExercise) -> list[str]:
     return [text[i] for i in ids]
 
 
+def shape_text(shape: list[Definition]) -> str:
+    """Print the answer's definitions as stubs, each under its docstring line."""
+    return "\n\n".join((f"# {d.summary}\n" if d.summary else "") + d.code for d in shape)
+
+
 def exercise_blocks(ex: Exercise, number: int) -> list[Block]:
     """The exercise as a learner sees it, without answers."""
     blocks: list[Block] = [
@@ -183,6 +189,13 @@ def exercise_blocks(ex: Exercise, number: int) -> list[Block]:
         tail = " Then write the fix." if ex.fix_checker else ""
         blocks.append(Markdown(f"*Write down the line number of the bug.{tail}*"))
     elif isinstance(ex, CodeExercise):
+        brief = code_brief(ex)
+        if brief.must:
+            blocks.append(Markdown("Your code must pass these checks:"))
+            blocks.append(Items(brief.must))
+        if brief.shape:
+            blocks.append(Markdown(f"Shape of the answer. {brief.shape_note}"))
+            blocks.append(Code(shape_text(brief.shape), ex.language))
         if ex.starter:
             blocks.append(Markdown("Starter code:"))
             blocks.append(Code(ex.starter, ex.language))
