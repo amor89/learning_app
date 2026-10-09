@@ -298,6 +298,13 @@ exercises:
     language: sql
     prompt: |
       Goal: MERGE a redelivery into silver. The delivery can repeat a respondent within a wave. Keep the row with the latest `ingestion_timestamp`. Find the bug and fix it.
+    primer: |
+      `MERGE INTO target AS t USING source AS s ON <condition>` is the SQL form of the Delta merge from lesson A3-L1. Each target row is matched against the source rows that meet the `ON` condition:
+
+      - `WHEN MATCHED THEN UPDATE SET *` overwrites the matched target row with the source row's columns.
+      - `WHEN NOT MATCHED THEN INSERT *` inserts source rows with no match.
+
+      The `USING` part can be a table or a subquery in brackets. In Databricks SQL, `SELECT * EXCEPT (col)` returns every column except `col`.
     code: |
       MERGE INTO research.research_silver.nat_respondents AS t
       USING research.research_bronze.nat_raw_w14 AS s

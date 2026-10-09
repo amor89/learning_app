@@ -105,6 +105,18 @@ exercises:
     language: python
     prompt: |
       What does this print on pandas 3.0?
+    primer: |
+      `io.StringIO(text)` wraps a string in a file-like object. `pd.read_csv` reads it as if it were a file on disk, which keeps small examples and tests free of real files.
+
+      ```python
+      import io
+
+      import pandas as pd
+
+      pd.read_csv(io.StringIO("a,b\n1,x\n"))   # one row: a=1, b='x'
+      ```
+
+      `df["col"].iloc[0]` returns the first value of a column by position.
     code: |
       import io
 

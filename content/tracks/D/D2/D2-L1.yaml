@@ -161,6 +161,23 @@ exercises:
     language: python
     prompt: |
       Post-mortem debugging reads the local variables of the frame that raised. Write `crash_locals(fn: Callable[..., object], *args: object) -> dict[str, object] | None` that calls `fn(*args)`. If it raises, return a copy of the local variables of the **innermost** frame of the traceback (the one pdb lands in). If it does not raise, return `None`. Import `Callable` from `collections.abc`.
+    primer: |
+      An exception carries its traceback in `err.__traceback__`. A traceback is a chain of frames, outermost first: `tb.tb_next` moves one call deeper and is `None` at the innermost frame. `tb.tb_frame` is the frame itself, and `tb.tb_frame.f_locals` holds its local variables as a dict.
+
+      ```python
+      def inner():
+          raise ValueError
+
+      def outer():
+          count = 3
+          inner()
+
+      try:
+          outer()
+      except Exception as err:
+          tb = err.__traceback__              # the frame that called outer()
+          tb.tb_next.tb_frame.f_locals        # {'count': 3}: outer's locals
+      ```
     starter: |
       def crash_locals(fn, *args):
           try:

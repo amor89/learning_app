@@ -12,6 +12,7 @@ A static, offline-capable learning web app (GitHub Pages, PWA, Pyodide) with fou
 - No filler, no em dashes, no hype words.
 - One idea per lesson. Concept section: 150 to 300 words.
 - Every claim about an API names the version it applies to. Every Fabric feature carries its status (GA or preview) from `VERSIONS.md`.
+- Teach before you test. An exercise may use only what its lesson, an earlier lesson in the track, or its own `primer` explains. A primer explains each new function or term with a small example on other data, and never points at a bug. `tests/content/test_taught.py` enforces it.
 - Never invent a function, parameter or config key. If you have not checked it against official docs, mark it `unverified: true` in the lesson file and list it in `VERSIONS.md`.
 
 ## Python and PySpark standards

@@ -108,6 +108,8 @@ exercises:
     language: python
     prompt: |
       What happens? (MLflow 3.16)
+    primer: |
+      `mlflow.log_param(key, value)` logs one parameter to the active run. `mlflow.log_params({...})`, from the concept, logs several at once. Both write to the same parameter store, so the concept's rules about parameters apply to each call.
     code: |
       import mlflow
 
@@ -133,6 +135,8 @@ exercises:
     language: python
     prompt: |
       Log the Git commit as a tag and the model under the name `model`.
+    primer: |
+      Each plural MLflow call has a singular form for one item: `log_params` and `log_param(key, value)`, `log_metrics` and `log_metric(key, value)`, `set_tags` and `set_tag(key, value)`.
     template: |
       mlflow.[[g1]]("git_commit", commit)
       mlflow.sklearn.log_model(model, [[g2]]="model")

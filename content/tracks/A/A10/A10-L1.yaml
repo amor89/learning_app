@@ -130,6 +130,8 @@ exercises:
     language: python
     prompt: |
       A reviewer blocks this pull request. Tap the line that must never be committed, then rewrite the module.
+    primer: |
+      `requests.get(url, headers={...}, timeout=30)` sends an HTTP GET request and returns a `requests.Response`, which holds the status code and the body. An `Authorization: Bearer <token>` header sends the caller's access token. `timeout` stops the call from waiting forever.
     code: |
       import requests
 

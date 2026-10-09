@@ -107,6 +107,12 @@ exercises:
     language: python
     prompt: |
       What does this print? (NumPy 2.4)
+    primer: |
+      `np.corrcoef(x, y)` returns a 2 by 2 matrix of Pearson correlations: each variable with itself on the diagonal (always 1.0), and the correlation between `x` and `y` at `[0, 1]` and `[1, 0]`.
+
+      ```python
+      np.corrcoef([1, 2, 3], [2, 4, 7])[0, 1]   # 0.993...
+      ```
     code: |
       import numpy as np
 

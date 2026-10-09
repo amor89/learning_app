@@ -89,6 +89,7 @@ def render_exercise(ex: Exercise, hide_key: bool) -> dict[str, Any]:
     """
     data = ex.model_dump(mode="json", exclude={"seeded_bugs", "fix_seeded_bugs", "spark_tests"})
     data["prompt_html"] = md_to_html(ex.prompt)
+    data["primer_html"] = md_to_html(ex.primer) if ex.primer else ""
     data["hints_html"] = [md_inline(h) for h in ex.hints]
     data["explanation_html"] = md_to_html(ex.explanation)
     data["xp"] = ex.difficulty * XP_PER_LEVEL
@@ -264,7 +265,7 @@ def copy_checkers() -> None:
 
 def write_highlight_css() -> None:
     """Pygments styles: light by default, dark under the dark theme."""
-    light = HtmlFormatter(style="friendly").get_style_defs(f".{CSS_CLASS}, .code")
+    light = HtmlFormatter(style="friendly").get_style_defs([f".{CSS_CLASS}", ".code"])
     dark = HtmlFormatter(style="monokai").get_style_defs(
         [f":root[data-theme='dark'] .{CSS_CLASS}", ":root[data-theme='dark'] .code"]
     )

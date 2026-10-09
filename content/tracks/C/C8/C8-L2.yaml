@@ -152,6 +152,15 @@ exercises:
     language: python
     prompt: |
       Write `evaluate(expected: dict[str, float], actual: dict[str, float | None], rel_tol: float = 0.001) -> tuple[float, list[str]]`. `expected` maps question ids to ground-truth answers. `actual` maps them to the agent's answers, where `None` means the agent gave no number. Return the share of questions answered correctly (within `rel_tol`, and exactly for an expected 0.0) and a sorted list of the failed ids. A question missing from `actual` fails. Raise `ValueError` if `expected` is empty.
+    primer: |
+      `math.isclose(a, b, rel_tol=0.001)` is `True` when `a` and `b` differ by at most 0.1% of the larger of the two. Use it for floats, where `==` fails on rounding noise. With its default absolute tolerance of 0, a comparison with 0.0 is true only for exactly 0.0.
+
+      ```python
+      import math
+
+      math.isclose(100.0, 100.05, rel_tol=0.001)   # True
+      math.isclose(0.0, 1e-12)                     # False
+      ```
     starter: |
       def evaluate(expected, actual, rel_tol=0.001):
           failed = [q for q in expected if not actual.get(q)]

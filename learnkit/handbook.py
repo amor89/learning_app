@@ -169,6 +169,8 @@ def exercise_blocks(ex: Exercise, number: int) -> list[Block]:
         Heading(5, f"Exercise {number}. {TYPE_LABELS[ex.type]} (level {ex.difficulty})", ex.id),
         Markdown(ex.prompt),
     ]
+    if ex.primer:
+        blocks += [Markdown("**What you need to know.**"), *prose_blocks(ex.primer)]
     if isinstance(ex, McqExercise):
         blocks.append(Items([f"{o.id}) {o.text}" for o in ex.options]))
         if ex.reasons:

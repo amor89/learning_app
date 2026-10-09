@@ -140,6 +140,17 @@ exercises:
     language: python
     prompt: |
       Write `unstated_versions(prompt: str, libraries: list[str]) -> list[str]`. Return the libraries, in the order given, that the prompt does not mention followed by a version number, such as `pandas 3.0`, `PySpark 4.0` or `Python 3.12`. Match library names case-insensitively. A version is digits and dots after optional whitespace and an optional `v`. A library mentioned without a version counts as unstated.
+    primer: |
+      `re.escape(text)` adds backslashes before characters that have a meaning in patterns, such as `.` or `+`, so the text matches literally. `re.search(pattern, text, flags=re.IGNORECASE)` looks for a match anywhere in the text, ignoring case, and returns `None` when there is none.
+
+      ```python
+      import re
+
+      name = re.escape("C++")   # 'C\+\+'
+      re.search(name + r"\s*\d+", "I use c++ 20", flags=re.IGNORECASE)   # a match
+      ```
+
+      An `rf"..."` string combines a raw string (backslashes stay as typed) with an f-string (`{...}` inserts a value).
     starter: |
       def unstated_versions(prompt, libraries):
           return [lib for lib in libraries if lib not in prompt]

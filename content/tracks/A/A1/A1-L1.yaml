@@ -153,6 +153,20 @@ exercises:
     language: pyspark
     prompt: |
       This function has a name that promises no side effects. One line breaks that promise. Tap it, then fix the function so it only returns the waves.
+    primer: |
+      The code chains five DataFrame and session methods (PySpark 4.0):
+
+      - `df.select("wave_id")` keeps only the named columns.
+      - `.distinct()` drops duplicate rows.
+      - `a.subtract(b)` returns the distinct rows of `a` that are not in `b`.
+      - `.collect()` brings the rows back to Python as a list of `Row` objects. Read a field with `row.wave_id`.
+      - `spark.sql("...")` runs one SQL statement, such as a `SELECT` or a `DELETE`.
+
+      ```python
+      a = spark.createDataFrame([("W1",), ("W2",), ("W2",)], "wave_id STRING")
+      b = spark.createDataFrame([("W1",)], "wave_id STRING")
+      [row.wave_id for row in a.subtract(b).collect()]   # ['W2']
+      ```
     code: |
       def get_unprocessed_waves(spark: SparkSession, bronze: str, silver: str, tracker_id: str) -> list[str]:
           """Return wave ids in bronze but not yet in silver for one tracker."""

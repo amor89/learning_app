@@ -101,6 +101,15 @@ exercises:
     language: python
     prompt: |
       Pure noise: 100 rows, 5,000 random features, random labels. The 20 best features are selected on all rows, then 5-fold CV is run. Roughly what accuracy does it print? (scikit-learn 1.8, seed 0)
+    primer: |
+      The code uses four scikit-learn tools (version 1.8):
+
+      - `SelectKBest(f_classif, k=20).fit_transform(X, y)` scores each column against the labels `y` and returns only the `k` best-scoring columns.
+      - `LogisticRegression()` is a linear classifier.
+      - `cross_val_score(model, X, y, cv=5)` splits the rows into 5 folds. It fits on 4 folds, scores accuracy on the fifth, and repeats for each fold. It returns the 5 scores.
+      - `rng.normal(size=(rows, cols))` draws random numbers, and `rng.integers(0, 2, n)` draws `n` random labels, 0 or 1.
+
+      On pure noise, an honest model scores about 0.5 accuracy: a coin toss.
     code: |
       import numpy as np
       from sklearn.feature_selection import SelectKBest, f_classif
@@ -301,6 +310,15 @@ exercises:
     packages: [pandas]
     prompt: |
       Target encoding replaces each region with its churn rate. The model's test AUC is far above its production AUC. Tap the line that leaks, and fix the function so the rates come from training rows only.
+    primer: |
+      `pd.concat([a, b])` stacks DataFrames on top of each other: the rows of `a`, then the rows of `b`.
+
+      `series.map(lookup)` replaces each value with the matching entry of another Series, matched by its index:
+
+      ```python
+      rates = pd.Series({"North": 0.1, "South": 0.3})
+      pd.Series(["North", "South"]).map(rates)   # 0.1, 0.3
+      ```
     code: |
       import pandas as pd
 

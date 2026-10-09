@@ -239,6 +239,10 @@ exercises:
     language: pyspark
     prompt: |
       A gold table read by Direct Lake on an F32 grows by one small file per hour and has passed the file guardrail. Tap the line that causes the build-up, and rewrite the job so the table is compacted after the append.
+    primer: |
+      `df.repartition(n)` redistributes the rows into `n` partitions. Spark writes one file per partition, so `repartition(1)` before a write produces one file per write.
+
+      `df.sparkSession` is the session the DataFrame belongs to, so a function can run SQL with `df.sparkSession.sql(...)` without a separate `spark` parameter.
     code: |
       def publish_hourly(df, table):
           """Append the latest hour to a Direct Lake gold table."""

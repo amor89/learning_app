@@ -139,6 +139,14 @@ exercises:
     language: pyspark
     prompt: |
       Complete the bronze write and the timestamp audit column.
+    primer: |
+      `df.withColumn(name, column)` returns a new DataFrame with one column added, or replaced when the name exists. It is the one-column form of `withColumns({...})` from the worked example.
+
+      ```python
+      dated = df.withColumn("loaded_on", F.current_date())
+      ```
+
+      The writer's `.mode(...)` decides what happens to rows already in the table: `"append"` adds the new rows, `"overwrite"` replaces the old ones.
     template: |
       audited = raw.withColumn("ingestion_timestamp", F.[[g1]]())
       audited.write.format("delta").mode("[[g2]]").saveAsTable(table)

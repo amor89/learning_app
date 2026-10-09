@@ -129,6 +129,24 @@ exercises:
     language: python
     prompt: |
       What does this print?
+    primer: |
+      `@dataclass(frozen=True)` makes every instance read-only. Assigning to a field after the object exists raises `dataclasses.FrozenInstanceError`, and the field keeps its old value.
+
+      `try` runs a block. When the block raises an exception named in `except`, Python runs the `except` block instead of stopping, then carries on after it.
+
+      ```python
+      from dataclasses import FrozenInstanceError, dataclass
+
+      @dataclass(frozen=True)
+      class Limit:
+          value: int
+
+      limit = Limit(5)
+      try:
+          limit.value = 9
+      except FrozenInstanceError:
+          print("read-only")
+      ```
     code: |
       from dataclasses import FrozenInstanceError, dataclass
 

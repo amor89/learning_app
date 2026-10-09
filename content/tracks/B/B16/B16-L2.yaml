@@ -251,6 +251,13 @@ exercises:
     language: python
     prompt: |
       Validation accuracy is stuck near chance while training loss falls slowly. Tap the line that breaks the loss.
+    primer: |
+      `nn.Sequential(a, b, c)` chains layers: the output of one is the input of the next. `nn.Linear(n_in, n_out)` is a fully connected layer, and `nn.ReLU()` sets negative values to 0. The class stores the chain as `self.net`, and `forward` decides what the model returns.
+
+      ```python
+      net = nn.Sequential(nn.Linear(3, 4), nn.ReLU(), nn.Linear(4, 2))
+      net(torch.ones(1, 3)).shape   # torch.Size([1, 2]): one score per class
+      ```
     code: |
       import torch
       from torch import nn

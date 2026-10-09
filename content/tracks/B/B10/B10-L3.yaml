@@ -109,6 +109,8 @@ exercises:
     language: python
     prompt: |
       What does this print? (pandas 3.0)
+    primer: |
+      `pd.to_datetime([...])` turns date strings such as `"2026-01-31"` into timestamps, so pandas compares and sorts them as dates, not as text.
     code: |
       import pandas as pd
 
@@ -270,6 +272,14 @@ exercises:
     packages: [pandas]
     prompt: |
       For each prediction, the feature should be the customer's most recent NPS score strictly **before** `as_of`. Validation looks too good. Tap the line that leaks and fix it.
+    primer: |
+      `df.groupby(keys).tail(1)` keeps the last row of each group, in the frame's current order. After `sort_values("date")`, that is the latest row per group:
+
+      ```python
+      df = pd.DataFrame({"k": ["a", "a", "b"], "v": [1, 2, 3]})
+      df.groupby("k").tail(1)   # rows (a, 2) and (b, 3)
+      ```
+
     code: |
       import pandas as pd
 

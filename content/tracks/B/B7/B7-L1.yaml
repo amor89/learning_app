@@ -164,6 +164,21 @@ exercises:
       - `missing_share`: share of missing values.
       - `n_unique`: distinct non-missing values.
       - `min` and `max`: for numeric columns, the minimum and maximum. For other columns, missing (`None` or `NaN`).
+    primer: |
+      Two pandas tools build this kind of summary:
+
+      - `pd.api.types.is_numeric_dtype(series)` is `True` for integer, float and boolean columns, and `False` for text.
+      - `pd.DataFrame.from_dict(rows, orient="index")` turns a dict of dicts into a frame. Each outer key becomes a row label, and each inner key becomes a column.
+
+      ```python
+      rows = {"a": {"n": 1, "kind": "x"}, "b": {"n": 2, "kind": "y"}}
+      pd.DataFrame.from_dict(rows, orient="index")
+      #    n kind
+      # a  1    x
+      # b  2    y
+      ```
+
+      `series.isna().mean()` is the share of missing values, because `True` counts as 1.
     starter: |
       import pandas as pd
 

@@ -244,6 +244,8 @@ exercises:
     language: pyspark
     prompt: |
       This notebook runs from a nightly pipeline. It worked when run by hand and fails in the pipeline. Tap the line that fails there, and rewrite the notebook without it.
+    primer: |
+      `import pandera.pandas as pa` loads pandera's pandas API. `spark.read.table(name).toPandas()` reads a table and copies it into a pandas DataFrame on the driver. `SCHEMA.validate(df, lazy=True)` checks that frame against a pandera schema and raises one error listing every failed check, not just the first. Track B, lesson B5-L1 covers pandera in depth.
     code: |
       %pip install pandera==0.33.1
       import pandera.pandas as pa

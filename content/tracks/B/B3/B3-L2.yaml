@@ -132,6 +132,12 @@ exercises:
     language: python
     prompt: |
       What does this print?
+    primer: |
+      `series.tolist()` returns the values of a pandas Series as a plain Python list, so `print` shows them without the index:
+
+      ```python
+      pd.Series([3, 4]).tolist()   # [3, 4]
+      ```
     code: |
       import pandas as pd
 

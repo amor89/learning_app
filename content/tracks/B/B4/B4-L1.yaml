@@ -114,6 +114,12 @@ exercises:
     language: python
     prompt: |
       What does this print on Polars 1.33?
+    primer: |
+      `series.to_list()` returns the values of a Polars Series as a plain Python list. `out["w"]` picks one column of a Polars DataFrame as a Series.
+
+      ```python
+      pl.DataFrame({"n": [1, 2]})["n"].to_list()   # [1, 2]
+      ```
     code: |
       import polars as pl
 

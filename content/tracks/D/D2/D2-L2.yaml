@@ -172,6 +172,15 @@ exercises:
     language: python
     prompt: |
       Write `log_check(logger: logging.Logger, check: str, status: str, severity: str, wave_id: str) -> None`. Log at INFO for `"PASS"`, WARNING for `"WARN"`, ERROR for `"FAIL"` with non-CRITICAL severity, and CRITICAL for `"FAIL"` with `"CRITICAL"` severity, then raise `RuntimeError`. Every message contains the wave id and check name. Use %-style arguments, not f-strings, in the logging calls. Raise `ValueError` for an unknown status.
+    primer: |
+      `logging.Logger` is the type of the object `logging.getLogger(name)` returns. Each level is a number: `logging.INFO` is 20, `WARNING` 30, `ERROR` 40, `CRITICAL` 50. `logger.log(level, message, *args)` logs at a level you pass in, so a dict can map each status to its level.
+
+      Pass values as arguments after a `%s` template. Logging fills them in only when the message is actually emitted:
+
+      ```python
+      logger.log(logging.WARNING, "wave %s has %d rows", "W1", 0)
+      # WARNING wave W1 has 0 rows
+      ```
     starter: |
       import logging
 
