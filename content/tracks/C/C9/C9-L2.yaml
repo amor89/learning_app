@@ -150,6 +150,10 @@ exercises:
     language: python
     prompt: |
       Write `visible_columns(roles: list[dict[str, set[str]]], table: str, engine: Literal["spark", "sql_endpoint"]) -> set[str]`. Each role maps table names to the columns it allows. Consider only roles that include `table`. If none do, return an empty set (deny by default). For `"spark"`, return the union of the allowed columns. For `"sql_endpoint"`, return the intersection, because a column hidden by any role is blocked. Raise `ValueError` for any other engine.
+    primer: |
+      `Literal` from `typing` limits a parameter to fixed values: `mode: Literal["fast", "safe"]` tells readers and mypy that only those two strings are valid. Python does not check it at run time, so a caller can still pass any string. Raise an error yourself when a wrong value must not get through.
+
+      `set().union(*sets)` combines sets: every item in any of them. `set.intersection(*sets)` keeps only items in all of them.
     starter: |
       def visible_columns(roles, table, engine):
           columns = set()

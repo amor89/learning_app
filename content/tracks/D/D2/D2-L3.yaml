@@ -156,6 +156,20 @@ exercises:
     language: python
     prompt: |
       Write `plan_warnings(plan: str, max_exchanges: int = 2) -> list[str]` that reads the text of `df.explain()` and returns warnings, in this order, each at most once: `"cross join"` if the plan contains `CartesianProduct` or `BroadcastNestedLoopJoin`, `"python udf"` if it contains `BatchEvalPython` or `ArrowEvalPython`, and `"many shuffles"` if the word `Exchange` appears more than `max_exchanges` times, not counting `BroadcastExchange`.
+    primer: |
+      `re.findall(pattern, text)`, or `compiled.findall(text)`, returns every match as a list, so `len(...)` counts them. Two pattern tools control what counts:
+
+      - `\b` marks a word boundary: `\bcat\b` matches `cat` as a whole word only.
+      - `(?<!con)` is a **negative lookbehind**: the match counts only when `con` does not come right before it.
+
+      ```python
+      import re
+
+      text = "cat concat bobcat"
+      re.findall(r"cat", text)           # ['cat', 'cat', 'cat']
+      re.findall(r"(?<!con)cat", text)   # ['cat', 'cat']: not the one in concat
+      re.findall(r"\bcat\b", text)       # ['cat']
+      ```
     starter: |
       def plan_warnings(plan, max_exchanges=2):
           warnings = []

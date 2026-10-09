@@ -167,6 +167,18 @@ exercises:
     language: pyspark
     prompt: |
       Write `check_idempotent(spark, load, table)`. `load` is a function that takes no arguments and loads a fixed source into `table`. Run it once, snapshot the table with `collect()`, run it again, and assert the table still equals the snapshot with `assertDataFrameEqual`.
+    primer: |
+      `Callable` from `collections.abc` types a parameter that holds a function. `Callable[[], None]` is a function that takes no arguments and returns nothing. You run it by calling the parameter, like any function:
+
+      ```python
+      from collections.abc import Callable
+
+      def twice(step: Callable[[], None]) -> None:
+          step()
+          step()
+      ```
+
+      `.collect()` returns a list of rows, a snapshot that does not change when the table changes later.
     starter: |
       from collections.abc import Callable
 

@@ -250,6 +250,12 @@ exercises:
     packages: [numpy]
     prompt: |
       Two analysts run the same bootstrap with seed 7 and get different confidence intervals. One of them imports a plotting helper that draws random jitter with `np.random`. Tap the line that makes the result depend on other code, and fix the function.
+    primer: |
+      `np.asarray(values)` turns a Python list into a NumPy array, so array methods such as `.mean()` work on it. An input that is already an array passes through without a copy.
+
+      ```python
+      np.asarray([1.0, 2.0]).mean()   # 1.5
+      ```
     code: |
       import numpy as np
 

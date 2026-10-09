@@ -21,6 +21,7 @@ LEXERS = {
     "kql": "kql",
     "dax": "dax",
     "yaml": "yaml",
+    "toml": "toml",
     "text": "text",
 }
 CSS_CLASS = "hl"

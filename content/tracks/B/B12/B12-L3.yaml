@@ -301,6 +301,8 @@ exercises:
     packages: [numpy, pandas]
     prompt: |
       Validation reports recall 0.78, but production recall is 0.41. Tap the line that makes the evaluation unrepresentative, and fix the function.
+    primer: |
+      `df.sample(frac=5.0, replace=True, random_state=seed)` draws rows at random, with replacement, five times as many as the frame holds. Each row appears about five times. `pd.concat([a, b])` stacks two frames, rows of `a` first.
     code: |
       import pandas as pd
 

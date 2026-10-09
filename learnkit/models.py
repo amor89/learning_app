@@ -16,6 +16,7 @@ CONCEPT_MAX_WORDS = 300
 MIN_EXERCISES = 5
 MIN_EXERCISE_TYPES = 3
 HINT_TIERS = 3
+PRIMER_MAX_WORDS = 120
 
 Language = Literal["python", "pyspark", "sql", "tsql", "kql", "dax", "yaml", "text"]
 CommentStyle = Literal["sql", "dax", "kql", "none"]
@@ -111,9 +112,16 @@ class Option(Strict):
 
 
 class ExerciseBase(Strict):
+    """Fields every exercise shares.
+
+    ``primer`` explains, with a small example on other data, each function or
+    keyword the exercise needs that its lesson has not taught yet.
+    """
+
     id: str
     difficulty: int = Field(ge=1, le=5)
     prompt: str
+    primer: str = ""
     hints: list[str]
     explanation: str
 
@@ -121,6 +129,8 @@ class ExerciseBase(Strict):
     def _three_hints(self) -> ExerciseBase:
         if len(self.hints) != HINT_TIERS:
             raise ValueError(f"{self.id}: needs exactly {HINT_TIERS} hints")
+        if word_count(self.primer) > PRIMER_MAX_WORDS:
+            raise ValueError(f"{self.id}: primer prose over {PRIMER_MAX_WORDS} words")
         return self
 
 

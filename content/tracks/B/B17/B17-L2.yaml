@@ -160,6 +160,20 @@ exercises:
       Write a Hypothesis test `test_dedupe_idempotent` for `dedupe(rows: list[tuple[str, int]]) -> list[tuple[str, int]]`. Generate `rows` as lists of `(id, timestamp)` tuples with `st.lists(st.tuples(st.sampled_from(["a", "b", "c"]), st.integers(0, 5)))`. Assert that `dedupe(dedupe(rows)) == dedupe(rows)`.
 
       Hypothesis does not run in the browser. The checker reads your code. Run it locally with pytest.
+    primer: |
+      Hypothesis builds test inputs from **strategies**:
+
+      - `st.sampled_from(["x", "y"])` picks one value from the list.
+      - `st.integers(0, 5)` picks an integer from 0 to 5.
+      - `st.tuples(a, b)` builds a tuple from two strategies, and `st.lists(s)` a list of any length.
+
+      `@given(strategy)` above a test function runs it many times. Each run passes a new generated value as the function's argument:
+
+      ```python
+      @given(st.lists(st.integers(0, 9)))
+      def test_sort_keeps_length(values: list[int]) -> None:
+          assert len(sorted(values)) == len(values)
+      ```
     starter: |
       from hypothesis import given, strategies as st
 

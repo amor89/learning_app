@@ -270,6 +270,12 @@ exercises:
     packages: [pandas]
     prompt: |
       The analysis reports a larger lift than the product team expected. Tap the line that breaks the randomisation, and fix the function.
+    primer: |
+      `series.to_dict()` turns a pandas Series into a dict: the index labels become keys. After a `groupby(...).mean()`, the keys are the group names.
+
+      ```python
+      pd.Series([0.2, 0.4], index=["A", "B"]).to_dict()   # {'A': 0.2, 'B': 0.4}
+      ```
     code: |
       import pandas as pd
 

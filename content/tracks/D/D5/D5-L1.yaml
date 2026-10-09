@@ -158,6 +158,18 @@ exercises:
     language: python
     prompt: |
       Write `unknown_params(func: Callable[..., object], params: list[str]) -> list[str] | None`. Use `inspect.signature` to return the names in `params` that `func` does not accept, in the order given. If `func` accepts `**kwargs`, return `None`: you cannot tell from the signature alone.
+    primer: |
+      `inspect.signature(func).parameters` maps each parameter name to a `Parameter` object. Test a name with `in`. Each parameter's `.kind` says how it is passed. `inspect.Parameter.VAR_KEYWORD` is the kind of a `**kwargs` parameter, which accepts any keyword name.
+
+      ```python
+      import inspect
+
+      def f(a, b=1, **options): ...
+
+      params = inspect.signature(f).parameters
+      "a" in params                                                  # True
+      params["options"].kind is inspect.Parameter.VAR_KEYWORD        # True
+      ```
     starter: |
       def unknown_params(func, params):
           return []

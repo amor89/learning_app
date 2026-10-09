@@ -140,6 +140,22 @@ exercises:
     language: python
     prompt: |
       Write `parse_timeout(value: str) -> int` for a pipeline linter. It parses the `D.HH:MM:SS` format and returns the total seconds. Raise `ValueError` if the format is wrong, if hours are above 23 or minutes or seconds above 59, or if the total exceeds 7 days.
+    primer: |
+      Python's `re` module matches text against a pattern:
+
+      - `re.compile(r"...")` builds a pattern once, so you reuse it.
+      - `\d` matches one digit, `\d{2}` exactly two, `\d+` one or more, and `\.` a literal dot.
+      - Brackets `( )` **capture** part of the match.
+      - `pattern.fullmatch(text)` matches the **whole** string and returns a match object, or `None` when the text does not fit.
+      - `match.groups()` returns the captured parts as strings.
+
+      ```python
+      import re
+
+      MONTH = re.compile(r"(\d{4})-(\d{2})")
+      MONTH.fullmatch("2026-03").groups()   # ('2026', '03')
+      MONTH.fullmatch("2026-03x")           # None
+      ```
     starter: |
       def parse_timeout(value):
           days, rest = value.split(".")

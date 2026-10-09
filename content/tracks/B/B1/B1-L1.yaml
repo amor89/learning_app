@@ -122,6 +122,20 @@ exercises:
     language: text
     prompt: |
       Complete the `pyproject.toml` so runtime needs and developer tools are separate.
+    primer: |
+      A `pyproject.toml` file is written in TOML. A name in square brackets starts a **table**, a section of settings. Each line below it is `key = value`. A list goes in square brackets.
+
+      ```toml
+      [project]
+      name = "survey-tools"
+      requires-python = ">=3.11"
+      dependencies = ["numpy>=2.0,<3", "httpx>=0.28"]
+
+      [dependency-groups]
+      dev = ["pytest>=9"]
+      ```
+
+      Read it as: the package `survey-tools` needs Python 3.11 or later, and NumPy and httpx to run. The `dev` group lists tools only developers install.
     template: |
       [project]
       name = "churn"
@@ -153,6 +167,18 @@ exercises:
     language: python
     prompt: |
       Write `unpinned(pyproject_text)`. Parse the TOML with the standard library and return, sorted, every entry in `[project].dependencies` that has no version constraint at all (no `=`, `<`, `>`, `~` or `!`). Return an empty list when there is no dependencies key.
+    primer: |
+      **Pins and constraints.** A dependency string is a package name, optionally followed by a version constraint: `numpy>=2.0,<3` allows 2.x only, `requests==2.32.0` pins one version, `pydantic~=2.12` means 2.12 or a later 2.x. A bare name such as `httpx` has no constraint, so every install takes whatever version is newest. That entry is **unpinned**. Constraints use the characters `=`, `<`, `>`, `~` and `!`.
+
+      **Reading TOML.** `tomllib` is in the standard library from Python 3.11. `tomllib.loads(text)` turns TOML text into nested dicts, one per table:
+
+      ```python
+      import tomllib
+
+      data = tomllib.loads('[project]\nname = "x"\ndependencies = ["numpy>=2.0", "httpx"]\n')
+      data["project"]["dependencies"]   # ['numpy>=2.0', 'httpx']
+      data.get("tool", {})              # {}: the table is missing
+      ```
     starter: |
       import tomllib
 

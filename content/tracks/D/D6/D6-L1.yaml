@@ -139,6 +139,21 @@ exercises:
     language: python
     prompt: |
       Write `called_names(source: str) -> list[str]` that parses Python source with `ast` and returns the dotted names of every call, such as `spark.read.format` or `F.col`, unique and sorted. Ignore calls whose target is not a name or attribute chain (for example a call on a subscript). This gives you the checklist for step 2 of the read-through.
+    primer: |
+      `ast.parse(source)` turns Python code into a tree of nodes. `ast.walk(tree)` visits every node. Three node types matter here:
+
+      - `ast.Call` is a call. Its `.func` is the thing being called.
+      - `ast.Name` is a plain name such as `print`. Its `.id` is the text.
+      - `ast.Attribute` is `something.attr`. Its `.attr` is the last part and its `.value` the node before the dot.
+
+      ```python
+      import ast
+
+      func = ast.parse("os.path.join(a)").body[0].value.func
+      func.attr, func.value.attr, func.value.value.id   # ('join', 'path', 'os')
+      ```
+
+      Test a node's type with `isinstance(node, ast.Call)`.
     starter: |
       def called_names(source):
           return [line for line in source.splitlines() if "(" in line]

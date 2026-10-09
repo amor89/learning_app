@@ -405,6 +405,9 @@ export function renderExercise(app, ex, position, total, onChange, context = {})
       h("p", { class: "muted small" }, `${TYPE_LABELS[ex.type]} · Level ${ex.difficulty} · ${ex.xp} XP`, " ", badge),
     ),
     h("div", { class: "prompt", html: ex.prompt_html }),
+    ex.primer_html
+      ? h("section", { class: "primer", "aria-label": "What you need to know" }, h("h4", {}, "What you need to know"), h("div", { html: ex.primer_html }))
+      : null,
     builder.brief ?? null,
     builder.body,
     h("div", { class: "actions" }, checkBtn, hintBtn, solveBtn),

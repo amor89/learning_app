@@ -130,6 +130,10 @@ exercises:
     language: sql
     prompt: |
       A new Delta table gets these statements in order. What version number does the RESTORE create?
+    primer: |
+      `CREATE TABLE t (id INT) USING DELTA` creates a table stored in the Delta format, so it has a transaction log and versions. On Databricks, Delta is the default, and `USING DELTA` states it explicitly.
+
+      Each statement that changes the table commits one new version: the `CREATE` is version 0, and every `INSERT`, `UPDATE`, `DELETE` or `MERGE` after it adds one.
     code: |
       CREATE TABLE t (id INT) USING DELTA;           -- version 0
       INSERT INTO t VALUES (1);                      -- version 1
@@ -155,6 +159,10 @@ exercises:
     language: sql
     prompt: |
       A nightly maintenance script. After an incident, the team cannot time travel even one day back. Tap the line that causes it, then fix the script.
+    primer: |
+      `SET key = value` changes a Spark setting for the rest of the session.
+
+      `ANALYZE TABLE t COMPUTE STATISTICS` collects table statistics, such as the row count and size in bytes, so the query optimiser picks better plans. It reads data and deletes nothing.
     code: |
       OPTIMIZE research_silver.nat_respondents ZORDER BY (wave_id);
       SET spark.databricks.delta.retentionDurationCheck.enabled = false;

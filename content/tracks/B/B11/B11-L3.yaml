@@ -106,6 +106,19 @@ exercises:
     language: python
     prompt: |
       What does this print? (scikit-learn 1.8)
+    primer: |
+      Every step in a scikit-learn pipeline has a name, and each step's settings are addressed as `name__setting`.
+
+      - `Pipeline([("scale", StandardScaler()), ("clf", LogisticRegression())])` uses the names you give.
+      - `make_pipeline(...)` names each step after its class, in lower case.
+
+      `pipe.get_params()` returns a dict of every setting, keyed by those names:
+
+      ```python
+      pipe = make_pipeline(StandardScaler(), DecisionTreeClassifier())
+      [name for name, _ in pipe.steps]   # ['standardscaler', 'decisiontreeclassifier']
+      "decisiontreeclassifier__max_depth" in pipe.get_params()   # True
+      ```
     code: |
       from sklearn.linear_model import LogisticRegression
       from sklearn.pipeline import make_pipeline

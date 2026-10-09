@@ -160,6 +160,12 @@ exercises:
     packages: [polars, pandas, pyarrow]
     prompt: |
       This function runs out of memory on the full extract. Tap the line that loads far more than the result needs, and fix the function.
+    primer: |
+      `df.item()` returns the single value of a Polars DataFrame that has exactly one row and one column, as a plain Python value. A query that ends in one aggregate, such as a mean, gives that shape:
+
+      ```python
+      pl.DataFrame({"x": [4.0]}).item()   # 4.0
+      ```
     code: |
       import pandas as pd
       import polars as pl

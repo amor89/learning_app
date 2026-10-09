@@ -103,6 +103,15 @@ exercises:
     language: python
     prompt: |
       What does this print? (statsmodels 0.14)
+    primer: |
+      `proportions_ztest(count, nobs)` from `statsmodels.stats.proportion` tests whether two proportions differ. `count` holds the successes in each group, and `nobs` the group sizes. It returns the z statistic and the two-sided p-value.
+
+      ```python
+      from statsmodels.stats.proportion import proportions_ztest
+
+      z, p = proportions_ztest([30, 45], [100, 100])   # 30% against 45%
+      # z = -2.19, p = 0.028
+      ```
     code: |
       from statsmodels.stats.proportion import proportions_ztest
 

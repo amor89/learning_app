@@ -166,6 +166,20 @@ exercises:
     language: python
     prompt: |
       Write `mismatches(candidate: Callable[[list[float]], float | None], reference: Callable[[list[float]], float | None], cases: list[list[float]]) -> list[int]`. Run both functions on each case. Return the indexes of cases where the candidate raises an exception, or where the results differ. Two `None` results match. Floats match within `math.isclose` defaults. Import `Callable` from `collections.abc`.
+    primer: |
+      `Callable` from `collections.abc` types a parameter that holds a function. `Callable[[list[float]], float | None]` takes a list of floats and returns a float or `None`. Call the parameter like any function.
+
+      `try: ... except Exception:` catches any error the call raises, so one failing case does not stop the loop:
+
+      ```python
+      from collections.abc import Callable
+
+      def safe(fn: Callable[[int], float], x: int) -> float | None:
+          try:
+              return fn(x)
+          except Exception:
+              return None
+      ```
     starter: |
       def mismatches(candidate, reference, cases):
           return [i for i, case in enumerate(cases) if candidate(case) != reference(case)]

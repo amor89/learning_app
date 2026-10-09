@@ -90,6 +90,15 @@ exercises:
     language: pyspark
     prompt: |
       What does this print on PySpark 4.0?
+    primer: |
+      `spark.createDataFrame(rows, schema)` builds a small DataFrame from Python tuples, one tuple per row. The schema string names each column and gives its type. Tests and examples use it to make data without a table.
+
+      `df.columns` returns the column names as a Python list, in order.
+
+      ```python
+      df = spark.createDataFrame([("R1", 3)], "id STRING, n INT")
+      df.columns   # ['id', 'n']
+      ```
     code: |
       df = spark.createDataFrame([(1, 2.5)], "respondent_id INT, weight DOUBLE")
       print(df.withColumnRenamed("wgt", "final_weight").columns)

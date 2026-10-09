@@ -153,6 +153,15 @@ exercises:
     packages: [pandas]
     prompt: |
       Write `load_delivery(csv_text: str) -> pd.DataFrame`. Read the CSV with `respondent_id` and `postcode_area` as strings, keeping leading zeros. Convert `final_weight` to float. If any non-empty weight fails to parse, raise `ValueError` naming how many. Empty weights stay missing.
+    primer: |
+      `pd.to_numeric(series, errors="coerce")` converts text to numbers. A value it cannot parse becomes missing instead of raising an error:
+
+      ```python
+      s = pd.Series(["1.5", "abc", None], dtype="string")
+      pd.to_numeric(s, errors="coerce")   # 1.5, <NA>, <NA>
+      ```
+
+      A value that was present before and missing after failed to parse. Compare `s.notna()` with the parsed result's `.isna()` to find those rows.
     starter: |
       import io
 

@@ -177,6 +177,18 @@ exercises:
     language: python
     prompt: |
       Write `stale_pipelines(runs, now, max_age_hours=26)`. `runs` is a list of dicts with `pipeline_name`, `status` and `finished_at` (timezone-aware datetime). Return the sorted names of pipelines whose most recent SUCCESS is older than `max_age_hours` before `now`. A pipeline with runs but no SUCCESS at all is stale too.
+    primer: |
+      A `timedelta` is a length of time. Subtract one from a `datetime` to get an earlier moment, then compare datetimes with `<` and `>`:
+
+      ```python
+      from datetime import UTC, datetime, timedelta
+
+      now = datetime(2026, 3, 10, 9, 0, tzinfo=UTC)
+      week_ago = now - timedelta(days=7)        # 2026-03-03 09:00 UTC
+      datetime(2026, 3, 1, tzinfo=UTC) < week_ago   # True: older than a week
+      ```
+
+      `d.setdefault(key, value)` adds `key` with `value` only when the key is missing, and returns what is stored.
     starter: |
       from datetime import datetime, timedelta
 

@@ -299,6 +299,10 @@ select { font-family: var(--sans); padding: 8px; min-height: 44px; width: 100%; 
 .solution { border-top: 1px dashed var(--border); margin-top: 12px; padding-top: 4px; }
 .pager { display: flex; justify-content: space-between; gap: 8px; margin: 12px 0; }
 .fix { margin-top: 10px; }
+.primer { border-left: 4px solid var(--accent); background: var(--info-bg); border-radius: 0 8px 8px 0; padding: 4px 12px 6px; margin: 10px 0; }
+.primer h4 { margin: 8px 0 4px; }
+.primer p { margin: 6px 0; }
+.primer .hl pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .brief { background: var(--surface-2); border-radius: 8px; padding: 4px 12px 8px; margin: 10px 0; }
 .brief h4 { margin: 8px 0 4px; }
 .brief ol, .brief ul { padding-left: 1.3em; margin: 4px 0 8px; }
@@ -335,5 +339,5 @@ h1[tabindex="-1"]:focus { outline: none; }
 /* Long unbroken tokens (code, error names) must wrap on a 390px screen. */
 fieldset { min-width: 0; }
 .slot, .design > *, .choice > * { min-width: 0; }
-.choice span, .slot span, .order-text, .prompt, .feedback, .hints li, .explanation, .takeaway, .notes li, .brief li, .brief p { overflow-wrap: anywhere; }
+.choice span, .slot span, .order-text, .prompt, .feedback, .hints li, .explanation, .takeaway, .notes li, .brief li, .brief p, .primer p, .primer li { overflow-wrap: anywhere; }
 :not(pre) > code { overflow-wrap: anywhere; }

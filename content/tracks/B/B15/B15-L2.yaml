@@ -102,6 +102,20 @@ exercises:
     language: python
     prompt: |
       What does this print?
+    primer: |
+      Three NumPy tools count labels:
+
+      - `labels[labels != -1]` keeps the elements where the condition is true.
+      - `np.unique(a)` returns the distinct values, sorted.
+      - `np.bincount(a)` counts each non-negative integer: position `i` holds how often `i` appears.
+
+      ```python
+      a = np.array([0, 2, 2, 2])
+      np.unique(a)     # [0 2]
+      np.bincount(a)   # [1 0 3]: one 0, no 1s, three 2s
+      ```
+
+      `(a == 2).mean()` is the share of elements equal to 2, because `True` counts as 1.
     code: |
       import numpy as np
 

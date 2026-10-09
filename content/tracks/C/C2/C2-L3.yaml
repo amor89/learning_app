@@ -190,6 +190,15 @@ exercises:
     language: tsql
     prompt: |
       On the SQL analytics endpoint, write a view `dbo.v_wave_reach` with one row per `wave_id` and a column `reach_pct`: the sum of `weighted_reach` divided by the sum of `weighted_base` from `dbo.nat_metrics`. A wave with a zero base must return NULL, not a divide-by-zero error.
+    primer: |
+      `NULLIF(a, b)` returns NULL when `a` equals `b`, and `a` otherwise. Any arithmetic with NULL gives NULL, so dividing by `NULLIF(x, 0)` turns a zero divisor into a NULL result instead of an error:
+
+      ```sql
+      SELECT 10 / NULLIF(0, 0);   -- NULL
+      SELECT 10 / NULLIF(5, 0);   -- 2
+      ```
+
+      `CREATE VIEW name AS SELECT ...` saves a query under a name. Reading the view runs the query.
     starter: |
       CREATE VIEW dbo.v_wave_reach AS
     checker:

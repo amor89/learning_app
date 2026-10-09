@@ -107,6 +107,14 @@ exercises:
     language: python
     prompt: |
       A GradientBoostingClassifier row has base value -1.2 (log-odds) and SHAP values 0.8, 0.5 and -0.3. What does this print?
+    primer: |
+      Log-odds convert to a probability with the logistic function: `p = 1 / (1 + e^(-log_odds))`. `math.exp(x)` computes `e^x`.
+
+      ```python
+      import math
+
+      1 / (1 + math.exp(-0.0))   # 0.5: log-odds 0 means even odds
+      ```
     code: |
       import math
 

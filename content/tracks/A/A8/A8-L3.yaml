@@ -136,6 +136,10 @@ exercises:
     language: sql
     prompt: |
       CDF is enabled when the table is created. How many rows does the change read return?
+    primer: |
+      In SQL, `table_changes('table_name', start_version)` returns the same rows as reading the change feed with `readChangeFeed`: one row per change from `start_version` onwards, with `_change_type`, `_commit_version` and `_commit_timestamp`.
+
+      `TBLPROPERTIES (...)` inside `CREATE TABLE` sets table properties at creation, as `ALTER TABLE ... SET TBLPROPERTIES` does later.
     code: |
       CREATE TABLE c1 (id INT, v STRING) USING DELTA
         TBLPROPERTIES (delta.enableChangeDataFeed = true);   -- version 0
@@ -302,6 +306,12 @@ exercises:
     language: pyspark
     prompt: |
       After enabling CDF, updated respondents appear twice in the gold input, once with old values. Tap the line, then fix the function.
+    primer: |
+      `F.col(name).isin([...])` is true when the column's value equals any item in the list. It keeps several allowed values in one condition:
+
+      ```python
+      df.filter(F.col("region").isin(["North", "South"]))
+      ```
     code: |
       def current_rows(spark: SparkSession, table: str, last_processed_version: int) -> DataFrame:
           """Inserted and updated rows since the last run, with their new values."""

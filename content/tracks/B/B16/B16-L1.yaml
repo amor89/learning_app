@@ -131,6 +131,16 @@ exercises:
     language: python
     prompt: |
       What does this print? (PyTorch 2.14; the meta device stands in for a GPU)
+    primer: |
+      `torch.nn.Linear(n_in, n_out)` is a layer with a weight matrix and a bias, both **parameters** the model learns. `model.parameters()` yields them, so `next(model.parameters())` is the first one. Every tensor has a `.device` saying where it lives, such as `cpu` or `cuda:0`.
+
+      ```python
+      layer = torch.nn.Linear(3, 2)
+      next(layer.parameters()).shape    # torch.Size([2, 3])
+      next(layer.parameters()).device   # device(type='cpu')
+      ```
+
+      `torch.ones(2)` is a tensor of two ones.
     code: |
       import torch
 
@@ -260,6 +270,14 @@ exercises:
     language: python
     prompt: |
       Validation runs without errors on the CPU but raises "Expected all tensors to be on the same device" on the GPU. Tap the line that causes it.
+    primer: |
+      `with torch.inference_mode():` runs the block without tracking gradients. Evaluation needs no gradients, so this saves memory and time. `model.eval()` switches layers such as dropout to evaluation behaviour.
+
+      `tensor.argmax(dim=1)` returns, for each row, the position of the largest value: the predicted class.
+
+      ```python
+      torch.tensor([[0.1, 0.9], [0.8, 0.2]]).argmax(dim=1)   # tensor([1, 0])
+      ```
     code: |
       from collections.abc import Iterable
 
