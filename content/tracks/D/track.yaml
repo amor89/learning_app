@@ -13,6 +13,7 @@ checklist:
   - Ask the model to list its assumptions. Check each one.
   - State versions, constraints, expected outputs and tests in every prompt.
 modules:
+  - {id: D0, title: "Start here: foundations for finding errors", tags: [all-months], summary: "The words and the method of debugging, and how to read code you did not write."}
   - {id: D1, title: Reading tracebacks and stack traces, tags: [all-months], summary: "Find the root cause in Python and Spark errors."}
   - {id: D2, title: Debugging tools, tags: [all-months], summary: "breakpoint(), pdb, logging levels, Spark UI and explain()."}
   - {id: D3, title: Silent errors, tags: [all-months], summary: "Join explosion, nulls in filters, type coercion, timezone drift, mutable defaults."}

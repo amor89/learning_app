@@ -1,0 +1,287 @@
+id: A0-L2
+title: The SQL that pipelines use
+
+concept: |
+  Databricks pipelines mix PySpark with Spark SQL. The examples use Spark 4.0 SQL. Run SQL from Python with `spark.sql("SELECT ...")`, which returns a DataFrame.
+
+  **Read and filter.** `SELECT region, final_weight FROM respondents WHERE final_weight > 0` picks columns and keeps rows.
+
+  **Summarise.** `GROUP BY region` makes one row per region. Aggregates work per group: `COUNT(*)` counts rows, `COUNT(final_weight)` counts non-NULL values, and `SUM` and `AVG` skip NULLs. `HAVING SUM(final_weight) > 100` filters groups after they are summarised, where `WHERE` filters rows before.
+
+  **Join.** `JOIN regions g ON r.region_code = g.region_code` keeps only matching rows. `LEFT JOIN` keeps every row of the left table and fills the right side with NULL when there is no match. `LEFT ANTI JOIN` keeps the left rows that have **no** match, which finds orphan keys in one line.
+
+  **NULL means unknown.** Any comparison with NULL is unknown, never true, so `WHERE final_weight = NULL` matches nothing. Use `IS NULL` and `IS NOT NULL`.
+
+  **Pick one row per key.** A delivery can repeat a respondent. A **window function** numbers the rows within each key, newest first, and you keep number 1:
+
+  ```sql
+  SELECT respondent_id, wave_id, final_weight
+  FROM (
+    SELECT *,
+           ROW_NUMBER() OVER (PARTITION BY respondent_id, wave_id ORDER BY delivery_version DESC) AS rn
+    FROM bronze_deliveries
+  )
+  WHERE rn = 1
+  ```
+
+  `PARTITION BY` sets the groups, `ORDER BY ... DESC` puts the newest first, and `ROW_NUMBER()` gives exactly one row the number 1 in each group. `DISTINCT` would keep both versions, because their values differ.
+
+  Lessons A3 and A4 add `MERGE`, `GRANT` and row filters on top of these.
+
+why_it_matters: |
+  A data-quality check counted missing weights with `WHERE final_weight = NULL`. It reported zero every night for two months while 1,800 weights were missing, because a comparison with NULL is never true. `IS NULL` found them on the first run, and the check now catches the problem it was written for.
+
+worked_example:
+  language: sql
+  weak:
+    code: |
+      SELECT DISTINCT *
+      FROM bronze_deliveries
+      WHERE final_weight != NULL;
+    annotations:
+      - find: "SELECT DISTINCT *"
+        note: "Two versions of one respondent differ in their values, so DISTINCT keeps both."
+      - find: "WHERE final_weight != NULL;"
+        note: "A comparison with NULL is never true, so this returns no rows at all."
+  strong:
+    code: |
+      SELECT respondent_id, wave_id, final_weight
+      FROM (
+        SELECT *,
+               ROW_NUMBER() OVER (PARTITION BY respondent_id, wave_id ORDER BY delivery_version DESC) AS rn
+        FROM bronze_deliveries
+        WHERE final_weight IS NOT NULL
+      )
+      WHERE rn = 1;
+    annotations:
+      - find: "ROW_NUMBER() OVER (PARTITION BY respondent_id, wave_id ORDER BY delivery_version DESC) AS rn"
+        note: "Numbers each respondent's versions, newest first."
+      - find: "WHERE final_weight IS NOT NULL"
+        note: "IS NOT NULL is the test that works for NULL."
+      - find: "WHERE rn = 1;"
+        note: "Exactly one row per respondent and wave: the latest version."
+  takeaway: |
+    Filter rows with WHERE and groups with HAVING, test NULL with IS NULL, and keep one row per key with ROW_NUMBER, not DISTINCT.
+
+exercises:
+  - id: A0-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which condition finds respondents whose weight is missing?
+    options:
+      - {id: a, text: "`WHERE final_weight = NULL`"}
+      - {id: b, text: "`WHERE final_weight IS NULL`"}
+      - {id: c, text: "`WHERE final_weight = 0`"}
+      - {id: d, text: "`WHERE NOT final_weight`"}
+    answer: b
+    reasons:
+      - {id: r1, text: "A comparison with NULL is unknown, never true. IS NULL is the test made for it."}
+      - {id: r2, text: "IS is faster than =."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "= NULL is never true, so it matches no rows, even missing ones."
+      - answer: c
+        feedback: "0 is a real weight, not a missing one."
+      - answer: d
+        feedback: "NOT on a NULL is still unknown, so missing rows are not kept."
+      - answer: b|r2
+        feedback: "Right condition, wrong reason. It is about correctness: = NULL never matches."
+    hints:
+      - "What does comparing anything with NULL give?"
+      - "Unknown, never true."
+      - "SQL has a dedicated test."
+    explanation: |
+      NULL means unknown, so `= NULL` is never true. `IS NULL` matches missing values.
+
+  - id: A0-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: sql
+    prompt: |
+      `respondents` has three rows, with final_weight 1.0, NULL and 2.0. What does this return? Answer as two numbers.
+    code: |
+      SELECT COUNT(*), COUNT(final_weight)
+      FROM respondents;
+    answer: |
+      3 2
+    accepted:
+      - "3, 2"
+    wrong_answers:
+      - answer: "3 3"
+        feedback: "COUNT(column) counts only non-NULL values, so it skips the missing weight."
+      - answer: "2 2"
+        feedback: "COUNT(*) counts rows, whatever their values."
+    hints:
+      - "What does COUNT(*) count?"
+      - "What does COUNT(column) skip?"
+      - "Rows against non-NULL values."
+    explanation: |
+      `COUNT(*)` counts all three rows. `COUNT(final_weight)` counts the two non-NULL weights.
+
+  - id: A0-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: sql
+    prompt: |
+      List respondents whose region code is missing from the regions lookup.
+    template: |
+      SELECT r.respondent_id, r.region_code
+      FROM respondents r
+      LEFT [[g1]] JOIN regions g
+        [[g2]] r.region_code = g.region_code;
+    gaps:
+      g1: {accepted: [ANTI, anti]}
+      g2: {accepted: ["ON", "on"]}
+    wrong_answers:
+      - answer: {g1: OUTER, g2: "ON"}
+        feedback: "A LEFT OUTER JOIN keeps every respondent. An anti join keeps only those with no match."
+      - answer: {g1: SEMI, g2: "ON"}
+        feedback: "A semi join keeps rows that do match. You want the ones that do not."
+    hints:
+      - "A join that keeps left rows with no match."
+      - "Joins name their condition after one keyword."
+      - "`ANTI` and `ON`."
+    explanation: |
+      `LEFT ANTI JOIN ... ON` returns the left rows with no match on the right: the orphan codes.
+
+  - id: A0-L2-E4
+    type: write_function
+    difficulty: 3
+    language: sql
+    prompt: |
+      `bronze_deliveries` can hold several versions of a respondent in a wave. Write a query that returns `respondent_id`, `wave_id`, `delivery_version` and `final_weight` for the latest version only: the highest `delivery_version` per respondent and wave. Use `ROW_NUMBER()`.
+    starter: |
+      SELECT DISTINCT respondent_id, wave_id, delivery_version, final_weight
+      FROM bronze_deliveries;
+    checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: row_number
+          type: required
+          pattern: "ROW_NUMBER\\s*\\(\\s*\\)\\s+OVER\\s*\\("
+          message: "Number the rows with ROW_NUMBER() OVER (...)."
+        - id: partition
+          type: required
+          pattern: "PARTITION\\s+BY\\s+respondent_id\\s*,\\s*wave_id"
+          message: "Number within each respondent and wave: PARTITION BY respondent_id, wave_id."
+        - id: newest_first
+          type: required
+          pattern: "ORDER\\s+BY\\s+delivery_version\\s+DESC"
+          message: "Put the newest version first: ORDER BY delivery_version DESC."
+        - id: keep_first
+          type: required
+          pattern: "WHERE\\s+rn\\s*=\\s*1"
+          message: "Keep the first row of each group: WHERE rn = 1, with the number aliased AS rn."
+        - id: no_distinct
+          type: forbidden
+          pattern: "\\bDISTINCT\\b"
+          message: "DISTINCT keeps both versions, because their values differ. Number the rows instead."
+    solution: |
+      SELECT respondent_id, wave_id, delivery_version, final_weight
+      FROM (
+        SELECT *,
+               ROW_NUMBER() OVER (PARTITION BY respondent_id, wave_id ORDER BY delivery_version DESC) AS rn
+        FROM bronze_deliveries
+      )
+      WHERE rn = 1;
+    seeded_bugs:
+      - |
+        SELECT respondent_id, wave_id, delivery_version, final_weight
+        FROM (
+          SELECT *,
+                 ROW_NUMBER() OVER (PARTITION BY respondent_id, wave_id ORDER BY delivery_version) AS rn
+          FROM bronze_deliveries
+        )
+        WHERE rn = 1;
+      - |
+        SELECT respondent_id, wave_id, delivery_version, final_weight
+        FROM (
+          SELECT *,
+                 ROW_NUMBER() OVER (PARTITION BY respondent_id ORDER BY delivery_version DESC) AS rn
+          FROM bronze_deliveries
+        )
+        WHERE rn = 1;
+    wrong_answers:
+      - answer: |
+          SELECT respondent_id, wave_id, delivery_version, final_weight
+          FROM (
+            SELECT *,
+                   ROW_NUMBER() OVER (PARTITION BY respondent_id, wave_id ORDER BY delivery_version) AS rn
+            FROM bronze_deliveries
+          )
+          WHERE rn = 1;
+        triggers: newest_first
+      - answer: |
+          SELECT respondent_id, wave_id, delivery_version, final_weight
+          FROM (
+            SELECT *,
+                   ROW_NUMBER() OVER (PARTITION BY respondent_id ORDER BY delivery_version DESC) AS rn
+            FROM bronze_deliveries
+          )
+          WHERE rn = 1;
+        triggers: partition
+    hints:
+      - "Put the numbering in a subquery: `SELECT *, ROW_NUMBER() OVER (...) AS rn FROM bronze_deliveries`."
+      - "Inside OVER: `PARTITION BY respondent_id, wave_id ORDER BY delivery_version DESC`."
+      - "Outside, select the four columns and keep `WHERE rn = 1`."
+    explanation: |
+      `ROW_NUMBER()` numbers each respondent's versions within a wave, newest first, and `WHERE rn = 1` keeps one row per key. Without `DESC` you keep the oldest version, and without `wave_id` you keep one row per respondent across all waves.
+
+  - id: A0-L2-E5
+    type: spot_bug
+    difficulty: 3
+    language: sql
+    prompt: |
+      This check reports 0 missing weights every night, though weights are missing. Tap the line with the bug, then fix it.
+    code: |
+      SELECT COUNT(*) AS missing_weights
+      FROM research_prod.research_silver.nat_respondents
+      WHERE final_weight = NULL;
+    bug_lines: [3]
+    fix_checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: is_null
+          type: required
+          pattern: "WHERE\\s+final_weight\\s+IS\\s+NULL"
+          message: "Test for a missing value with IS NULL."
+        - id: no_eq_null
+          type: forbidden
+          pattern: "=\\s*NULL"
+          message: "= NULL is never true. Use IS NULL."
+    fix_solution: |
+      SELECT COUNT(*) AS missing_weights
+      FROM research_prod.research_silver.nat_respondents
+      WHERE final_weight IS NULL;
+    wrong_answers:
+      - lines: [1]
+        feedback: "COUNT(*) counts the rows the WHERE clause keeps. The WHERE clause keeps none."
+      - lines: [2]
+        feedback: "The table name is a valid three-level name."
+    hints:
+      - "Which rows does the WHERE clause keep?"
+      - "Is any comparison with NULL ever true?"
+      - "`WHERE final_weight IS NULL`."
+    explanation: |
+      `= NULL` is unknown for every row, so no row passes the filter and the count is always 0. `IS NULL` counts the missing weights.
+
+recap:
+  - front: "WHERE against HAVING"
+    back: "WHERE filters rows before grouping. HAVING filters groups after aggregation."
+  - front: "COUNT(*) against COUNT(column)"
+    back: "COUNT(*) counts rows. COUNT(column) counts non-NULL values. SUM and AVG skip NULLs."
+  - front: "Find rows with no match in a lookup"
+    back: "LEFT ANTI JOIN lookup ON key. A LEFT JOIN keeps all rows and fills NULLs."
+  - front: "Test for a missing value in SQL"
+    back: "IS NULL or IS NOT NULL. = NULL is never true."
+  - front: "Keep the latest row per key"
+    back: "ROW_NUMBER() OVER (PARTITION BY keys ORDER BY version DESC) AS rn, then WHERE rn = 1."
+
+claims:
+  - claim: "COUNT(*) is 3 and COUNT(col) is 2 with one NULL; WHERE col = NULL matches no rows; LEFT ANTI JOIN returns unmatched left rows; the ROW_NUMBER query keeps the highest delivery_version per respondent and wave."
+    status: verified
+    source: "Run on Spark 4.0.4 SQL locally."

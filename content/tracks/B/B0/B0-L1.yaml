@@ -1,0 +1,358 @@
+id: B0-L1
+title: Python essentials for data work
+
+concept: |
+  This track assumes you can read and write everyday Python 3.11 or later. Here is the core it relies on.
+
+  **Values and collections.** Numbers are `int` or `float`, text is `str`, and `True` and `False` are `bool`. `None` means "no value". A `list` holds items in order, `[1.5, 2.0]`. A `dict` maps keys to values, `{"R1": 1.5, "R2": 2.0}`. A `tuple` is a fixed group, such as `(lower, upper)`.
+
+  **Functions** take inputs and return a result. Type hints say what goes in and out, and a docstring says what the function does:
+
+  ```python
+  def mean_weight(weights: list[float]) -> float | None:
+      """Average weight, or None for an empty list."""
+      if not weights:
+          return None
+      return sum(weights) / len(weights)
+  ```
+
+  **Loops and comprehensions.** `for rid, w in weights.items():` walks through a dict's keys and values together. A comprehension builds a new list in one line: `[w for w in weights if w > 0]`.
+
+  **f-strings** put values into text: `f"{name}: {share:.1%}"` prints `North: 12.5%`. The part after the colon sets the format.
+
+  **Truthiness.** In an `if`, Python treats `0`, `0.0`, `""`, empty collections and `None` as false. That is handy for "is this list empty?", and dangerous for numbers. A share of `0.0` is real data, so test for a missing value with `is None`, never with `if not share`.
+
+  **Errors.** `raise ValueError("negative weight for R2")` stops the function with a message. `try: ... except ValueError:` catches it where you can handle it. Raise early, with a message that names the bad input.
+
+  **Imports.** `import math` or `from pathlib import Path` bring in standard library modules. Install other packages, such as pandas, with pip (lesson B1-L2).
+
+why_it_matters: |
+  A brand tracker counted brands "with no data" using `if not share:`. Brands with a real 0% share counted as missing, so the report said 14 brands lacked data when only 9 did. The client asked why five brands had vanished from the chart. One `is None` fixed both the count and the chart.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      weights = {"R1": 1.5, "R2": 0.0, "R3": None}
+      total = 0
+      n = 0
+      for k in weights:
+          if weights[k]:
+              total = total + weights[k]
+              n = n + 1
+      print("mean", total / n)
+    annotations:
+      - find: 'weights = {"R1": 1.5, "R2": 0.0, "R3": None}'
+        note: "Data at module level: nothing else can reuse or test this logic."
+      - find: "if weights[k]:"
+        note: "Truthiness skips the real 0.0 weight as well as the missing one."
+      - find: 'print("mean", total / n)'
+        note: "Prints instead of returning, and divides by zero when every weight is missing."
+  strong:
+    code: |
+      def mean_weight(weights: dict[str, float | None]) -> float | None:
+          """Mean of the recorded weights, or None when none is recorded."""
+          recorded = [w for w in weights.values() if w is not None]
+          if not recorded:
+              return None
+          return sum(recorded) / len(recorded)
+
+
+      print(f"mean: {mean_weight({'R1': 1.5, 'R2': 0.0, 'R3': None}):.2f}")
+    annotations:
+      - find: "def mean_weight(weights: dict[str, float | None]) -> float | None:"
+        note: "Type hints show that weights may be missing and that the result may be None."
+      - find: "recorded = [w for w in weights.values() if w is not None]"
+        note: "A comprehension that keeps 0.0 and drops only missing values."
+      - find: "if not recorded:"
+        note: "Truthiness is right here: it asks whether the list is empty."
+      - find: "print(f\"mean: {mean_weight({'R1': 1.5, 'R2': 0.0, 'R3': None}):.2f}\")"
+        note: "An f-string with a format: two decimals, mean: 0.75."
+  takeaway: |
+    Put logic in typed functions that return results, use comprehensions to filter, and test for missing values with `is None`.
+
+exercises:
+  - id: B0-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      `share` is a float, or `None` when no answer was recorded. Which condition is true only when the share is missing?
+    options:
+      - {id: a, text: "`if not share:`"}
+      - {id: b, text: "`if share is None:`"}
+      - {id: c, text: "`if share == 0:`"}
+      - {id: d, text: "`if share < 0.01:`"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Only None is None. A real 0.0 share is a value, and `is None` leaves it alone."}
+      - {id: r2, text: "`is` is faster than `not`."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "0.0 is falsy, so `not share` is also true for a real 0% share."
+      - answer: c
+        feedback: "That catches a real 0.0 share, and comparing None with < would fail in the next option."
+      - answer: d
+        feedback: "`None < 0.01` raises a TypeError, and small real shares would count as missing."
+      - answer: b|r2
+        feedback: "Right condition, wrong reason. It is about meaning, not speed."
+    hints:
+      - "Which of these is also true for 0.0?"
+      - "0.0 is falsy."
+      - "Only one test checks for None itself."
+    explanation: |
+      `is None` is true only for a missing value. Truthiness lumps 0.0 in with None.
+
+  - id: B0-L1-E2
+    type: predict_output
+    difficulty: 1
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      weights = {"R1": 1.5, "R2": 0.0, "R3": 2.0}
+      kept = [rid for rid, w in weights.items() if w > 0]
+      print(kept, len(weights))
+    answer: |
+      ['R1', 'R3'] 3
+    wrong_answers:
+      - answer: "['R1', 'R2', 'R3'] 3"
+        feedback: "The comprehension keeps only IDs whose weight is above 0. R2 has 0.0."
+      - answer: "['R1', 'R3'] 2"
+        feedback: "`len(weights)` counts the original dict, which still has three entries."
+      - answer: "[1.5, 2.0] 3"
+        feedback: "The comprehension collects `rid`, the key, not `w`."
+    hints:
+      - "`.items()` gives each key with its value."
+      - "Which weights are above 0?"
+      - "The comprehension does not change the dict."
+    explanation: |
+      The comprehension builds a new list of keys whose weight is positive. The dict itself still has three entries.
+
+  - id: B0-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the function so its type hint allows a missing share, and its label shows a share of 0.125 as `North: 12.5%`.
+    template: |
+      def label(name: str, share: float | [[g1]]) -> str:
+          if share is None:
+              return f"{name}: no data"
+          return f"{name}: {share:[[g2]]}"
+    gaps:
+      g1: {accepted: [None]}
+      g2: {accepted: [.1%]}
+    wrong_answers:
+      - answer: {g1: None, g2: .1f}
+        feedback: "`.1f` prints 0.1. The `%` format multiplies by 100 and adds the sign."
+      - answer: {g1: "0", g2: .1%}
+        feedback: "The hint names a type. A missing value has the type None."
+    hints:
+      - "Which value means missing?"
+      - "A percentage format with one decimal."
+      - "`None` and `.1%`."
+    explanation: |
+      `float | None` documents that the share may be missing. `.1%` multiplies by 100, rounds to one decimal and adds `%`.
+
+  - id: B0-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `summarise_weights(weights: dict[str, float | None]) -> dict[str, float | int | None]`. Keys are respondent IDs. Missing weights are `None`. Return a dict with:
+
+      - `"n"`: the number of recorded weights, including 0.0,
+      - `"total"`: their sum (0.0 when none is recorded),
+      - `"mean"`: total divided by n, or `None` when n is 0.
+
+      Raise `ValueError` naming the respondent ID when any weight is negative.
+    starter: |
+      def summarise_weights(weights):
+          total = 0
+          n = 0
+          for rid in weights:
+              if weights[rid]:
+                  total += weights[rid]
+                  n += 1
+          return {"n": n, "total": total, "mean": total / n}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: summarise_weights
+          typed: true
+          docstring: true
+          message: "Give summarise_weights type hints and a docstring."
+        - id: no_truthiness
+          kind: forbids_bare_truthiness
+          names: [w, weight, value]
+          message: "Test for a missing weight with `is None`. Truthiness would skip a real 0.0."
+      tests:
+        - id: normal
+          code: |
+            assert summarise_weights({"R1": 1.0, "R2": None, "R3": 3.0}) == {"n": 2, "total": 4.0, "mean": 2.0}
+          message: "Skip None, count and sum the rest: n 2, total 4.0, mean 2.0."
+        - id: zero_counts
+          code: |
+            assert summarise_weights({"R1": 0.0, "R2": 2.0}) == {"n": 2, "total": 2.0, "mean": 1.0}
+          message: "A weight of 0.0 is recorded, so it counts in n. Test for missing values with `is None`."
+        - id: empty
+          code: |
+            assert summarise_weights({}) == {"n": 0, "total": 0.0, "mean": None}
+            assert summarise_weights({"R1": None}) == {"n": 0, "total": 0.0, "mean": None}
+          message: "With no recorded weights, return n 0, total 0.0 and mean None, without dividing by zero."
+        - id: negative
+          code: |
+            try:
+                summarise_weights({"R1": 1.0, "R2": -0.5})
+            except ValueError as err:
+                assert "R2" in str(err), str(err)
+            else:
+                raise AssertionError("no ValueError for a negative weight")
+          message: "Raise ValueError that names the respondent with the negative weight."
+    solution: |
+      def summarise_weights(weights: dict[str, float | None]) -> dict[str, float | int | None]:
+          """Count, total and mean of the recorded weights.
+
+          Args:
+              weights: Respondent ID to weight, None when missing.
+
+          Returns:
+              A dict with n, total and mean. mean is None when no weight is recorded.
+
+          Raises:
+              ValueError: If any weight is negative.
+          """
+          recorded: list[float] = []
+          for rid, w in weights.items():
+              if w is None:
+                  continue
+              if w < 0:
+                  raise ValueError(f"negative weight for {rid}: {w}")
+              recorded.append(w)
+          total = float(sum(recorded))
+          n = len(recorded)
+          mean = total / n if n > 0 else None
+          return {"n": n, "total": total, "mean": mean}
+    seeded_bugs:
+      - |
+        def summarise_weights(weights: dict[str, float | None]) -> dict[str, float | int | None]:
+            """Skips zero weights by accident."""
+            recorded = []
+            for rid, w in weights.items():
+                if w is not None and w < 0:
+                    raise ValueError(f"negative weight for {rid}")
+                if w is not None and w > 0:
+                    recorded.append(w)
+            total = float(sum(recorded))
+            return {"n": len(recorded), "total": total, "mean": total / len(recorded) if recorded else None}
+      - |
+        def summarise_weights(weights: dict[str, float | None]) -> dict[str, float | int | None]:
+            """Divides by zero when nothing is recorded."""
+            recorded = []
+            for rid, w in weights.items():
+                if w is None:
+                    continue
+                if w < 0:
+                    raise ValueError(f"negative weight for {rid}")
+                recorded.append(w)
+            total = float(sum(recorded))
+            return {"n": len(recorded), "total": total, "mean": total / len(recorded)}
+    wrong_answers:
+      - answer: |
+          def summarise_weights(weights: dict[str, float | None]) -> dict[str, float | int | None]:
+              """Skips zero weights by accident."""
+              recorded = []
+              for rid, w in weights.items():
+                  if w is not None and w < 0:
+                      raise ValueError(f"negative weight for {rid}")
+                  if w is not None and w > 0:
+                      recorded.append(w)
+              total = float(sum(recorded))
+              return {"n": len(recorded), "total": total, "mean": total / len(recorded) if recorded else None}
+        triggers: zero_counts
+      - answer: |
+          def summarise_weights(weights: dict[str, float | None]) -> dict[str, float | int | None]:
+              """Divides by zero when nothing is recorded."""
+              recorded = []
+              for rid, w in weights.items():
+                  if w is None:
+                      continue
+                  if w < 0:
+                      raise ValueError(f"negative weight for {rid}")
+                  recorded.append(w)
+              total = float(sum(recorded))
+              return {"n": len(recorded), "total": total, "mean": total / len(recorded)}
+        triggers: empty
+    hints:
+      - "Loop with `for rid, w in weights.items():` and skip `w is None`."
+      - "Raise `ValueError(f\"negative weight for {rid}\")` before you keep a weight."
+      - "Compute the mean only when n > 0. Otherwise it is None."
+    explanation: |
+      Skipping only `None` keeps real zeros, checking n before dividing avoids a ZeroDivisionError, and an error message that names the ID points straight at the bad row.
+
+  - id: B0-L1-E5
+    type: spot_bug
+    difficulty: 3
+    language: python
+    prompt: |
+      This function reports 2 brands with no data for `{"A": 0.0, "B": None, "C": 0.4}`. Only one brand has no data. Tap the line with the bug, then fix it.
+    code: |
+      def count_missing(shares: dict[str, float | None]) -> int:
+          """Number of brands with no share recorded."""
+          missing = 0
+          for brand, share in shares.items():
+              if not share:
+                  missing += 1
+          return missing
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      tests:
+        - id: zero_is_data
+          code: |
+            assert count_missing({"A": 0.0, "B": None, "C": 0.4}) == 1
+          message: "A share of 0.0 is recorded data. Count only None as missing."
+        - id: all_missing
+          code: |
+            assert count_missing({"A": None, "B": None}) == 2
+            assert count_missing({}) == 0
+          message: "Count every None, and return 0 for an empty dict."
+    fix_solution: |
+      def count_missing(shares: dict[str, float | None]) -> int:
+          """Number of brands with no share recorded."""
+          missing = 0
+          for brand, share in shares.items():
+              if share is None:
+                  missing += 1
+          return missing
+    wrong_answers:
+      - lines: [4]
+        feedback: "The loop is fine: it visits every brand with its share."
+      - lines: [6]
+        feedback: "Adding one is right. The condition that decides when is wrong."
+    hints:
+      - "Which brands does the function count?"
+      - "Is 0.0 truthy or falsy?"
+      - "`if share is None:`."
+    explanation: |
+      `not share` is true for 0.0 as well as None. `share is None` counts only the missing value.
+
+recap:
+  - front: "Test for a missing number"
+    back: "if value is None. Truthiness also treats 0 and 0.0 as false."
+  - front: "Filter a list in one line"
+    back: "A comprehension: [w for w in weights if w > 0]."
+  - front: "Show 0.125 as 12.5%"
+    back: "f\"{share:.1%}\"."
+  - front: "Walk through a dict"
+    back: "for key, value in d.items():"
+  - front: "Signal bad input"
+    back: "raise ValueError(\"message naming the input\"). Catch it with try/except where you can handle it."
+
+claims:
+  - claim: "0, 0.0, an empty string, an empty list and None are falsy; \"0\" is truthy; f\"{0.125:.1%}\" gives 12.5%."
+    status: verified
+    source: "Run on Python 3.11 and 3.13."

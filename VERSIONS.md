@@ -178,6 +178,8 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 | Wilson against statsmodels `proportion_confint(method="wilson")` within rtol 1e-6; seeded coverage: Wilson 0.9415 and Wald 0.7865 at p = 0.05, n = 30, 2,000 simulations. | Verified | Local, statsmodels 0.14.6 and 0.15.0, NumPy 2.4.6 |
 | `unittest.mock`: `side_effect` lists, `call_count` includes raising calls, patch where the name is looked up. `monkeypatch.setenv` and `delenv` undone after the test. | Verified | Local, Python 3.11 and 3.13 |
 | pytest-cov branch coverage: 100% line and 83% branch for one-sided `if`, missing jump `2->4`; `--cov-fail-under` exits 1; `--strict-markers` and `strict = true` reject unregistered markers. | Verified | Local, pytest-cov 7.1.0, coverage 7.17.0 |
+| Start-here modules: `0.0` falsy and `f"{0.125:.1%}"`; pandas `df[w > 0 & in_scope]` silently ignores `in_scope`; `size`/`count`/`sum` named aggregations; left against inner merge; `np.std` ddof 0 against pandas ddof 1 (2.0 and 2.138); CSV loses `01234`, Parquet keeps it. | Verified | Local, pandas 3.0.2 and 3.0.6, NumPy 2.4.6, pyarrow 22.0.0 and 26.0.0 |
+| Start-here modules, Spark: transformations against actions, immutable `withColumn`, `COUNT(*)` against `COUNT(col)`, `= NULL` matches nothing, `LEFT ANTI JOIN`, `ROW_NUMBER` latest per key, Delta `_delta_log` commits and `VERSION AS OF`. | Verified | Local, Spark 4.0.4, delta-spark 4.0.1 |
 
 ## Track D facts (checked September 2026)
 

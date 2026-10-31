@@ -16,6 +16,7 @@ checklist:
   - Tests use fixtures and parametrize, compare numbers with stated tolerances, isolate I/O, and run with coverage in CI.
   - Every model has a model card. Every decision has a log entry.
 modules:
+  - {id: B0, title: "Start here: foundations for data science", tags: [prereq], summary: "The Python, pandas and statistics this track assumes."}
   - {id: B1, title: Project setup, tags: [prereq], summary: "pyproject.toml, virtual environments, ruff, mypy and folder layout."}
   - {id: B2, title: Code design, tags: [prereq], summary: "Pure functions, dataclasses, when to use classes, configuration objects."}
   - {id: B3, title: Clean pandas, tags: [prereq], summary: "Dtypes, vectorisation, method chaining and Copy-on-Write in pandas 3."}

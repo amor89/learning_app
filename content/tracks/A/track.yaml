@@ -16,6 +16,7 @@ checklist:
   - Row filters use a SQL UDF with SET ROW FILTER. Grants go to groups.
   - Tests run on a local SparkSession in CI before every merge.
 modules:
+  - {id: A0, title: "Start here: foundations for Databricks", tags: [prereq], summary: "Spark DataFrames, the SQL pipelines use, and the lakehouse map: Databricks, Unity Catalog, Delta and medallion layers."}
   - {id: A1, title: Code structure, tags: [M16-18, current-work], summary: "Functions, type hints, docstrings, naming, config files and PEP 8."}
   - {id: A2, title: Medallion architecture, tags: [M16-18, current-work], summary: "Bronze, silver and gold contracts."}
   - {id: A3, title: Delta Lake, tags: [M16-18, current-work], summary: "MERGE, idempotent writes, schema enforcement and evolution, time travel, maintenance."}

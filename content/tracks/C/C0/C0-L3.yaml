@@ -1,0 +1,248 @@
+id: C0-L3
+title: Two engines, one table, Spark notebooks and the SQL analytics endpoint
+
+concept: |
+  A Fabric lakehouse (GA) stores its tables once, as Delta in OneLake. Two engines read them, and you will use both.
+
+  **Spark, in a notebook.** Fabric notebooks run PySpark and give you a `spark` session. Runtime 2.0 (GA) runs Spark 4.1, and the examples here behave the same on the Spark 4.0 used in Track A. You work with DataFrames:
+
+  ```python
+  from pyspark.sql import functions as F
+
+  df = spark.read.table("respondents")
+  totals = df.filter(F.col("final_weight") > 0).groupBy("region").agg(F.sum("final_weight").alias("total"))
+  totals.show()
+  ```
+
+  `filter`, `groupBy`, `agg`, `select` and `orderBy` are **transformations**: they describe a new DataFrame and run nothing. **Actions** run the plan: `show()` prints rows, `count()` counts them and `collect()` returns them to Python as `Row` objects. `groupBy("region").count()` is a shortcut that adds a `count` column. In tests, `spark.createDataFrame(rows, "region STRING, w DOUBLE")` builds a small DataFrame. `spark.sql("SELECT ...")` runs Spark SQL in the same notebook.
+
+  Spark also **writes**: `df.write.mode("append").saveAsTable("respondents")` adds rows to a managed table, and `mode("overwrite")` replaces them.
+
+  **T-SQL, on the SQL analytics endpoint.** Every lakehouse gets a SQL analytics endpoint (GA). It answers T-SQL queries over the same tables, so analysts and reports can query with familiar SQL:
+
+  ```sql
+  SELECT region, SUM(final_weight) AS total
+  FROM dbo.respondents
+  WHERE final_weight > 0
+  GROUP BY region;
+  ```
+
+  The endpoint is **read-only for table data**. You can create views on it, but `INSERT`, `UPDATE` and `DELETE` against lakehouse tables fail there. Write with Spark, or use a Warehouse when you need T-SQL writes (lesson C2-L3).
+
+  Pick by job: Spark for loading and transforming, the SQL endpoint for querying and reporting.
+
+why_it_matters: |
+  A team planned its nightly load as T-SQL `INSERT` statements on the SQL analytics endpoint, because the analysts knew SQL. The first run failed on every statement, since the endpoint does not write to lakehouse tables. Moving the load to a Spark notebook, and keeping T-SQL for the reports, matched each engine to what it does.
+
+worked_example:
+  language: sql
+  weak:
+    code: |
+      -- On the SQL analytics endpoint
+      INSERT INTO dbo.respondents (respondent_id, final_weight)
+      SELECT respondent_id, final_weight FROM dbo.staging_w14;
+    annotations:
+      - find: "INSERT INTO dbo.respondents (respondent_id, final_weight)"
+        note: "The endpoint is read-only for lakehouse table data, so this fails."
+  strong:
+    code: |
+      -- Load with Spark, in a notebook:
+      --   spark.read.table("staging_w14").write.mode("append").saveAsTable("respondents")
+      -- Query with T-SQL, on the SQL analytics endpoint:
+      SELECT region, SUM(final_weight) AS total
+      FROM dbo.respondents
+      GROUP BY region;
+    annotations:
+      - find: '--   spark.read.table("staging_w14").write.mode("append").saveAsTable("respondents")'
+        note: "Spark writes the Delta table."
+      - find: "SELECT region, SUM(final_weight) AS total"
+        note: "The endpoint reads the same table with T-SQL, without a copy."
+  takeaway: |
+    One Delta table, two engines: write and transform with Spark, query with T-SQL on the SQL analytics endpoint.
+
+exercises:
+  - id: C0-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You need to append tonight's delivery to the lakehouse table `respondents`. Where do you write the code?
+    options:
+      - {id: a, text: "In a Spark notebook, with `df.write.mode(\"append\").saveAsTable(\"respondents\")`"}
+      - {id: b, text: "On the SQL analytics endpoint, with `INSERT INTO dbo.respondents ...`"}
+      - {id: c, text: "In a Power BI report"}
+      - {id: d, text: "Anywhere: every engine can write lakehouse tables"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Spark writes lakehouse tables. The SQL analytics endpoint is read-only for table data."}
+      - {id: r2, text: "Spark is faster than SQL."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The SQL analytics endpoint does not write lakehouse table data. INSERT fails there."
+      - answer: c
+        feedback: "Reports read data. They do not load it."
+      - answer: d
+        feedback: "The SQL analytics endpoint is read-only for lakehouse table data."
+      - answer: a|r2
+        feedback: "Right place, wrong reason. It is about which engine can write, not speed."
+    hints:
+      - "Which engine writes lakehouse tables?"
+      - "What does the SQL analytics endpoint do with INSERT?"
+      - "Spark writes, the endpoint reads."
+    explanation: |
+      Spark writes lakehouse tables. The SQL analytics endpoint queries them and is read-only for their data.
+
+  - id: C0-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      What does this print? (Spark 4.0 and later)
+    code: |
+      from pyspark.sql import functions as F
+
+      df = spark.createDataFrame([("N", 2.0), ("S", 0.0), ("S", 3.0)], "region STRING, w DOUBLE")
+      print(df.filter(F.col("w") > 0).groupBy("region").count().orderBy("region").collect())
+    answer: |
+      [Row(region='N', count=1), Row(region='S', count=1)]
+    wrong_answers:
+      - answer: "[Row(region='N', count=1), Row(region='S', count=2)]"
+        feedback: "The filter runs first and drops the S row with w 0.0."
+      - answer: "[('N', 1), ('S', 1)]"
+        feedback: "collect() returns Row objects, which print with their field names."
+    hints:
+      - "Which rows survive w > 0?"
+      - "Then count rows per region."
+      - "collect returns Row objects."
+    explanation: |
+      The filter drops the zero weight, leaving one row per region. `count()` after `groupBy` adds a `count` column, and `collect()` returns `Row` objects.
+
+  - id: C0-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: pyspark
+    prompt: |
+      Read the staging table and add its rows to `respondents`, keeping the rows already there.
+    template: |
+      spark.read.[[g1]]("staging_w14").write.mode("[[g2]]").saveAsTable("respondents")
+    gaps:
+      g1: {accepted: [table]}
+      g2: {accepted: [append]}
+    wrong_answers:
+      - answer: {g1: table, g2: overwrite}
+        feedback: "overwrite replaces the rows already in the table. The task keeps them: append."
+    hints:
+      - "The reader method that takes a table name."
+      - "Add rows, do not replace them."
+      - "`table` and `append`."
+    explanation: |
+      `spark.read.table(...)` reads a lakehouse table, and `mode("append")` adds rows instead of replacing them.
+
+  - id: C0-L3-E4
+    type: write_function
+    difficulty: 3
+    language: tsql
+    prompt: |
+      On the SQL analytics endpoint, write a query that returns each `region` with `total_weight`, the sum of `final_weight`, from `dbo.respondents`. Count only rows with a positive weight, and sort by region.
+    starter: |
+      SELECT *
+      FROM dbo.respondents;
+    checker:
+      kind: text
+      comments: sql
+      rules:
+        - id: source
+          type: required
+          pattern: "FROM\\s+dbo\\.respondents"
+          message: "Query dbo.respondents."
+        - id: total
+          type: required
+          pattern: "SUM\\s*\\(\\s*final_weight\\s*\\)\\s+AS\\s+total_weight"
+          message: "Return SUM(final_weight) AS total_weight."
+        - id: positive
+          type: required
+          pattern: "WHERE\\s+final_weight\\s*>\\s*0"
+          message: "Keep only positive weights: WHERE final_weight > 0."
+        - id: group
+          type: required
+          pattern: "GROUP\\s+BY\\s+region"
+          message: "One row per region needs GROUP BY region."
+        - id: sort
+          type: required
+          pattern: "ORDER\\s+BY\\s+region"
+          message: "Sort the result: ORDER BY region."
+        - id: read_only
+          type: forbidden
+          pattern: "\\b(INSERT|UPDATE|DELETE)\\b"
+          message: "The endpoint is read-only for lakehouse table data. A query needs no writes."
+    solution: |
+      SELECT region, SUM(final_weight) AS total_weight
+      FROM dbo.respondents
+      WHERE final_weight > 0
+      GROUP BY region
+      ORDER BY region;
+    seeded_bugs:
+      - |
+        SELECT region, SUM(final_weight) AS total_weight
+        FROM dbo.respondents
+        GROUP BY region
+        ORDER BY region;
+      - |
+        SELECT region, SUM(final_weight) AS total_weight
+        FROM dbo.respondents
+        WHERE final_weight > 0
+        GROUP BY region;
+    wrong_answers:
+      - answer: |
+          SELECT region, SUM(final_weight) AS total_weight
+          FROM dbo.respondents
+          GROUP BY region
+          ORDER BY region;
+        triggers: positive
+    hints:
+      - "Start with `SELECT region, SUM(final_weight) AS total_weight FROM dbo.respondents`."
+      - "Filter rows before grouping: `WHERE final_weight > 0`."
+      - "Then `GROUP BY region ORDER BY region`."
+    explanation: |
+      `WHERE` filters rows, `GROUP BY` makes one row per region, and `ORDER BY` sorts the result. The query only reads, which is all the endpoint allows on table data.
+
+  - id: C0-L3-E5
+    type: spot_bug
+    difficulty: 3
+    language: tsql
+    prompt: |
+      This script runs on a lakehouse's SQL analytics endpoint and fails. Tap the line that cannot work there.
+    code: |
+      SELECT COUNT(*) AS rows_before FROM dbo.respondents;
+      INSERT INTO dbo.respondents (respondent_id, final_weight) VALUES ('R9', 1.0);
+      SELECT COUNT(*) AS rows_after FROM dbo.respondents;
+    bug_lines: [2]
+    wrong_answers:
+      - lines: [1]
+        feedback: "Reading a lakehouse table on the endpoint is exactly what it is for."
+      - lines: [3]
+        feedback: "This SELECT would run. The line before it cannot."
+    hints:
+      - "Which statements only read?"
+      - "Can the endpoint change lakehouse table data?"
+      - "It is read-only for table data."
+    explanation: |
+      The SQL analytics endpoint is read-only for lakehouse table data, so the INSERT fails. Add the row from a Spark notebook, or keep data that needs T-SQL writes in a Warehouse.
+
+recap:
+  - front: "Two engines over one lakehouse table"
+    back: "Spark in notebooks reads and writes. The SQL analytics endpoint queries with T-SQL and is read-only for table data."
+  - front: "Append rows to a lakehouse table from Spark"
+    back: "df.write.mode(\"append\").saveAsTable(\"respondents\"). mode(\"overwrite\") replaces the rows."
+  - front: "Spark transformations against actions"
+    back: "filter, groupBy, agg, select describe a new DataFrame. show, count, collect run the plan."
+  - front: "Where to put T-SQL writes"
+    back: "In a Warehouse. The lakehouse's SQL analytics endpoint does not write table data."
+
+claims:
+  - claim: "The E2 code prints [Row(region='N', count=1), Row(region='S', count=1)]; spark.sql runs SQL in the same session."
+    status: verified
+    source: "Run on PySpark 4.0.4 locally. Not run on Fabric Runtime 2.0 (Spark 4.1)."
+  - claim: "The SQL analytics endpoint (GA) is read-only for lakehouse table data and supports views; Lakehouse is GA; Fabric Runtime 2.0 (GA) runs Spark 4.1."
+    status: search-only
+    source: "VERSIONS.md Fabric feature status (data-engineering/lakehouse-sql-analytics-endpoint, runtime), as taught in C2-L3 and C5-L2."
