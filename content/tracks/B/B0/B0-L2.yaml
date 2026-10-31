@@ -1,0 +1,353 @@
+id: B0-L2
+title: pandas essentials
+
+concept: |
+  pandas holds tables as **DataFrames**: named columns over a row **index**. One column is a **Series**. The examples use pandas 3.0, where text columns get the `str` dtype.
+
+  ```python
+  import pandas as pd
+
+  df = pd.read_csv("respondents.csv")
+  ```
+
+  **Select columns.** `df["w"]` returns one column as a Series. `df[["id", "w"]]` returns a smaller DataFrame.
+
+  **Filter rows.** A comparison on a column gives a Series of `True` and `False`, a **mask**. Indexing with it keeps the `True` rows: `df[df["w"] > 0]`. Combine masks with `&` (and), `|` (or) and `~` (not), and put **each condition in brackets**: `df[(df["w"] > 0) & df["in_scope"]]`. Python's `and` raises an error on a Series.
+
+  **Add columns.** `df.assign(w2=df["w"] * 2)` returns a new DataFrame with the extra column and leaves `df` unchanged.
+
+  **Missing values** show as `NaN` or `<NA>`. `df["w"].isna()` marks them. `sum()` and `mean()` skip them.
+
+  **Group and summarise.** `df.groupby("region")["w"].sum()` adds up the weights per region. For several results at once, name each one:
+
+  ```python
+  df.groupby("region", as_index=False).agg(
+      n=("w", "size"),        # rows, missing or not
+      recorded=("w", "count"),  # non-missing values
+      total=("w", "sum"),
+  )
+  ```
+
+  `as_index=False` keeps `region` as a normal column.
+
+  **Join tables.** `df.merge(regions, on="region_code", how="left")` adds the columns of `regions` to every row of `df`. `how="left"` keeps rows with no match, filling the new columns with missing values. The default, `how="inner"`, drops them.
+
+  **Tidy the result.** `sort_values("region")` orders rows, and `reset_index(drop=True)` renumbers them 0, 1, 2.
+
+why_it_matters: |
+  An analyst joined respondents to a region lookup with the default inner merge. 312 respondents had a region code missing from the lookup, and they disappeared from every regional table without an error. The national total no longer matched the sum of the regions. A left merge, followed by a count of rows with a missing region, shows the problem in one line.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import pandas as pd
+
+      df = pd.read_csv("respondents.csv")
+      df = df.merge(pd.read_csv("regions.csv"), on="region_code")
+      out = {}
+      for i in range(len(df)):
+          r = df.iloc[i]["region"]
+          out[r] = out.get(r, 0) + df.iloc[i]["w"]
+    annotations:
+      - find: 'df = df.merge(pd.read_csv("regions.csv"), on="region_code")'
+        note: "The default inner merge silently drops respondents with an unknown region code."
+      - find: "for i in range(len(df)):"
+        note: "A Python loop over rows: slow, and it hides what the code computes."
+      - find: 'out[r] = out.get(r, 0) + df.iloc[i]["w"]'
+        note: "A missing weight (NaN) turns that region's total into NaN."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def region_totals(respondents: pd.DataFrame, regions: pd.DataFrame) -> pd.DataFrame:
+          """Respondents and weight total per region, keeping unknown codes."""
+          joined = respondents.merge(regions, on="region_code", how="left")
+          return (
+              joined.groupby("region", as_index=False, dropna=False)
+              .agg(n=("w", "size"), total_weight=("w", "sum"))
+              .sort_values("region")
+              .reset_index(drop=True)
+          )
+    annotations:
+      - find: 'joined = respondents.merge(regions, on="region_code", how="left")'
+        note: "A left merge keeps every respondent. Unknown codes get a missing region."
+      - find: 'joined.groupby("region", as_index=False, dropna=False)'
+        note: "dropna=False keeps the missing region as its own group, so nobody disappears."
+      - find: '.agg(n=("w", "size"), total_weight=("w", "sum"))'
+        note: "Named results in one pass. sum skips missing weights."
+  takeaway: |
+    Filter with bracketed masks, summarise with groupby and named aggregations, and merge with how="left" when every row must survive.
+
+exercises:
+  - id: B0-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which line keeps only rows with a positive weight that are in scope?
+    options:
+      - {id: a, text: "`df[(df[\"w\"] > 0) & df[\"in_scope\"]]`"}
+      - {id: b, text: "`df[df[\"w\"] > 0 and df[\"in_scope\"]]`"}
+      - {id: c, text: "`df[df[\"w\"] > 0, df[\"in_scope\"]]`"}
+      - {id: d, text: "`df.filter(df[\"w\"] > 0)`"}
+    answer: a
+    reasons:
+      - {id: r1, text: "`&` combines two masks row by row, and the brackets make the comparison happen first."}
+      - {id: r2, text: "`&` is shorter to type than `and`."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Python's `and` needs a single True or False. On a Series it raises \"The truth value of a Series is ambiguous\"."
+      - answer: c
+        feedback: "A comma inside the brackets makes a tuple, which pandas reads as a column label, not a filter."
+      - answer: d
+        feedback: "DataFrame.filter selects columns by name. It does not filter rows by a condition."
+      - answer: a|r2
+        feedback: "Right line, wrong reason. `&` works row by row, which `and` cannot do."
+    hints:
+      - "Which operator works row by row on a Series?"
+      - "`and` wants one True or False."
+      - "Brackets around each comparison."
+    explanation: |
+      Masks combine with `&`, `|` and `~`. Bracket each comparison so it runs before the combination.
+
+  - id: B0-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (pandas 3.0)
+    primer: |
+      `series.to_dict()` turns a Series into a plain dict, with the index labels as keys. After a groupby, the labels are the group names:
+
+      ```python
+      pd.Series([3, 5], index=["a", "b"]).to_dict()   # {'a': 3, 'b': 5}
+      ```
+    code: |
+      import pandas as pd
+
+      df = pd.DataFrame({"region": ["N", "N", "S"], "w": [1.0, None, 2.0]})
+      print(df.groupby("region")["w"].sum().to_dict())
+    answer: |
+      {'N': 1.0, 'S': 2.0}
+    wrong_answers:
+      - answer: "{'N': nan, 'S': 2.0}"
+        feedback: "pandas' sum skips missing values, so N adds up only 1.0."
+      - answer: "{'N': 2, 'S': 1}"
+        feedback: "That counts rows. sum adds the values."
+    hints:
+      - "Group the rows by region, then add up w."
+      - "What does sum do with a missing value?"
+      - "It skips it."
+    explanation: |
+      `sum` skips missing values, so region N totals 1.0 and S totals 2.0. `.to_dict()` turns the result into a dict keyed by region.
+
+  - id: B0-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Add region names to every respondent, and keep respondents whose region code is missing from the lookup.
+    template: |
+      joined = respondents.merge(regions, on="[[g1]]", how="[[g2]]")
+    gaps:
+      g1: {accepted: [region_code]}
+      g2: {accepted: [left]}
+    wrong_answers:
+      - answer: {g1: region_code, g2: inner}
+        feedback: "An inner merge drops respondents with no match, which is what the task forbids."
+      - answer: {g1: region, g2: left}
+        feedback: "Join on the column both tables share, the code. The name is what you want to add."
+    hints:
+      - "Which column do both tables have?"
+      - "Which merge keeps every row of the left table?"
+      - "`region_code` and `left`."
+    explanation: |
+      `on` names the shared key. `how="left"` keeps every respondent and fills the region with a missing value when there is no match.
+
+  - id: B0-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Write `region_summary(df: pd.DataFrame) -> pd.DataFrame`. `df` has columns `region` and `w`, where `w` can be missing. Return one row per region, sorted by region, with a default index and the columns:
+
+      - `region`,
+      - `n`: rows in the region, including missing weights,
+      - `recorded`: rows with a weight,
+      - `total_weight`: the sum of the weights, 0.0 when none is recorded.
+
+      Do not loop over rows.
+    starter: |
+      import pandas as pd
+
+
+      def region_summary(df):
+          out = {}
+          for i in range(len(df)):
+              r = df.iloc[i]["region"]
+              out[r] = out.get(r, 0) + df.iloc[i]["w"]
+          return pd.DataFrame({"region": list(out), "total_weight": list(out.values())})
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+        import pandas as pd
+
+        def _frame():
+            return pd.DataFrame({"region": ["S", "N", "N", "S", "E"], "w": [2.0, 1.0, np.nan, 3.0, np.nan]})
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: region_summary
+          typed: true
+          docstring: true
+          message: "Give region_summary type hints and a docstring."
+        - id: no_row_loop
+          kind: forbids_pattern
+          pattern: "for\\s+\\w+\\s+in\\s+range\\(len\\("
+          message: "Do not loop over rows. Use groupby with named aggregations."
+      tests:
+        - id: columns
+          code: |
+            out = region_summary(_frame())
+            assert list(out.columns) == ["region", "n", "recorded", "total_weight"], list(out.columns)
+          message: "Return the columns region, n, recorded and total_weight, in that order."
+        - id: values
+          code: |
+            expected = pd.DataFrame({"region": ["E", "N", "S"], "n": [1, 2, 2], "recorded": [0, 1, 2], "total_weight": [0.0, 1.0, 5.0]})
+            pd.testing.assert_frame_equal(region_summary(_frame()), expected)
+          message: "Count all rows with size, recorded weights with count, and add them with sum. Sort by region and reset the index."
+        - id: input_unchanged
+          code: |
+            df = _frame()
+            before = df.copy()
+            region_summary(df)
+            pd.testing.assert_frame_equal(df, before)
+          message: "Leave the input frame unchanged."
+    solution: |
+      import pandas as pd
+
+
+      def region_summary(df: pd.DataFrame) -> pd.DataFrame:
+          """Rows, recorded weights and weight total per region.
+
+          Args:
+              df: Respondents with region and w columns.
+
+          Returns:
+              One row per region, sorted, with a default index.
+          """
+          return (
+              df.groupby("region", as_index=False)
+              .agg(n=("w", "size"), recorded=("w", "count"), total_weight=("w", "sum"))
+              .sort_values("region")
+              .reset_index(drop=True)
+          )
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def region_summary(df: pd.DataFrame) -> pd.DataFrame:
+            """Counts non-missing weights as n."""
+            return (
+                df.groupby("region", as_index=False)
+                .agg(n=("w", "count"), recorded=("w", "count"), total_weight=("w", "sum"))
+                .sort_values("region")
+                .reset_index(drop=True)
+            )
+      - |
+        import pandas as pd
+
+
+        def region_summary(df: pd.DataFrame) -> pd.DataFrame:
+            """Keeps region as the index."""
+            return df.groupby("region").agg(n=("w", "size"), recorded=("w", "count"), total_weight=("w", "sum"))
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def region_summary(df: pd.DataFrame) -> pd.DataFrame:
+              """Counts non-missing weights as n."""
+              return (
+                  df.groupby("region", as_index=False)
+                  .agg(n=("w", "count"), recorded=("w", "count"), total_weight=("w", "sum"))
+                  .sort_values("region")
+                  .reset_index(drop=True)
+              )
+        triggers: values
+      - answer: |
+          import pandas as pd
+
+
+          def region_summary(df: pd.DataFrame) -> pd.DataFrame:
+              """Keeps region as the index."""
+              return df.groupby("region").agg(n=("w", "size"), recorded=("w", "count"), total_weight=("w", "sum"))
+        triggers: columns
+    hints:
+      - "`df.groupby(\"region\", as_index=False)` keeps region as a column."
+      - "`.agg(n=(\"w\", \"size\"), recorded=(\"w\", \"count\"), total_weight=(\"w\", \"sum\"))`."
+      - "Finish with `.sort_values(\"region\").reset_index(drop=True)`."
+    explanation: |
+      `size` counts rows, `count` counts non-missing values and `sum` skips missing values. Named aggregations produce all three in one pass.
+
+  - id: B0-L2-E5
+    type: spot_bug
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      For a frame where the only in-scope row has weight 3.0, this function returns two rows, 2.0 and 3.0. Tap the line with the bug, then fix it.
+    code: |
+      import pandas as pd
+
+
+      def in_scope_positive(df: pd.DataFrame) -> pd.DataFrame:
+          """Rows that are in scope and have a positive weight."""
+          return df[df["w"] > 0 & df["in_scope"]]
+    bug_lines: [6]
+    fix_checker:
+      kind: python
+      setup: |
+        import pandas as pd
+      tests:
+        - id: both_conditions
+          code: |
+            df = pd.DataFrame({"w": [2.0, 3.0, 0.0], "in_scope": [False, True, True]})
+            assert in_scope_positive(df)["w"].tolist() == [3.0]
+          message: "Keep rows that pass both conditions. Put each comparison in brackets."
+    fix_solution: |
+      import pandas as pd
+
+
+      def in_scope_positive(df: pd.DataFrame) -> pd.DataFrame:
+          """Rows that are in scope and have a positive weight."""
+          return df[(df["w"] > 0) & df["in_scope"]]
+    wrong_answers:
+      - lines: [5]
+        feedback: "The docstring describes the right behaviour. The code does not match it."
+    hints:
+      - "Which runs first, `>` or `&`?"
+      - "`&` binds tighter than `>`, so Python computes `0 & df[\"in_scope\"]` first."
+      - "Bracket the comparison: `(df[\"w\"] > 0) & df[\"in_scope\"]`."
+    explanation: |
+      `&` binds more tightly than `>`, so the line compares `w` with `0 & in_scope`, which is all zeros. The in-scope condition disappears without an error. Brackets fix it.
+
+recap:
+  - front: "Filter rows on two conditions"
+    back: "df[(df[\"w\"] > 0) & df[\"in_scope\"]]. Each comparison in brackets, & not and."
+  - front: "Count rows against count values"
+    back: "size counts rows, count counts non-missing values. sum and mean skip missing values."
+  - front: "Several results per group"
+    back: "df.groupby(\"region\", as_index=False).agg(n=(\"w\", \"size\"), total=(\"w\", \"sum\"))."
+  - front: "Join and keep every row"
+    back: "df.merge(other, on=\"key\", how=\"left\"). The default inner merge drops rows with no match."
+
+claims:
+  - claim: "groupby sum skips NaN; named aggregations with size, count and sum give int64, int64 and float64; a left merge keeps unmatched rows and an inner merge drops them; df[df.w > 0 & df.in_scope] silently ignores in_scope."
+    status: verified
+    source: "Run on pandas 3.0.6 and 3.0.2."

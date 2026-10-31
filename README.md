@@ -40,6 +40,7 @@ The `deploy` job in `.github/workflows/ci.yml` publishes `site/` after every gat
 | `site/` | The static app served by GitHub Pages, plus generated content and downloads |
 | `scripts/` | Build scripts: content bundle, handbook (PDF and Word), practicals |
 | `practice/` | Local pytest harness with a SparkSession and Delta Lake |
+| `labs/testing/` | The B19 testing lab: a small package to test, and a reference suite with 100% branch coverage |
 | `tests/` | Quality gates for every exercise, store unit tests, browser smoke test |
 | `reference/` | Your pipeline code and roadmap |
 
@@ -74,6 +75,10 @@ Some Track B lessons teach libraries that neither Pyodide nor the `dev` group in
 ## Laptop practice with Spark
 
 See `practice/README.md`. Short version: install Java 17 or 21, create a separate virtual environment, `pip install -e . --group spark`, then `pytest practice`. The Spark harness needs pandas 2.x, so it cannot share the `dev` environment, which uses pandas 3.
+
+## Testing lab
+
+Module B19 ends with a laptop lab in `labs/testing/`. Use the `dev` environment, `cd labs/testing`, then `pytest`. Write your tests in `labs/testing/tests/`, measure them with `pytest --cov=survey_stats --cov-branch --cov-report=term-missing`, and compare with `reference_tests/`. See `labs/testing/README.md`.
 
 ## Documents
 

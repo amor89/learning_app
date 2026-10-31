@@ -1,0 +1,6 @@
+# Settings for the B19 testing lab. Run pytest from this folder.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--strict-markers"
+markers = ["slow: takes more than a few seconds"]

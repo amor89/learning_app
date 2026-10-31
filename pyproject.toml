@@ -22,6 +22,7 @@ dev = [
     "ruff>=0.16,<0.17",
     "mypy>=2.3,<2.4",
     "pytest>=9,<10",
+    "pytest-cov>=7.1,<8",
     "pandas>=3.0,<3.1",
     "numpy>=2,<3",
     "scikit-learn>=1.9,<1.10",
@@ -63,7 +64,7 @@ ignore = ["N812"]
 [tool.mypy]
 strict = true
 python_version = "3.11"
-files = ["learnkit", "checkers", "scripts", "practice"]
+files = ["learnkit", "checkers", "scripts", "practice", "labs/testing/src"]
 exclude = ["practice/exercises/", "practice/capstone/before_pipeline.py", "practice/capstone/pr_review"]
 # Pygments and nbformat ship without full type hints.
 untyped_calls_exclude = ["pygments", "nbformat"]

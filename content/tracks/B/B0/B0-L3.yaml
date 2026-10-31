@@ -1,0 +1,330 @@
+id: B0-L3
+title: The statistics you need for this track
+
+concept: |
+  Survey and model results are estimates from a **sample**, used to say something about a **population**. Five ideas carry most of this track.
+
+  **Mean and spread.** The mean is the average. The standard deviation (SD) measures how far values sit from it. The sample SD divides by n - 1. Watch the defaults: NumPy 2's `np.std(x)` divides by n, while pandas 3's `Series.std()` divides by n - 1. For `[2, 4, 4, 4, 5, 5, 7, 9]` they give 2.0 and 2.138.
+
+  **Standard error (SE).** Another sample would give a slightly different estimate. The SE says by how much, on average:
+
+  - for a mean: `SD / sqrt(n)`,
+  - for a share p: `sqrt(p * (1 - p) / n)`.
+
+  A share of 50% from 1,000 people has an SE of about 0.0158, 1.6 points. Four times the sample halves the SE.
+
+  **Confidence interval.** A 95% interval is roughly the estimate plus or minus 1.96 SEs: 50% plus or minus 3.1 points. Lesson B8-L2 shows better intervals for small samples and shares near 0 or 100%.
+
+  **p-value.** It is the probability of a difference at least as large as the one you saw, if there were no true difference. It is not the probability that your hypothesis is true. A p-value of 0.03 means "this would be unusual if nothing were going on", nothing more.
+
+  **Effect size.** A tiny difference becomes "significant" in a huge sample. Always report how big the difference is, with its interval, next to any p-value.
+
+  Survey weights change all of these. Lesson B8-L1 shows how.
+
+why_it_matters: |
+  A monthly report flagged every brand whose awareness changed with p < 0.05. With 20,000 respondents a month, a change of 0.6 points was "significant", and the client reacted to noise-sized moves that no campaign could explain. Reporting each change with its interval, and agreeing in advance on the smallest change worth acting on, ended the false alarms.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import numpy as np
+
+      scores = np.array([2, 4, 4, 4, 5, 5, 7, 9])
+      sd = np.std(scores)
+      print("p < 0.05, so the campaign worked")
+    annotations:
+      - find: "sd = np.std(scores)"
+        note: "NumPy's default divides by n, the population SD, not the sample SD."
+      - find: 'print("p < 0.05, so the campaign worked")'
+        note: "A p-value says nothing about how big the effect is, or that the hypothesis is true."
+  strong:
+    code: |
+      import math
+
+      import numpy as np
+
+      scores = np.array([2, 4, 4, 4, 5, 5, 7, 9])
+      sd = np.std(scores, ddof=1)
+      se = sd / math.sqrt(len(scores))
+      low, high = scores.mean() - 1.96 * se, scores.mean() + 1.96 * se
+      print(f"mean {scores.mean():.2f}, 95% interval {low:.2f} to {high:.2f}")
+    annotations:
+      - find: "sd = np.std(scores, ddof=1)"
+        note: "ddof=1 divides by n - 1: the sample standard deviation."
+      - find: "se = sd / math.sqrt(len(scores))"
+        note: "The standard error of the mean."
+      - find: 'print(f"mean {scores.mean():.2f}, 95% interval {low:.2f} to {high:.2f}")'
+        note: "The estimate with its uncertainty, not a bare yes or no."
+  takeaway: |
+    Report an estimate with its standard error or interval, know which SD your library computes, and read a p-value for what it is.
+
+exercises:
+  - id: B0-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      An A/B test reports p = 0.03 for the difference in conversion. What does that mean?
+    options:
+      - {id: a, text: "There is a 3% chance that the new page is no better."}
+      - {id: b, text: "If the pages truly converted equally, a difference this large or larger would happen about 3% of the time."}
+      - {id: c, text: "The new page converts 3% better."}
+      - {id: d, text: "The result is 97% certain to be correct."}
+    answer: b
+    reasons:
+      - {id: r1, text: "A p-value is computed assuming no real difference, and measures how surprising the data would be then."}
+      - {id: r2, text: "A p-value is the probability that the hypothesis is false."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "A p-value is not the probability of a hypothesis. It assumes no difference and asks how unusual the data are."
+      - answer: c
+        feedback: "The p-value says nothing about the size of the difference. Report the effect and its interval."
+      - answer: d
+        feedback: "There is no such certainty in a p-value."
+      - answer: b|r2
+        feedback: "Right statement, wrong reason. The p-value is about the data, given no difference, not about the hypothesis."
+    hints:
+      - "What does the calculation assume?"
+      - "It assumes there is no real difference."
+      - "It measures how surprising the data would be then."
+    explanation: |
+      p = 0.03 says the observed difference would be unusual if there were no real difference. It does not give the probability of any hypothesis or the size of the effect.
+
+  - id: B0-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (NumPy 2, pandas 3.0)
+    code: |
+      import numpy as np
+      import pandas as pd
+
+      x = [2, 4, 4, 4, 5, 5, 7, 9]
+      print(np.std(x), round(pd.Series(x).std(), 3))
+    answer: |
+      2.0 2.138
+    accepted:
+      - "2.0 2.1380"
+    wrong_answers:
+      - answer: "2.0 2.0"
+        feedback: "pandas' std divides by n - 1 by default, the sample SD, so it is larger than NumPy's."
+      - answer: "2.138 2.138"
+        feedback: "NumPy's std divides by n by default. It gives 2.0 here."
+    hints:
+      - "Both compute a standard deviation. Do they divide by the same number?"
+      - "NumPy divides by n. pandas divides by n - 1."
+      - "The sum of squared deviations is 32, and n is 8."
+    explanation: |
+      The squared deviations sum to 32. NumPy divides by 8 (SD 2.0), pandas by 7 (SD 2.138). Pass `ddof=1` to NumPy for the sample SD.
+
+  - id: B0-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Compute the standard error of a share `p` from `n` respondents, then the lower end of a 95% interval.
+    template: |
+      se = math.sqrt(p * (1 - p) / [[g1]])
+      low = p - [[g2]] * se
+    gaps:
+      g1: {accepted: [n]}
+      g2: {accepted: ["1.96", "1.959964"]}
+    wrong_answers:
+      - answer: {g1: n, g2: "2.58"}
+        feedback: "2.58 gives a 99% interval. A 95% interval uses 1.96."
+      - answer: {g1: "n - 1", g2: "1.96"}
+        feedback: "The SE of a share divides p(1 - p) by n."
+    hints:
+      - "p(1 - p) divided by the sample size, then the square root."
+      - "The multiplier for 95%."
+      - "`n` and `1.96`."
+    explanation: |
+      The SE of a share is `sqrt(p(1 - p) / n)`. A 95% interval stretches 1.96 SEs either side of the estimate.
+
+  - id: B0-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `share_ci(successes: int, n: int, z: float = 1.96) -> tuple[float, float] | None`, the normal-approximation interval for a share. With `p = successes / n` and `se = sqrt(p * (1 - p) / n)`, return `(p - z * se, p + z * se)` clipped to [0, 1].
+
+      Return `None` when `n` is 0. Raise `ValueError` when `successes` is negative or above `n`.
+    starter: |
+      import math
+
+
+      def share_ci(successes, n, z=1.96):
+          p = successes / n
+          se = math.sqrt(p * (1 - p) / n)
+          return (p - z * se, p + z * se)
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: share_ci
+          typed: true
+          docstring: true
+          message: "Give share_ci type hints and a docstring."
+      tests:
+        - id: half
+          code: |
+            low, high = share_ci(500, 1000)
+            assert round(low, 3) == 0.469 and round(high, 3) == 0.531, (low, high)
+          message: "500 of 1,000 gives about (0.469, 0.531)."
+        - id: clipped
+          code: |
+            low, high = share_ci(1, 10)
+            assert low == 0.0 and round(high, 3) == 0.286, (low, high)
+            assert share_ci(10, 10) == (1.0, 1.0)
+          message: "Clip the interval to [0, 1]: 1 of 10 gives a lower end of 0.0, not a negative number."
+        - id: empty
+          code: |
+            assert share_ci(0, 0) is None
+          message: "Return None when n is 0, instead of dividing by zero."
+        - id: impossible
+          code: |
+            for bad in [(-1, 10), (11, 10)]:
+                try:
+                    share_ci(*bad)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(f"no ValueError for {bad}")
+          message: "Raise ValueError when successes is below 0 or above n."
+    solution: |
+      import math
+
+
+      def share_ci(successes: int, n: int, z: float = 1.96) -> tuple[float, float] | None:
+          """Normal-approximation confidence interval for a share.
+
+          Args:
+              successes: Number of successes, from 0 to n.
+              n: Sample size.
+              z: Normal multiplier, 1.96 for 95%.
+
+          Returns:
+              (lower, upper) clipped to [0, 1], or None when n is 0.
+
+          Raises:
+              ValueError: If successes is outside 0 to n.
+          """
+          if n == 0:
+              return None
+          if not 0 <= successes <= n:
+              raise ValueError(f"successes must be between 0 and {n}, got {successes}")
+          p = successes / n
+          se = math.sqrt(p * (1 - p) / n)
+          return max(0.0, p - z * se), min(1.0, p + z * se)
+    seeded_bugs:
+      - |
+        import math
+
+
+        def share_ci(successes: int, n: int, z: float = 1.96) -> tuple[float, float] | None:
+            """Forgets to clip."""
+            if n == 0:
+                return None
+            if not 0 <= successes <= n:
+                raise ValueError("bad successes")
+            p = successes / n
+            se = math.sqrt(p * (1 - p) / n)
+            return p - z * se, p + z * se
+      - |
+        import math
+
+
+        def share_ci(successes: int, n: int, z: float = 1.96) -> tuple[float, float] | None:
+            """Divides by n - 1."""
+            if n == 0:
+                return None
+            if not 0 <= successes <= n:
+                raise ValueError("bad successes")
+            p = successes / n
+            se = math.sqrt(p * (1 - p) / (n - 1))
+            return max(0.0, p - z * se), min(1.0, p + z * se)
+    wrong_answers:
+      - answer: |
+          import math
+
+
+          def share_ci(successes: int, n: int, z: float = 1.96) -> tuple[float, float] | None:
+              """Forgets to clip."""
+              if n == 0:
+                  return None
+              if not 0 <= successes <= n:
+                  raise ValueError("bad successes")
+              p = successes / n
+              se = math.sqrt(p * (1 - p) / n)
+              return p - z * se, p + z * se
+        triggers: clipped
+    hints:
+      - "Handle `n == 0` first, then check `0 <= successes <= n`."
+      - "`se = math.sqrt(p * (1 - p) / n)`."
+      - "Clip with `max(0.0, low)` and `min(1.0, high)`."
+    explanation: |
+      Guarding n and the count first, then clipping, gives an interval that never crashes or leaves [0, 1]. Lesson B8-L2 replaces this approximation with the Wilson interval, which behaves better near 0 and 1.
+
+  - id: B0-L3-E5
+    type: design
+    difficulty: 3
+    prompt: |
+      Match each question to the right tool.
+    slots:
+      - id: se_mean
+        label: "How precise is the mean score of 100 respondents with SD 4?"
+        options: &tools
+          - {id: sd_root_n, text: "SD / sqrt(n)"}
+          - {id: share_se, text: "sqrt(p(1 - p) / n)"}
+          - {id: interval, text: "Estimate plus or minus 1.96 SE"}
+          - {id: effect, text: "The size of the difference, with its interval"}
+        answer: sd_root_n
+      - id: se_share
+        label: "How precise is a 50% awareness share from 1,000 respondents?"
+        options: *tools
+        answer: share_se
+      - id: range
+        label: "Give a range that is likely to contain the true share"
+        options: *tools
+        answer: interval
+      - id: matters
+        label: "With p < 0.001 from 50,000 respondents, does the change matter?"
+        options: *tools
+        answer: effect
+    model_answer: |
+      - Standard error of a mean: SD / sqrt(n), here 4 / 10 = 0.4.
+      - Standard error of a share: sqrt(p(1 - p) / n), here about 0.016.
+      - A 95% interval: the estimate plus or minus 1.96 SE.
+      - Whether it matters: the size of the effect, which a tiny p-value in a big sample does not show.
+    wrong_answers:
+      - answer: {matters: interval}
+        feedback: "An interval helps, but the question is whether the size of the change matters. Look at the effect itself."
+      - answer: {se_share: sd_root_n}
+        feedback: "A share is a mean of 0s and 1s, but its SD comes from p itself: use sqrt(p(1 - p) / n)."
+    hints:
+      - "A mean or a share?"
+      - "A range or a precision?"
+      - "Significance is not size."
+    explanation: |
+      Use the SE formula that matches the estimate, turn it into an interval for a range, and judge importance by the size of the effect.
+
+recap:
+  - front: "Standard error of a mean and of a share"
+    back: "Mean: SD / sqrt(n). Share: sqrt(p(1 - p) / n). Four times the sample halves the SE."
+  - front: "A rough 95% interval"
+    back: "Estimate plus or minus 1.96 standard errors."
+  - front: "What a p-value is"
+    back: "The probability of a difference at least this large if there were no true difference. Not the probability that a hypothesis is true."
+  - front: "np.std against pandas std"
+    back: "np.std divides by n (population). Series.std divides by n - 1 (sample). Use np.std(x, ddof=1) for the sample SD."
+
+claims:
+  - claim: "np.std([2, 4, 4, 4, 5, 5, 7, 9]) is 2.0 and pd.Series(...).std() is 2.138; np.std with ddof=1 matches pandas."
+    status: verified
+    source: "Run on NumPy 2.4.6 with pandas 3.0.2 and 3.0.6."
+  - claim: "SE of a 50% share from 1,000 is 0.0158; from 4,000 it is 0.0079."
+    status: verified
+    source: "Computed in Python 3.11."

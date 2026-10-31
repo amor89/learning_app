@@ -13,6 +13,7 @@ checklist:
   - Items live in Git. Changes move through deployment pipelines.
   - Capacity use is monitored, and heavy jobs are scheduled off peak.
 modules:
+  - {id: C0, title: "Start here: foundations for Fabric", tags: [prereq], summary: "Data platform vocabulary, Power BI semantic models, and the Spark and SQL engines side by side."}
   - {id: C1, title: Fabric architecture, tags: [M16-18, current-work], summary: "Workspaces, capacities, items and OneLake as one logical lake."}
   - {id: C2, title: "Lakehouse, Warehouse and SQL analytics endpoint", tags: [M16-18, current-work], summary: "When to use each."}
   - {id: C3, title: Unifying datasets, tags: [M16-18, current-work], summary: "Shortcuts, mirroring (including Azure Databricks Unity Catalog) and avoiding duplicate copies."}

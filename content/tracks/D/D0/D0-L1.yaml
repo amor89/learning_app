@@ -1,0 +1,360 @@
+id: D0-L1
+title: Bugs, errors and failures, the words and the method
+
+concept: |
+  This track is about finding what is wrong in code, quickly and for certain. Start with three kinds of problem, from cheapest to most expensive.
+
+  - A **syntax error** stops Python before anything runs. It points at the line.
+  - An **exception** stops the program while it runs, with a traceback that names the error type and the line, such as `KeyError: 'R2'`.
+  - A **wrong result** raises nothing. The code finishes and reports the wrong number. These **silent bugs** cost most, because nobody knows to look.
+
+  Use precise words. A **defect** (bug) is the mistake in the code. A **failure** is what someone sees: a crash, or a total that is 3% too high. The **symptom** is where it shows. The **root cause** is the first place it went wrong, often far from the symptom.
+
+  Work through every bug with the same method:
+
+  1. **Reproduce** it, then shrink the input to the smallest one that still fails. Three rows beat three million.
+  2. **Read the evidence**: the last line of the traceback, or the first value that differs from what you expected.
+  3. **Form one hypothesis** that would explain everything you see.
+  4. **Test it** with one small check: an `assert`, a print of a single value, or the debugger (lesson D2-L1).
+  5. **Write a test** that fails because of the bug, so it cannot return unnoticed.
+  6. **Fix the root cause**, not the symptom, and watch the test pass.
+  7. **Look for the same mistake elsewhere.** Copied code copies bugs.
+
+  Two habits undo the method. Changing several things at once means you never learn which change mattered. Catching every exception and returning a default, such as `except Exception: return 0.0`, turns a loud failure into a silent one.
+
+why_it_matters: |
+  A weight loader caught every exception and returned 0.0 so that "the pipeline never breaks". When a supplier changed its file encoding, every read failed, every weight became 0.0, and the gold tables showed zero respondents for three regions. The pipeline reported success for a week. Without the catch-all, the first run would have stopped with a clear `UnicodeDecodeError` naming the file.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def mean_weight(path: str) -> float:
+          try:
+              values = [float(line) for line in open(path)]
+              return sum(values) / len(values)
+          except Exception:
+              return 0.0
+    annotations:
+      - find: "except Exception:"
+        note: "Catches everything: a missing file, a bad number, an empty file, a typo in the code."
+      - find: "return 0.0"
+        note: "A plausible default. The failure becomes a silent wrong result."
+  strong:
+    code: |
+      from pathlib import Path
+
+
+      def mean_weight(path: Path) -> float:
+          """Mean of the weights in a file with one number per line.
+
+          Raises:
+              ValueError: If the file holds no weights, or a line is not a number.
+          """
+          values = [float(line) for line in path.read_text().splitlines() if line.strip()]
+          if not values:
+              raise ValueError(f"no weights in {path}")
+          return sum(values) / len(values)
+    annotations:
+      - find: "values = [float(line) for line in path.read_text().splitlines() if line.strip()]"
+        note: "A bad line raises ValueError naming the text, and a missing file raises FileNotFoundError. Both are loud and specific."
+      - find: 'raise ValueError(f"no weights in {path}")'
+        note: "The empty case is handled on purpose, with a message that names the file."
+  takeaway: |
+    Reproduce small, read the evidence, test one hypothesis at a time, pin the bug with a failing test, fix the cause, and never silence an error with a default.
+
+exercises:
+  - id: D0-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A nightly job finishes without errors, but the gold table's weight total is 3% higher than the delivery's. What kind of problem is this?
+    options:
+      - {id: a, text: "A syntax error"}
+      - {id: b, text: "An exception"}
+      - {id: c, text: "A wrong result, a silent bug"}
+      - {id: d, text: "Not a bug, because nothing failed"}
+    answer: c
+    reasons:
+      - {id: r1, text: "The code ran to the end and produced a wrong number, with no error to point at it."}
+      - {id: r2, text: "Silent bugs are always caused by bad data."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "A syntax error stops the code before it runs. This job finished."
+      - answer: b
+        feedback: "An exception stops the run with a traceback. There was none."
+      - answer: d
+        feedback: "A wrong total is a failure, even when nothing crashed."
+      - answer: c|r2
+        feedback: "Right kind, wrong reason. Silent bugs come from code as often as from data."
+    hints:
+      - "Did anything stop the job?"
+      - "Is the result right?"
+      - "It ran and gave the wrong number."
+    explanation: |
+      Code that runs and reports the wrong number is a silent bug, the most expensive kind, because nothing tells you to look.
+
+  - id: D0-L1-E2
+    type: order
+    difficulty: 2
+    prompt: |
+      Put the debugging method in order.
+    items:
+      - {id: a, text: "Reproduce the failure and shrink the input to the smallest one that still fails."}
+      - {id: b, text: "Read the evidence: the last traceback line or the first wrong value."}
+      - {id: c, text: "Form one hypothesis that explains everything you see."}
+      - {id: d, text: "Test the hypothesis with one small check."}
+      - {id: e, text: "Write a test that fails because of the bug."}
+      - {id: f, text: "Fix the root cause and watch the test pass."}
+    answer: [a, b, c, d, e, f]
+    wrong_answers:
+      - answer: [b, c, d, e, f, a]
+        feedback: "Reproduce first. Evidence you cannot reproduce cannot confirm a fix."
+      - answer: [a, b, c, e, d, f]
+        feedback: "Test the hypothesis before you change code, or you may fix the wrong thing."
+      - answer: [a, b, c, d, f, e]
+        feedback: "Write the test first. A test written after the fix never proved it could fail."
+    hints:
+      - "You cannot study what you cannot make happen."
+      - "Evidence, then one idea, then a check of that idea."
+      - "The test must fail before the fix, so it comes first."
+    explanation: |
+      Reproduce, read, hypothesise and check. Then write a failing test, and fix the cause until it passes.
+
+  - id: D0-L1-E3
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      weights = {"R1": 1.0}
+      try:
+          print(weights["R2"])
+      except KeyError as err:
+          print("missing key:", err)
+    answer: |
+      missing key: 'R2'
+    wrong_answers:
+      - answer: "missing key: R2"
+        feedback: "A KeyError's message is the key's repr, so a string key prints in quotes."
+      - answer: "None"
+        feedback: "Indexing a dict with a missing key raises KeyError. Only `.get` returns None."
+    hints:
+      - "What happens when you index a dict with a key it does not have?"
+      - "The except block catches it and prints the error."
+      - "The error shows the key as Python writes it."
+    explanation: |
+      `weights["R2"]` raises `KeyError`, and the error prints as the key's repr, `'R2'`, which tells you exactly which key was missing.
+
+  - id: D0-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Step 1 of the method is to shrink a failing input. Write `minimise(rows: list[int], fails: Callable[[list[int]], bool]) -> list[int]`.
+
+      - Raise `ValueError` if `fails(rows)` is `False`: there is nothing to shrink.
+      - Otherwise, repeatedly try removing one element at a time, from the left. Whenever the shorter list still fails, keep it and start again.
+      - Stop when no single removal still fails, and return that list.
+
+      Keep the original order, and do not change `rows`.
+    starter: |
+      def minimise(rows, fails):
+          return rows
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: minimise
+          typed: true
+          docstring: true
+          message: "Give minimise type hints and a docstring. Import Callable from collections.abc."
+      tests:
+        - id: one_negative
+          code: |
+            out = minimise([3, -1, 4, -5], lambda rs: any(r < 0 for r in rs))
+            assert out == [-5], out
+          message: "For 'any negative value fails', [3, -1, 4, -5] shrinks to [-5] when you remove from the left and restart after each success."
+        - id: sum_rule
+          code: |
+            out = minimise([4, 1, 9, 2, 6], lambda rs: sum(rs) > 10)
+            assert out == [9, 6], out
+          message: "For 'sum above 10 fails', [4, 1, 9, 2, 6] shrinks to [9, 6]. Restart from the left after each removal."
+        - id: no_failure
+          code: |
+            try:
+                minimise([1, 2], lambda rs: False)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError when the input does not fail")
+          message: "Raise ValueError when the full input does not fail."
+        - id: input_unchanged
+          code: |
+            rows = [3, -1, 4]
+            minimise(rows, lambda rs: any(r < 0 for r in rs))
+            assert rows == [3, -1, 4], rows
+          message: "Work on a copy: leave the list passed in unchanged."
+    solution: |
+      from collections.abc import Callable
+
+
+      def minimise(rows: list[int], fails: Callable[[list[int]], bool]) -> list[int]:
+          """Shrink a failing input by removing one element at a time.
+
+          Args:
+              rows: An input that makes fails return True.
+              fails: Returns True when the bug shows on the given input.
+
+          Returns:
+              A smaller list that still fails, where no single removal still fails.
+
+          Raises:
+              ValueError: If the full input does not fail.
+          """
+          if not fails(rows):
+              raise ValueError("the input does not fail, so there is nothing to shrink")
+          current = list(rows)
+          shrunk = True
+          while shrunk:
+              shrunk = False
+              for i in range(len(current)):
+                  candidate = current[:i] + current[i + 1 :]
+                  if fails(candidate):
+                      current = candidate
+                      shrunk = True
+                      break
+          return current
+    seeded_bugs:
+      - |
+        from collections.abc import Callable
+
+
+        def minimise(rows: list[int], fails: Callable[[list[int]], bool]) -> list[int]:
+            """Removes in place from the caller's list."""
+            if not fails(rows):
+                raise ValueError("does not fail")
+            shrunk = True
+            while shrunk:
+                shrunk = False
+                for i in range(len(rows)):
+                    removed = rows.pop(i)
+                    if fails(rows):
+                        shrunk = True
+                        break
+                    rows.insert(i, removed)
+            return rows
+      - |
+        from collections.abc import Callable
+
+
+        def minimise(rows: list[int], fails: Callable[[list[int]], bool]) -> list[int]:
+            """Never checks that the input fails."""
+            current = list(rows)
+            shrunk = True
+            while shrunk:
+                shrunk = False
+                for i in range(len(current)):
+                    candidate = current[:i] + current[i + 1 :]
+                    if fails(candidate):
+                        current = candidate
+                        shrunk = True
+                        break
+            return current
+    wrong_answers:
+      - answer: |
+          from collections.abc import Callable
+
+
+          def minimise(rows: list[int], fails: Callable[[list[int]], bool]) -> list[int]:
+              """Removes in place from the caller's list."""
+              if not fails(rows):
+                  raise ValueError("does not fail")
+              shrunk = True
+              while shrunk:
+                  shrunk = False
+                  for i in range(len(rows)):
+                      removed = rows.pop(i)
+                      if fails(rows):
+                          shrunk = True
+                          break
+                      rows.insert(i, removed)
+              return rows
+        triggers: input_unchanged
+    hints:
+      - "Check `fails(rows)` first, then work on `current = list(rows)`."
+      - "`candidate = current[:i] + current[i + 1:]` is the list without element i."
+      - "Loop while the last pass removed something. After each successful removal, break and start again from the left."
+    explanation: |
+      Repeated single removals keep the failing behaviour while the input shrinks. A small failing input makes the evidence easy to read and the test easy to write.
+
+  - id: D0-L1-E5
+    type: spot_bug
+    difficulty: 3
+    language: python
+    prompt: |
+      A file of weights with one corrupted line makes this function report a total of 0.0, and the pipeline carries on. Tap the **two** lines that turn the failure into a silent wrong result, then fix the function so bad input raises.
+    code: |
+      def load_total(lines: list[str]) -> float:
+          """Total weight from the lines of a delivery file."""
+          try:
+              return sum(float(line) for line in lines)
+          except Exception:
+              return 0.0
+    bug_lines: [5, 6]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_catch_all
+          kind: forbids_pattern
+          pattern: "except\\s+Exception|except\\s*:"
+          message: "Do not catch every exception. Let a bad line raise."
+      tests:
+        - id: total
+          code: |
+            assert load_total(["1.5", "2.5"]) == 4.0
+          message: "Good lines must still add up."
+        - id: bad_line_raises
+          code: |
+            try:
+                load_total(["1.5", "n/a"])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("a corrupted line did not raise")
+          message: "A line that is not a number must raise ValueError, not return a default."
+    fix_solution: |
+      def load_total(lines: list[str]) -> float:
+          """Total weight from the lines of a delivery file."""
+          return sum(float(line) for line in lines)
+    wrong_answers:
+      - lines: [4]
+        feedback: "Summing the parsed lines is correct. The problem is what happens when parsing fails."
+      - lines: [6]
+        feedback: "Returning 0.0 is half of it. Which line catches the error in the first place?"
+      - lines: [5]
+        feedback: "Catching everything is half of it. Which line hides the failure behind a plausible number?"
+    hints:
+      - "What happens when `float(\"n/a\")` runs?"
+      - "Where does that error go?"
+      - "The catch-all and the default it returns."
+    explanation: |
+      `except Exception` swallows the ValueError, and `return 0.0` replaces it with a believable number. Remove both, so a corrupted file stops the run with a message naming the bad text.
+
+recap:
+  - front: "Three kinds of problem, cheapest first"
+    back: "Syntax error (nothing runs), exception (crash with a traceback), wrong result (silent bug)."
+  - front: "Defect, failure, root cause"
+    back: "Defect: the mistake in code. Failure: what someone sees. Root cause: the first place it went wrong."
+  - front: "The debugging method"
+    back: "Reproduce small, read the evidence, one hypothesis, one check, a failing test, fix the cause, look for the same mistake elsewhere."
+  - front: "Why except Exception: return 0.0 is dangerous"
+    back: "It turns a loud, specific failure into a silent wrong result."
+
+claims:
+  - claim: "A missing dict key raises KeyError whose message is the key's repr ('R2'); float(\"n/a\") raises ValueError."
+    status: verified
+    source: "Run on Python 3.11 and 3.13."

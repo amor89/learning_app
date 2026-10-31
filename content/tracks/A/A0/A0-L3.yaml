@@ -1,0 +1,294 @@
+id: A0-L3
+title: The lakehouse map, Databricks, Unity Catalog, Delta and medallion layers
+
+concept: |
+  Track A uses a handful of Databricks words on every page. This lesson places each one.
+
+  **Workspace, notebooks, compute, jobs.** You work in a **workspace**, writing code in **notebooks**. Code runs on **compute**: **serverless** compute that Databricks manages for you, or a cluster you configure. Databricks Free Edition offers serverless compute only. A **job** runs notebooks on a schedule, with parameters (lesson A10-L2).
+
+  **Unity Catalog** organises data and permissions with three-level names, `catalog.schema.table`:
+
+  - a **catalog** per environment, such as `research_dev` and `research_prod`,
+  - a **schema** per layer, such as `research_silver`,
+  - a **table**, such as `nat_respondents`.
+
+  **Volumes** hold files, such as raw delivery CSVs, under the same names and permissions. Grants go to groups, never to individual users (lesson A4-L2).
+
+  **Delta tables.** A table created `USING DELTA`, the Databricks default, is a folder of Parquet data files plus a transaction log, `_delta_log`. Each write adds one numbered JSON commit to the log, so the table has versions 0, 1, 2 and so on. `DESCRIBE HISTORY t` lists them, and `SELECT * FROM t VERSION AS OF 1` reads an older one (lesson A3-L3). Readers never see a half-finished write.
+
+  **Medallion layers** give each table one job:
+
+  - **Bronze** keeps every delivery as received, plus audit columns: `nat_raw`.
+  - **Silver** has clean names and types and one row per respondent per wave: `nat_respondents`.
+  - **Gold** holds business-ready aggregates with a stated grain: `nat_metrics`.
+
+  Data moves forward only. A fix in silver logic means rebuilding silver from bronze, never editing bronze. Module A2 sets the contract for each layer.
+
+why_it_matters: |
+  Two analysts both wrote to a table called `respondents`, one in the development catalog and one in production, because their notebooks used two-part names and different default catalogs. Production silver received a week of test rows before anyone noticed. Three-level names, with the catalog stated explicitly or set from a job parameter, make the target impossible to mistake.
+
+worked_example:
+  language: sql
+  weak:
+    code: |
+      CREATE TABLE respondents AS SELECT * FROM csv.`/Users/anna/w14.csv`;
+      UPDATE respondents SET final_weight = 1.0 WHERE final_weight IS NULL;
+    annotations:
+      - find: "CREATE TABLE respondents AS SELECT * FROM csv.`/Users/anna/w14.csv`;"
+        note: "A one-part name lands in whatever catalog and schema are current, read from a personal folder."
+      - find: "UPDATE respondents SET final_weight = 1.0 WHERE final_weight IS NULL;"
+        note: "Edits the only copy of the delivery in place, so the original values are lost."
+  strong:
+    code: |
+      -- Bronze: the delivery as received, from a governed volume
+      CREATE TABLE IF NOT EXISTS research_prod.research_bronze.nat_raw
+      AS SELECT *, current_timestamp() AS ingestion_timestamp
+      FROM csv.`/Volumes/research_prod/landing/deliveries/w14.csv`;
+
+      -- Every write is a version you can inspect
+      DESCRIBE HISTORY research_prod.research_bronze.nat_raw;
+    annotations:
+      - find: "CREATE TABLE IF NOT EXISTS research_prod.research_bronze.nat_raw"
+        note: "Catalog, schema and table spelled out: production, bronze layer, the tracker's raw table."
+      - find: "FROM csv.`/Volumes/research_prod/landing/deliveries/w14.csv`;"
+        note: "Files live in a Unity Catalog volume, with the same permissions as tables."
+      - find: "DESCRIBE HISTORY research_prod.research_bronze.nat_raw;"
+        note: "The Delta log shows every version, who wrote it and what changed."
+  takeaway: |
+    Name every table in full, keep files in volumes, let Delta keep versions, and move data forward from bronze to silver to gold.
+
+exercises:
+  - id: A0-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      In `research_prod.research_silver.nat_respondents`, what is `research_silver`?
+    options:
+      - {id: a, text: "The catalog"}
+      - {id: b, text: "The schema"}
+      - {id: c, text: "The table"}
+      - {id: d, text: "The workspace"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Unity Catalog names run catalog.schema.table, so the middle part is the schema."}
+      - {id: r2, text: "Names containing silver are always schemas."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The catalog comes first: research_prod, the production environment."
+      - answer: c
+        feedback: "The table comes last: nat_respondents."
+      - answer: d
+        feedback: "A workspace is where you work. It is not part of a table name."
+      - answer: b|r2
+        feedback: "Right part, wrong reason. Position decides: catalog.schema.table."
+    hints:
+      - "Three parts, three levels."
+      - "catalog.schema.table."
+      - "The middle one."
+    explanation: |
+      Unity Catalog names are `catalog.schema.table`. Here the catalog is the environment, the schema is the layer and the table is the tracker's silver table.
+
+  - id: A0-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: sql
+    prompt: |
+      These statements run in order on a new Delta table. What does the last query return?
+    code: |
+      CREATE TABLE t (id INT) USING DELTA;   -- version 0
+      INSERT INTO t VALUES (1);              -- version 1
+      INSERT INTO t VALUES (2);              -- version 2
+      SELECT id FROM t VERSION AS OF 1;
+    answer: |
+      1
+    wrong_answers:
+      - answer: |
+          1
+          2
+        feedback: "Version 1 is the table after the first insert. The second insert made version 2."
+      - answer: "2"
+        feedback: "VERSION AS OF 1 reads the table as it was after the first insert, which held only 1."
+    hints:
+      - "Each statement that changes the table makes one version."
+      - "What did the table hold at version 1?"
+      - "Only the first insert had run."
+    explanation: |
+      Version 1 is the table right after the first insert, so it holds the single row with id 1.
+
+  - id: A0-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Name the NAT tracker's tables by the team convention.
+    template: |
+      bronze: research_prod.research_bronze.nat_[[g1]]
+      silver: research_prod.research_silver.nat_[[g2]]
+      gold:   research_prod.research_gold.nat_[[g3]]
+    gaps:
+      g1: {accepted: [raw]}
+      g2: {accepted: [respondents]}
+      g3: {accepted: [metrics]}
+    wrong_answers:
+      - answer: {g1: bronze, g2: silver, g3: gold}
+        feedback: "The layer is already in the schema name. The table name says what the table holds: raw, respondents, metrics."
+    hints:
+      - "Bronze holds the deliveries as received."
+      - "Silver holds one row per respondent per wave."
+      - "`raw`, `respondents`, `metrics`."
+    explanation: |
+      The convention is `[tracker]_raw`, `[tracker]_respondents` and `[tracker]_metrics`, so a table's name says what it holds and the schema says its layer.
+
+  - id: A0-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `parse_table_name(name: str) -> tuple[str, str, str]` for a job that must only ever write to fully named tables. Split the name on dots and return `(catalog, schema, table)`. Raise `ValueError` naming the input when there are not exactly three parts, or when any part is empty.
+    starter: |
+      def parse_table_name(name):
+          return tuple(name.split("."))
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: parse_table_name
+          typed: true
+          docstring: true
+          message: "Give parse_table_name type hints and a docstring."
+      tests:
+        - id: three_parts
+          code: |
+            assert parse_table_name("research_prod.research_silver.nat_respondents") == ("research_prod", "research_silver", "nat_respondents")
+          message: "Return the catalog, schema and table as a tuple of three strings."
+        - id: too_few
+          code: |
+            for bad in ["nat_respondents", "research_silver.nat_respondents"]:
+                try:
+                    parse_table_name(bad)
+                except ValueError as err:
+                    assert bad in str(err), str(err)
+                else:
+                    raise AssertionError(f"no ValueError for {bad!r}")
+          message: "Raise ValueError naming the input when the name has fewer than three parts."
+        - id: too_many_or_empty
+          code: |
+            for bad in ["a.b.c.d", "research_prod..nat_respondents", ".b.c"]:
+                try:
+                    parse_table_name(bad)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(f"no ValueError for {bad!r}")
+          message: "Raise ValueError for more than three parts, or for an empty part."
+    solution: |
+      def parse_table_name(name: str) -> tuple[str, str, str]:
+          """Split a Unity Catalog table name into catalog, schema and table.
+
+          Args:
+              name: A name such as research_prod.research_silver.nat_respondents.
+
+          Returns:
+              (catalog, schema, table).
+
+          Raises:
+              ValueError: If the name does not have exactly three non-empty parts.
+          """
+          parts = name.split(".")
+          if len(parts) != 3 or any(part == "" for part in parts):
+              raise ValueError(f"expected catalog.schema.table, got {name!r}")
+          catalog, schema, table = parts
+          return catalog, schema, table
+    seeded_bugs:
+      - |
+        def parse_table_name(name: str) -> tuple[str, str, str]:
+            """Accepts empty parts."""
+            parts = name.split(".")
+            if len(parts) != 3:
+                raise ValueError(f"expected catalog.schema.table, got {name!r}")
+            return parts[0], parts[1], parts[2]
+      - |
+        def parse_table_name(name: str) -> tuple[str, str, str]:
+            """Error message does not name the input."""
+            parts = name.split(".")
+            if len(parts) != 3 or "" in parts:
+                raise ValueError("bad name")
+            return parts[0], parts[1], parts[2]
+    wrong_answers:
+      - answer: |
+          def parse_table_name(name: str) -> tuple[str, str, str]:
+              """Accepts empty parts."""
+              parts = name.split(".")
+              if len(parts) != 3:
+                  raise ValueError(f"expected catalog.schema.table, got {name!r}")
+              return parts[0], parts[1], parts[2]
+        triggers: too_many_or_empty
+    hints:
+      - "`parts = name.split(\".\")`."
+      - "Check `len(parts) != 3` and whether any part is an empty string."
+      - "Put the name in the message: `f\"expected catalog.schema.table, got {name!r}\"`."
+    explanation: |
+      A job that refuses anything but a full, three-part name can never write to whatever catalog happens to be the default.
+
+  - id: A0-L3-E5
+    type: design
+    difficulty: 3
+    prompt: |
+      Place each item for the NAT tracker.
+    slots:
+      - id: file
+        label: "The supplier's delivery file, w14.csv, exactly as sent"
+        options: &places
+          - {id: volume, text: "A Unity Catalog volume"}
+          - {id: bronze, text: "Bronze table nat_raw"}
+          - {id: silver, text: "Silver table nat_respondents"}
+          - {id: gold, text: "Gold table nat_metrics"}
+        answer: volume
+      - id: raw_rows
+        label: "Every row of every delivery, with ingestion_id and source_file"
+        options: *places
+        answer: bronze
+      - id: clean
+        label: "One typed row per respondent per wave, latest delivery only"
+        options: *places
+        answer: silver
+      - id: agg
+        label: "Weighted reach by wave and region"
+        options: *places
+        answer: gold
+    model_answer: |
+      - Files as sent: a volume.
+      - Rows as received, with audit columns: bronze.
+      - Clean, deduplicated respondents: silver.
+      - Business-ready aggregates: gold.
+    wrong_answers:
+      - answer: {raw_rows: silver}
+        feedback: "Silver keeps one row per respondent per wave. Every delivered row, duplicates included, belongs in bronze."
+      - answer: {clean: gold}
+        feedback: "Gold holds aggregates. Clean respondent-level rows are silver."
+    hints:
+      - "A file is not a table."
+      - "As received, then clean, then aggregated."
+      - "Volume, bronze, silver, gold."
+    explanation: |
+      Files sit in a volume, and each table layer has one job: bronze as received, silver clean, gold aggregated.
+
+recap:
+  - front: "Unity Catalog name"
+    back: "catalog.schema.table, such as research_prod.research_silver.nat_respondents. Files live in volumes."
+  - front: "What makes a Delta table"
+    back: "Parquet data files plus _delta_log, where each write adds a numbered commit: versions 0, 1, 2."
+  - front: "Read an older version of a table"
+    back: "SELECT * FROM t VERSION AS OF 1. DESCRIBE HISTORY t lists the versions."
+  - front: "The three medallion layers"
+    back: "Bronze: as received, with audit columns. Silver: clean, one row per key. Gold: aggregates with a stated grain."
+
+claims:
+  - claim: "A Delta table's _delta_log holds one JSON commit per write (00000000000000000000.json, ...); DESCRIBE HISTORY lists versions 0, 1, 2 after a create and two inserts; VERSION AS OF 1 returns the first inserted row."
+    status: verified
+    source: "Run on Spark 4.0.4 with delta-spark 4.0.1 locally."
+  - claim: "Databricks Free Edition offers serverless compute only."
+    status: verified
+    source: "docs.databricks.com/aws/en/getting-started/free-edition-limitations (checked 2026-09-25, VERSIONS.md)."

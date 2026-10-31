@@ -1,0 +1,452 @@
+id: B19-L2
+title: Fixtures, shared setup without shared state
+
+concept: |
+  A **fixture** is a function decorated with `@pytest.fixture`. A test asks for it by naming it as a parameter, and pytest calls the fixture and passes in the result:
+
+  ```python
+  @pytest.fixture
+  def respondents() -> pd.DataFrame:
+      return pd.DataFrame({"respondent_id": ["R1", "R2"], "final_weight": [1.0, 3.0]})
+
+
+  def test_total_weight(respondents: pd.DataFrame) -> None:
+      assert respondents["final_weight"].sum() == 4.0
+  ```
+
+  By default a fixture runs once **per test**, so every test gets a fresh object. A test can change it without touching any other test.
+
+  Use `yield` when something must be cleaned up. Code before `yield` is setup. Code after it is teardown, and pytest runs it even when the test fails.
+
+  `scope="module"` or `scope="session"` builds the object once and shares it. Use that only for things that are expensive and that no test changes, such as the SparkSession in lesson A9-L1. A shared object that one test changes makes results depend on the order tests run in.
+
+  Put fixtures that several files use in `conftest.py`. Tests in that folder and its subfolders can use them without an import.
+
+  pytest ships built-in fixtures. `tmp_path` gives each test a fresh temporary directory as a `pathlib.Path`. `monkeypatch` changes settings and undoes the change afterwards (lesson B19-L7).
+
+  When tests need many slightly different inputs, write a **factory fixture**. It returns a function that builds the data, with defaults for everything, so each test states only what matters to it:
+
+  ```python
+  @pytest.fixture
+  def make_respondents():
+      def make(weights: list[float]) -> pd.DataFrame:
+          ids = [f"R{i}" for i in range(1, len(weights) + 1)]
+          return pd.DataFrame({"respondent_id": ids, "final_weight": weights})
+      return make
+  ```
+
+why_it_matters: |
+  A QA test suite shared one session-scoped DataFrame of 500 respondents across 40 tests. One test capped the weights in place to check the cap function. On a laptop the tests ran in file order and passed. In CI a plugin ran them in random order, and three weight-total tests failed about one run in four. The team spent two days calling the failures "flaky" before they found the in-place change. Function scope fixed it in one line.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import pandas as pd
+
+      RESPONDENTS = pd.DataFrame({"respondent_id": ["R1", "R2"], "final_weight": [1.0, 3.0]})
+
+
+      def test_cap_weights():
+          RESPONDENTS.loc[RESPONDENTS["final_weight"] > 2, "final_weight"] = 2.0
+          assert RESPONDENTS["final_weight"].max() == 2.0
+
+
+      def test_total_weight():
+          assert RESPONDENTS["final_weight"].sum() == 4.0
+    annotations:
+      - find: 'RESPONDENTS = pd.DataFrame({"respondent_id": ["R1", "R2"], "final_weight": [1.0, 3.0]})'
+        note: "One module-level frame, shared by every test in the file."
+      - find: 'RESPONDENTS.loc[RESPONDENTS["final_weight"] > 2, "final_weight"] = 2.0'
+        note: "Changes the shared frame in place. Every later test sees 2.0 instead of 3.0."
+      - find: 'assert RESPONDENTS["final_weight"].sum() == 4.0'
+        note: "Passes alone, fails after test_cap_weights: a test that depends on order."
+  strong:
+    code: |
+      import pandas as pd
+      import pytest
+
+
+      @pytest.fixture
+      def respondents() -> pd.DataFrame:
+          return pd.DataFrame({"respondent_id": ["R1", "R2"], "final_weight": [1.0, 3.0]})
+
+
+      def test_cap_weights(respondents: pd.DataFrame) -> None:
+          capped = cap_weights(respondents, cap=2.0)
+          assert capped["final_weight"].max() == 2.0
+
+
+      def test_total_weight(respondents: pd.DataFrame) -> None:
+          assert respondents["final_weight"].sum() == 4.0
+    annotations:
+      - find: "@pytest.fixture"
+        note: "Function scope by default: a fresh frame for every test."
+      - find: "def test_cap_weights(respondents: pd.DataFrame) -> None:"
+        note: "The test asks for the fixture by naming it as a parameter."
+      - find: 'capped = cap_weights(respondents, cap=2.0)'
+        note: "The function under test returns a new frame. Nothing shared changes."
+  takeaway: |
+    Fixtures give each test fresh data by default. Share a fixture only when it is expensive and nothing changes it.
+
+exercises:
+  - id: B19-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A fixture returns a three-row DataFrame. Several tests change values in it. Which scope should it have?
+    options:
+      - {id: a, text: "The default, function scope"}
+      - {id: b, text: "`scope=\"module\"`"}
+      - {id: c, text: "`scope=\"session\"`"}
+      - {id: d, text: "A module-level variable instead of a fixture"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Each test gets its own fresh frame, so one test's changes cannot reach another."}
+      - {id: r2, text: "Function scope makes tests run faster."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Module scope shares one frame across the file. A change in one test leaks into the next."
+      - answer: c
+        feedback: "Session scope shares one frame across the whole run. Save it for expensive, read-only objects."
+      - answer: d
+        feedback: "A module-level variable is shared state, the problem fixtures solve."
+      - answer: a|r2
+        feedback: "Right scope, wrong reason. A three-row frame is cheap either way. Isolation is the point."
+    hints:
+      - "What happens to a shared object when one test changes it?"
+      - "Which scope builds a new object for every test?"
+      - "The default."
+    explanation: |
+      Function scope gives every test its own object. Wider scopes are for expensive objects that no test changes.
+
+  - id: B19-L2-E2
+    type: order
+    difficulty: 2
+    prompt: |
+      `conftest.py` holds this fixture. `test_fix.py` has two tests that both use it and print their own names. You run `pytest -s tests/test_fix.py` (`-s` shows prints). Put the printed lines in order.
+
+      ```python
+      @pytest.fixture
+      def weights():
+          print("setup")
+          yield [1.0, 2.0]
+          print("teardown")
+
+
+      def test_sum(weights):
+          print("test_sum")
+          assert sum(weights) == 3.0
+
+
+      def test_len(weights):
+          print("test_len")
+          assert len(weights) == 2
+      ```
+    items:
+      - {id: a, text: "setup (first time)"}
+      - {id: b, text: "test_sum"}
+      - {id: c, text: "teardown (first time)"}
+      - {id: d, text: "setup (second time)"}
+      - {id: e, text: "test_len"}
+      - {id: f, text: "teardown (second time)"}
+    answer: [a, b, c, d, e, f]
+    wrong_answers:
+      - answer: [a, b, e, c, d, f]
+        feedback: "A function-scoped fixture is torn down after each test and built again for the next."
+      - answer: [a, d, b, e, c, f]
+        feedback: "pytest builds a function-scoped fixture right before each test, not all at the start."
+    hints:
+      - "The fixture has function scope."
+      - "Code after `yield` runs when that test finishes."
+      - "Setup, test, teardown, then the same again."
+    explanation: |
+      For each test, pytest runs the code before `yield`, runs the test, then runs the code after `yield`.
+
+  - id: B19-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Open one DuckDB connection for all the tests in a file, and close it after the last one.
+    template: |
+      @pytest.[[g1]](scope="[[g2]]")
+      def con():
+          connection = duckdb.connect()
+          [[g3]] connection
+          connection.close()
+    gaps:
+      g1: {accepted: [fixture]}
+      g2: {accepted: [module]}
+      g3: {accepted: [yield]}
+    wrong_answers:
+      - answer: {g1: fixture, g2: session, g3: yield}
+        feedback: "Session scope shares the connection across every file in the run. The task asks for one per file: module scope."
+      - answer: {g1: fixture, g2: module, g3: return}
+        feedback: "`return` ends the function, so `connection.close()` never runs. `yield` hands over the value and resumes for teardown."
+    hints:
+      - "The decorator that makes a fixture."
+      - "One per file is one per module."
+      - "Hand the value over and come back later for teardown."
+    explanation: |
+      `@pytest.fixture(scope="module")` builds one connection per file. `yield` gives it to the tests, and the line after it runs once they finish.
+
+  - id: B19-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas, pytest]
+    prompt: |
+      Replace the shared module-level frame with a factory fixture.
+
+      - `make_respondents` is a fixture that returns a function `make(weights, in_scope=None)`. It builds a new DataFrame with `respondent_id` (`"R1"`, `"R2"`, ...), `final_weight` (the weights, as floats) and `in_scope` (the given booleans, or all `True` when `in_scope` is `None`).
+      - `test_in_scope_weight_skips_out_of_scope(make_respondents)` builds two rows with weights 1.0 and 3.0, where only the first is in scope, and asserts that `in_scope_weight(df)` is 1.0.
+    starter: |
+      import pandas as pd
+      import pytest
+
+
+      def in_scope_weight(df: pd.DataFrame) -> float:
+          """Total final_weight of in-scope rows."""
+          return float(df.loc[df["in_scope"], "final_weight"].sum())
+
+
+      RESPONDENTS = pd.DataFrame(
+          {"respondent_id": ["R1", "R2"], "final_weight": [1.0, 3.0], "in_scope": [True, False]}
+      )
+
+
+      def test_in_scope_weight_skips_out_of_scope():
+          assert in_scope_weight(RESPONDENTS) == 1.0
+    checker:
+      kind: python
+      setup: |
+        def _good(df):
+            return float(df.loc[df["in_scope"], "final_weight"].sum())
+
+        def _ignores_scope(df):
+            return float(df["final_weight"].sum())
+
+        def _factory():
+            return make_respondents.__wrapped__()
+      ast_rules:
+        - id: fixture_exists
+          kind: requires_function
+          name: make_respondents
+          message: "Define the fixture make_respondents."
+        - id: decorated
+          kind: requires_pattern
+          pattern: "@pytest\\.fixture"
+          message: "Decorate make_respondents with @pytest.fixture."
+        - id: test_exists
+          kind: requires_function
+          name: test_in_scope_weight_skips_out_of_scope
+          message: "Define test_in_scope_weight_skips_out_of_scope with a make_respondents parameter."
+      tests:
+        - id: builds_frame
+          code: |
+            import pandas as pd
+            make = _factory()
+            df = make([1.0, 2.0])
+            assert list(df.columns) == ["respondent_id", "final_weight", "in_scope"], list(df.columns)
+            assert df["respondent_id"].tolist() == ["R1", "R2"]
+            assert df["final_weight"].dtype == "float64"
+            assert df["in_scope"].tolist() == [True, True]
+          message: "make([1.0, 2.0]) must give columns respondent_id, final_weight and in_scope, with IDs R1, R2, float weights and in_scope all True."
+        - id: uses_in_scope
+          code: |
+            make = _factory()
+            df = make([5.0, 1.0], in_scope=[False, True])
+            assert df["in_scope"].tolist() == [False, True]
+          message: "Pass the in_scope list through when it is given."
+        - id: fresh_frames
+          code: |
+            make = _factory()
+            first = make([1.0])
+            first.loc[0, "final_weight"] = 99.0
+            assert make([1.0])["final_weight"].tolist() == [1.0]
+          message: "Each call must build a new frame, so a change to one never reaches another."
+        - id: test_passes_good
+          code: |
+            in_scope_weight = _good
+            test_in_scope_weight_skips_out_of_scope(_factory())
+          message: "Your test must pass for a correct in_scope_weight."
+        - id: test_catches_bug
+          code: |
+            in_scope_weight = _ignores_scope
+            try:
+                test_in_scope_weight_skips_out_of_scope(_factory())
+            except AssertionError:
+                pass
+            else:
+                raise AssertionError("the test passed when out-of-scope rows were counted")
+          message: "Your test must fail when in_scope_weight also counts the out-of-scope row. Mark the 3.0 row out of scope and assert 1.0."
+    solution: |
+      import pandas as pd
+      import pytest
+
+
+      def in_scope_weight(df: pd.DataFrame) -> float:
+          """Total final_weight of in-scope rows."""
+          return float(df.loc[df["in_scope"], "final_weight"].sum())
+
+
+      @pytest.fixture
+      def make_respondents():
+          """Factory for small respondent frames with sensible defaults."""
+
+          def make(weights: list[float], in_scope: list[bool] | None = None) -> pd.DataFrame:
+              ids = [f"R{i}" for i in range(1, len(weights) + 1)]
+              flags = in_scope if in_scope is not None else [True] * len(weights)
+              return pd.DataFrame(
+                  {
+                      "respondent_id": ids,
+                      "final_weight": [float(w) for w in weights],
+                      "in_scope": flags,
+                  }
+              )
+
+          return make
+
+
+      def test_in_scope_weight_skips_out_of_scope(make_respondents) -> None:
+          df = make_respondents([1.0, 3.0], in_scope=[True, False])
+          assert in_scope_weight(df) == 1.0
+    seeded_bugs:
+      - |
+        import pandas as pd
+        import pytest
+
+
+        def in_scope_weight(df: pd.DataFrame) -> float:
+            """Total final_weight of in-scope rows."""
+            return float(df.loc[df["in_scope"], "final_weight"].sum())
+
+
+        SHARED = pd.DataFrame({"respondent_id": ["R1"], "final_weight": [1.0], "in_scope": [True]})
+
+
+        @pytest.fixture
+        def make_respondents():
+            def make(weights, in_scope=None):
+                return SHARED
+            return make
+
+
+        def test_in_scope_weight_skips_out_of_scope(make_respondents) -> None:
+            df = make_respondents([1.0, 3.0], in_scope=[True, False])
+            assert in_scope_weight(df) == 1.0
+      - |
+        import pandas as pd
+        import pytest
+
+
+        def in_scope_weight(df: pd.DataFrame) -> float:
+            """Total final_weight of in-scope rows."""
+            return float(df.loc[df["in_scope"], "final_weight"].sum())
+
+
+        @pytest.fixture
+        def make_respondents():
+            def make(weights, in_scope=None):
+                ids = [f"R{i}" for i in range(1, len(weights) + 1)]
+                flags = in_scope if in_scope is not None else [True] * len(weights)
+                return pd.DataFrame({"respondent_id": ids, "final_weight": [float(w) for w in weights], "in_scope": flags})
+            return make
+
+
+        def test_in_scope_weight_skips_out_of_scope(make_respondents) -> None:
+            df = make_respondents([1.0, 3.0])
+            assert in_scope_weight(df) > 0
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+          import pytest
+
+
+          def in_scope_weight(df: pd.DataFrame) -> float:
+              """Total final_weight of in-scope rows."""
+              return float(df.loc[df["in_scope"], "final_weight"].sum())
+
+
+          @pytest.fixture
+          def make_respondents():
+              def make(weights, in_scope=None):
+                  ids = [f"R{i}" for i in range(1, len(weights) + 1)]
+                  flags = in_scope if in_scope is not None else [True] * len(weights)
+                  return pd.DataFrame({"respondent_id": ids, "final_weight": [float(w) for w in weights], "in_scope": flags})
+              return make
+
+
+          def test_in_scope_weight_skips_out_of_scope(make_respondents) -> None:
+              df = make_respondents([1.0, 3.0])
+              assert in_scope_weight(df) > 0
+        triggers: test_catches_bug
+    hints:
+      - "The fixture defines an inner function `make` and returns it, without calling it."
+      - "Inside `make`, build the IDs with `f\"R{i}\"` and default `in_scope` to `[True] * len(weights)`."
+      - "In the test: `df = make_respondents([1.0, 3.0], in_scope=[True, False])`, then assert 1.0."
+    explanation: |
+      The factory builds a new frame on every call, with defaults, so each test states only the values it cares about and no test can change another's data.
+
+  - id: B19-L2-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      `test_total_weight` passes on its own and fails when the whole file runs. Tap the **two** lines that together make the tests depend on each other.
+    code: |
+      import pandas as pd
+      import pytest
+
+
+      @pytest.fixture(scope="module")
+      def respondents():
+          return pd.DataFrame({"id": ["R1", "R2"], "w": [1.0, 3.0]})
+
+
+      def test_cap_weights(respondents):
+          respondents.loc[respondents["w"] > 2, "w"] = 2.0
+          assert respondents["w"].max() == 2.0
+
+
+      def test_total_weight(respondents):
+          assert respondents["w"].sum() == 4.0
+    bug_lines: [5, 11]
+    wrong_answers:
+      - lines: [5]
+        feedback: "Module scope shares the frame, which is only a problem because a test changes it. Find the change too."
+      - lines: [11]
+        feedback: "That line changes the frame. It leaks into the next test only because the fixture is shared. Find what shares it."
+      - lines: [16]
+        feedback: "This assertion is correct for the fixture's data. It fails because of what happened to the frame earlier."
+    hints:
+      - "Which test sees different data depending on what ran before?"
+      - "One line shares the frame. Another changes it."
+      - "The scope argument and the in-place assignment."
+    explanation: |
+      `scope="module"` builds one frame for the file, and `test_cap_weights` changes it in place. Use function scope, or have the code under test return a new frame.
+
+recap:
+  - front: "What a fixture is"
+    back: "A function decorated with @pytest.fixture. A test gets its value by naming it as a parameter."
+  - front: "Fixture setup and teardown"
+    back: "Code before yield is setup. Code after yield is teardown, and it runs even when the test fails."
+  - front: "When to widen a fixture's scope"
+    back: "Only for expensive objects that no test changes. A shared object that a test changes makes results depend on test order."
+  - front: "Factory fixture"
+    back: "A fixture that returns a function building fresh data with defaults, so each test states only what matters."
+  - front: "Share fixtures across files"
+    back: "Put them in conftest.py. Tests in that folder and below use them without an import."
+
+claims:
+  - claim: "Function scope is the default; code after yield runs after a failing test; conftest.py fixtures reach their folder and subfolders, and a test elsewhere gets \"fixture not found\"."
+    status: verified
+    source: "Run on pytest 9.2.0 in this repository's scratch environment."
+  - claim: "A module-scoped fixture changed in place by one test makes a later test fail, and the same tests pass in the reverse order."
+    status: verified
+    source: "Run on pytest 9.2.0 with pandas 3.0.6."
+  - claim: "Calling a fixture directly fails; fixture.__wrapped__ returns the undecorated function in pytest 9.0.2 and 9.2.0."
+    status: verified
+    source: "Run in the dev and Pyodide-pin environments. The E4 checker relies on __wrapped__."

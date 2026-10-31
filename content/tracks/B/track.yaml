@@ -13,8 +13,10 @@ checklist:
   - The metric matches the decision. Calibration and subgroup performance are checked.
   - Every experiment is tracked in MLflow.
   - Tests cover edge cases, including empty inputs and zeros.
+  - Tests use fixtures and parametrize, compare numbers with stated tolerances, isolate I/O, and run with coverage in CI.
   - Every model has a model card. Every decision has a log entry.
 modules:
+  - {id: B0, title: "Start here: foundations for data science", tags: [prereq], summary: "The Python, pandas and statistics this track assumes."}
   - {id: B1, title: Project setup, tags: [prereq], summary: "pyproject.toml, virtual environments, ruff, mypy and folder layout."}
   - {id: B2, title: Code design, tags: [prereq], summary: "Pure functions, dataclasses, when to use classes, configuration objects."}
   - {id: B3, title: Clean pandas, tags: [prereq], summary: "Dtypes, vectorisation, method chaining and Copy-on-Write in pandas 3."}
@@ -32,4 +34,5 @@ modules:
   - {id: B15, title: Embeddings and clustering, tags: [M7-9], summary: "SentenceTransformers, HDBSCAN and cluster validation."}
   - {id: B16, title: PyTorch hygiene, tags: [M1-3], summary: "Device handling, training loops and reproducibility."}
   - {id: B17, title: Testing and performance, tags: [prereq], summary: "Unit tests, Hypothesis, profiling and memory use."}
+  - {id: B19, title: Testing in depth, tags: [prereq], summary: "pytest from the inside: fixtures, parametrize, testing pandas, statistics and ML, mocks, coverage and CI."}
   - {id: B18, title: Documentation and communication, tags: [prereq, all-months], summary: "Docstrings, READMEs, model cards and decision logs."}

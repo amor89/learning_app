@@ -1,0 +1,419 @@
+id: B19-L5
+title: Testing statistical and random code
+
+concept: |
+  You rarely know the exact right answer for a statistic by heart. Three kinds of test still pin it down.
+
+  **1. Compare with an independent oracle.** On a small input, check your function against a trusted library that computes the same thing. Your Wilson interval should match statsmodels 0.14:
+
+  ```python
+  from statsmodels.stats.proportion import proportion_confint
+
+  expected = proportion_confint(12, 40, alpha=0.05, method="wilson")
+  np.testing.assert_allclose(wilson_interval(12, 40), expected, rtol=1e-6)
+  ```
+
+  The tolerance covers small differences, such as a z value rounded to 1.959964.
+
+  **2. Control the randomness.** A function that draws random numbers takes a `np.random.Generator` as a parameter. The test passes in `np.random.default_rng(7)`, often from a fixture, so every run draws the same numbers. Assert properties and tolerances, not exact draws: a test that hardcodes `0.4123` tells a reader nothing about why that number is right.
+
+  **3. Derive the tolerance from theory.** A simulation estimate is itself random. The share of 2,000 simulations in which a 95% interval covers the true value has a standard error of `sqrt(0.95 * 0.05 / 2000)`, about 0.0049. Assert that the coverage lies within four standard errors, between 0.931 and 0.969. A correct method passes. Pick parameters where a broken method fails clearly: at p = 0.05 and n = 30, the Wald interval covers only about 79% of the time.
+
+  Test invariants too. A probability lies in [0, 1]. A lower bound is at most the estimate. An interval narrows as n grows.
+
+  Never assert something that fails by chance. A test that checks `p_value < 0.05` on random data fails about one run in twenty, whatever the code does, and teaches the team to ignore red builds.
+
+why_it_matters: |
+  A team's bootstrap test asserted that the 95% interval for a mean was exactly `(4.812, 5.391)`, copied from one run. It had no seed, so it failed about once a week. The team added a retry. Months later a refactor resampled without replacement, which made every interval far too narrow. The retried test stayed green, because it now only checked that the function returned two numbers. A seeded coverage test with a theory-based tolerance would have failed at once.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def test_bootstrap_ci():
+          lo, hi = bootstrap_ci([4.0, 5.0, 6.0, 5.5], n_boot=1000)
+          assert (round(lo, 3), round(hi, 3)) == (4.812, 5.391)
+    annotations:
+      - find: "lo, hi = bootstrap_ci([4.0, 5.0, 6.0, 5.5], n_boot=1000)"
+        note: "No generator passed in, so every run draws different resamples."
+      - find: "assert (round(lo, 3), round(hi, 3)) == (4.812, 5.391)"
+        note: "One run's output, copied in. It fails by chance and says nothing about why the numbers are right."
+  strong:
+    code: |
+      import math
+
+      import numpy as np
+      import pytest
+
+
+      @pytest.fixture
+      def rng() -> np.random.Generator:
+          return np.random.default_rng(7)
+
+
+      def test_wilson_matches_statsmodels() -> None:
+          from statsmodels.stats.proportion import proportion_confint
+
+          expected = proportion_confint(12, 40, alpha=0.05, method="wilson")
+          np.testing.assert_allclose(wilson_interval(12, 40), expected, rtol=1e-6)
+
+
+      def test_wilson_coverage(rng: np.random.Generator) -> None:
+          sims, p, n = 2000, 0.05, 30
+          successes = rng.binomial(n, p, size=sims)
+          covered = [lo <= p <= hi for lo, hi in (wilson_interval(int(x), n) for x in successes)]
+          se = math.sqrt(0.95 * 0.05 / sims)
+          assert abs(np.mean(covered) - 0.95) < 4 * se
+    annotations:
+      - find: "return np.random.default_rng(7)"
+        note: "A seeded generator from a fixture: the same draws on every run."
+      - find: 'expected = proportion_confint(12, 40, alpha=0.05, method="wilson")'
+        note: "An independent oracle for the exact value on a small input."
+      - find: "sims, p, n = 2000, 0.05, 30"
+        note: "Parameters where a broken method, such as the Wald interval, fails clearly."
+      - find: "assert abs(np.mean(covered) - 0.95) < 4 * se"
+        note: "The tolerance comes from the simulation's own standard error, not from a guess."
+  takeaway: |
+    Check exact values against an oracle, seed every random draw, and size simulation tolerances from the standard error.
+
+exercises:
+  - id: B19-L5-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which test for `bootstrap_ci(values, rng, n_boot)` is reliable and catches real bugs?
+    options:
+      - {id: a, text: "Run it once without a seed and assert the exact interval printed by that run."}
+      - {id: b, text: "Pass `np.random.default_rng(7)`, then assert that lower <= mean <= upper and that the interval is narrower for 400 values than for 40."}
+      - {id: c, text: "Assert that a t-test on the bootstrap means gives p < 0.05."}
+      - {id: d, text: "Run it ten times without a seed and pass if most runs look sensible."}
+    answer: b
+    reasons:
+      - {id: r1, text: "The seed makes every run identical, and the assertions are properties any correct interval has."}
+      - {id: r2, text: "Seeds make code faster."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Without a seed the draws change every run, so the copied interval fails by chance."
+      - answer: c
+        feedback: "A p-value on random data falls below 0.05 about one time in twenty, whatever the code does."
+      - answer: d
+        feedback: "Repeating an unseeded test only hides how often it fails. 'Looks sensible' is not an assertion."
+      - answer: b|r2
+        feedback: "Right test, wrong reason. A seed buys reproducibility, not speed."
+    hints:
+      - "Will the test give the same result every run?"
+      - "Does it assert something a correct interval must satisfy?"
+      - "Seed plus invariants."
+    explanation: |
+      A seeded generator removes chance from the run. Invariants such as ordering and narrowing hold for every correct implementation.
+
+  - id: B19-L5-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      import math
+
+      p, sims = 0.95, 2000
+      se = math.sqrt(p * (1 - p) / sims)
+      low, high = p - 4 * se, p + 4 * se
+      print(round(se, 4), round(low, 3), round(high, 3))
+    answer: |
+      0.0049 0.931 0.969
+    wrong_answers:
+      - answer: "0.0049 0.94 0.96"
+        feedback: "The band is four standard errors wide on each side: 4 x 0.0049 is about 0.0195."
+      - answer: "0.0024 0.94 0.96"
+        feedback: "0.95 x 0.05 / 2000 is 0.00002375, and its square root is about 0.0049."
+    hints:
+      - "0.95 x 0.05 = 0.0475."
+      - "0.0475 / 2000 = 0.00002375. Take the square root."
+      - "Four times 0.0049 is about 0.0195."
+    explanation: |
+      The standard error of a share from 2,000 simulations is about 0.0049, so four standard errors give the band 0.931 to 0.969.
+
+  - id: B19-L5-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Check your Wilson interval against statsmodels on one small input.
+    template: |
+      from statsmodels.stats.proportion import proportion_confint
+
+      expected = proportion_confint(12, 40, alpha=0.05, method="[[g1]]")
+      np.testing.[[g2]](wilson_interval(12, 40), expected, rtol=1e-6)
+    gaps:
+      g1: {accepted: [wilson]}
+      g2: {accepted: [assert_allclose]}
+    wrong_answers:
+      - answer: {g1: normal, g2: assert_allclose}
+        feedback: "`method=\"normal\"` is the Wald interval. Compare like with like: `wilson`."
+      - answer: {g1: wilson, g2: assert_array_equal}
+        feedback: "Exact equality fails on tiny floating-point differences. Use a tolerance."
+    hints:
+      - "Name the same method as your function."
+      - "Compare with a tolerance."
+      - "`wilson` and `assert_allclose`."
+    explanation: |
+      An independent library computing the same interval is an oracle. `assert_allclose` with a small `rtol` absorbs rounding differences.
+
+  - id: B19-L5-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `coverage(ci_fn, rng, p, n, sims) -> float`, the core of a coverage test. It draws `sims` binomial success counts with `rng.binomial(n, p, size=sims)`, calls `ci_fn(successes, n)` for each count (as a Python `int`), and returns the share of intervals `(lo, hi)` with `lo <= p <= hi`. Raise `ValueError` if `sims` is below 1. Use only the `rng` passed in.
+    starter: |
+      import numpy as np
+
+
+      def coverage(ci_fn, rng, p, n, sims):
+          return 0.95
+    checker:
+      kind: python
+      setup: |
+        import math
+        import numpy as np
+
+        def _wilson(x, n, z=1.959964):
+            ph = x / n
+            denom = 1 + z**2 / n
+            centre = (ph + z**2 / (2 * n)) / denom
+            half = z / denom * math.sqrt(ph * (1 - ph) / n + z**2 / (4 * n**2))
+            return (max(0.0, centre - half), min(1.0, centre + half))
+
+        def _wald(x, n, z=1.959964):
+            ph = x / n
+            half = z * math.sqrt(ph * (1 - ph) / n)
+            return (ph - half, ph + half)
+      ast_rules:
+        - id: defined
+          kind: requires_function
+          name: coverage
+          typed: true
+          message: "Define coverage with type hints."
+        - id: uses_binomial
+          kind: requires_call
+          name: rng.binomial
+          message: "Draw the counts with rng.binomial(n, p, size=sims)."
+      tests:
+        - id: correct_method
+          code: |
+            value = coverage(_wilson, np.random.default_rng(7), 0.05, 30, 2000)
+            assert 0.931 < value < 0.969, value
+          message: "For the Wilson interval at p = 0.05, n = 30 and 2,000 simulations, coverage must be close to 0.95. A result of 1.0 means you compared the interval with the estimate, not with the true p."
+        - id: broken_method
+          code: |
+            value = coverage(_wald, np.random.default_rng(7), 0.05, 30, 2000)
+            assert value < 0.85, value
+          message: "For the Wald interval at p = 0.05 and n = 30, coverage is far below 0.95. Count an interval only when lo <= p <= hi."
+        - id: always_covers
+          code: |
+            assert coverage(lambda x, n: (0.0, 1.0), np.random.default_rng(1), 0.3, 20, 50) == 1.0
+          message: "An interval of (0, 1) always covers p, so coverage must be 1.0."
+        - id: reproducible
+          code: |
+            a = coverage(_wilson, np.random.default_rng(3), 0.2, 25, 300)
+            b = coverage(_wilson, np.random.default_rng(3), 0.2, 25, 300)
+            assert a == b
+          message: "The same seed must give the same coverage. Draw only from the rng passed in."
+        - id: int_counts
+          code: |
+            seen = []
+            def spy(x, n):
+                seen.append(type(x))
+                return (0.0, 1.0)
+            coverage(spy, np.random.default_rng(1), 0.3, 20, 5)
+            assert seen == [int] * 5, seen
+          message: "Call ci_fn once per simulation, with the count as a Python int."
+        - id: rejects_zero_sims
+          code: |
+            try:
+                coverage(_wilson, np.random.default_rng(1), 0.3, 20, 0)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for sims=0")
+          message: "Raise ValueError when sims is below 1."
+    solution: |
+      from collections.abc import Callable
+
+      import numpy as np
+
+
+      def coverage(
+          ci_fn: Callable[[int, int], tuple[float, float]],
+          rng: np.random.Generator,
+          p: float,
+          n: int,
+          sims: int,
+      ) -> float:
+          """Share of simulated samples whose interval covers the true proportion.
+
+          Args:
+              ci_fn: Interval function taking (successes, n) and returning (lo, hi).
+              rng: Seeded generator.
+              p: True proportion.
+              n: Sample size per simulation.
+              sims: Number of simulations.
+
+          Returns:
+              The coverage, between 0 and 1.
+
+          Raises:
+              ValueError: If sims is below 1.
+          """
+          if sims < 1:
+              raise ValueError("sims must be at least 1")
+          counts = rng.binomial(n, p, size=sims)
+          covered = 0
+          for count in counts:
+              lo, hi = ci_fn(int(count), n)
+              if lo <= p <= hi:
+                  covered += 1
+          return covered / sims
+    seeded_bugs:
+      - |
+        from collections.abc import Callable
+
+        import numpy as np
+
+
+        def coverage(
+            ci_fn: Callable[[int, int], tuple[float, float]],
+            rng: np.random.Generator,
+            p: float,
+            n: int,
+            sims: int,
+        ) -> float:
+            """Passes NumPy integers instead of Python ints."""
+            if sims < 1:
+                raise ValueError("sims must be at least 1")
+            counts = rng.binomial(n, p, size=sims)
+            return float(np.mean([lo <= p <= hi for lo, hi in (ci_fn(c, n) for c in counts)]))
+      - |
+        from collections.abc import Callable
+
+        import numpy as np
+
+
+        def coverage(
+            ci_fn: Callable[[int, int], tuple[float, float]],
+            rng: np.random.Generator,
+            p: float,
+            n: int,
+            sims: int,
+        ) -> float:
+            """Checks the estimate, not the true p."""
+            if sims < 1:
+                raise ValueError("sims must be at least 1")
+            counts = rng.binomial(n, p, size=sims)
+            hits = 0
+            for count in counts:
+                lo, hi = ci_fn(int(count), n)
+                if lo <= count / n <= hi:
+                    hits += 1
+            return hits / sims
+    wrong_answers:
+      - answer: |
+          from collections.abc import Callable
+
+          import numpy as np
+
+
+          def coverage(
+              ci_fn: Callable[[int, int], tuple[float, float]],
+              rng: np.random.Generator,
+              p: float,
+              n: int,
+              sims: int,
+          ) -> float:
+              """Checks the estimate, not the true p."""
+              if sims < 1:
+                  raise ValueError("sims must be at least 1")
+              counts = rng.binomial(n, p, size=sims)
+              hits = 0
+              for count in counts:
+                  lo, hi = ci_fn(int(count), n)
+                  if lo <= count / n <= hi:
+                      hits += 1
+              return hits / sims
+        triggers: correct_method
+    hints:
+      - "`counts = rng.binomial(n, p, size=sims)` gives one success count per simulation."
+      - "For each count, `lo, hi = ci_fn(int(count), n)`, then check the **true** p: `lo <= p <= hi`."
+      - "Return the number covered divided by sims. Check sims first."
+    explanation: |
+      Coverage asks how often the interval contains the true value. An interval almost always contains its own estimate, so checking the estimate instead of p hides a broken method.
+
+  - id: B19-L5-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Plan the tests for `weighted_mean_ci(values, weights, rng)`, which returns a bootstrap interval for a weighted mean.
+    slots:
+      - id: exact
+        label: "Is the point estimate right?"
+        options:
+          - {id: oracle, text: "Compare with np.average(values, weights=weights) on four rows"}
+          - {id: copy, text: "Compare with the value the function printed last week"}
+        answer: oracle
+      - id: random
+        label: "Make the bootstrap reproducible"
+        options:
+          - {id: seed, text: "An rng fixture returning np.random.default_rng(7)"}
+          - {id: retry, text: "Rerun the test up to three times on failure"}
+        answer: seed
+      - id: coverage
+        label: "Does the interval cover often enough?"
+        options:
+          - {id: se_band, text: "Simulate 2,000 samples and allow four standard errors around 0.95"}
+          - {id: pvalue, text: "Assert a test of coverage against 0.95 gives p > 0.05"}
+        answer: se_band
+      - id: edges
+        label: "Edge cases"
+        options:
+          - {id: edges, text: "Empty input, all weights zero and a missing weight each give the documented result"}
+          - {id: none, text: "Skip them: the bootstrap handles whatever it gets"}
+        answer: edges
+    model_answer: |
+      - An independent oracle for the exact value.
+      - A seeded generator, never retries.
+      - A coverage band sized from the standard error.
+      - Every edge case the function documents.
+    wrong_answers:
+      - answer: {exact: copy}
+        feedback: "A value copied from the function checks only that it agrees with itself."
+      - answer: {random: retry}
+        feedback: "Retries hide failures. Remove chance with a seed instead."
+      - answer: {coverage: pvalue}
+        feedback: "A p-value threshold fails by chance one run in twenty, or passes a broken method when the simulation is small."
+    hints:
+      - "Where does each expected value come from?"
+      - "Remove chance rather than retrying around it."
+      - "Size the tolerance from theory."
+    explanation: |
+      An oracle, a seed, a theory-based tolerance and the documented edge cases make a statistical test both stable and sharp.
+
+recap:
+  - front: "Oracle test for a statistic"
+    back: "On a small input, compare with an independent library, such as statsmodels proportion_confint, using assert_allclose."
+  - front: "Make random code testable"
+    back: "Pass a np.random.Generator in. Tests pass np.random.default_rng(seed), often from a fixture."
+  - front: "Tolerance for a simulated coverage"
+    back: "Standard error sqrt(p(1 - p) / sims). Allow about four standard errors: 0.931 to 0.969 for 0.95 over 2,000 simulations."
+  - front: "An assertion never to write"
+    back: "p_value < 0.05 on random data. It fails by chance about one run in twenty."
+
+claims:
+  - claim: "statsmodels proportion_confint(12, 40, alpha=0.05, method=\"wilson\") matches a Wilson interval with z = 1.959964 within rtol 1e-6."
+    status: verified
+    source: "Run on statsmodels 0.14.6 (Pyodide pin) and 0.15.0."
+  - claim: "With np.random.default_rng(7), 2,000 simulations at p = 0.05, n = 30: Wilson coverage 0.9415, Wald coverage 0.7865. At p = 0.3, n = 50: Wilson 0.9605, Wald 0.938."
+    status: verified
+    source: "Run on NumPy 2.4.6 in the dev and Pyodide-pin environments."

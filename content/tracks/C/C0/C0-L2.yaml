@@ -1,0 +1,206 @@
+id: C0-L2
+title: Power BI basics, reports, semantic models and measures
+
+concept: |
+  Power BI separates three layers. Keep them apart in your head.
+
+  - **Data** lives in tables at the source, such as Delta tables in a lakehouse.
+  - A **semantic model** describes that data for analysis: which tables it uses, how they relate, and which calculations exist.
+  - A **report** holds pages of **visuals**, such as charts and tables, that query the model.
+
+  **Tables and relationships.** A model usually has a **fact table**, one row per event or response, holding numbers and keys, and **dimension tables** that describe those keys, such as region or brand. A relationship links each dimension to the fact table, one-to-many, so a filter on a region narrows the facts to that region. Lesson C6-L1 builds this properly as a star schema.
+
+  **Columns and measures.** A **calculated column** is worked out once per row and stored. A **measure** is worked out when a visual asks, for whatever the visual currently shows. That difference matters for ratios:
+
+  ```text
+  Weighted reach % = DIVIDE ( SUM ( fact[reach] ), SUM ( fact[base] ) )
+  ```
+
+  This measure divides two totals, so it is right at every level: a region, a wave or everything. An average of per-row percentages weights a row with 2 respondents the same as a row with 2,000.
+
+  **Filter context.** Each visual cell evaluates a measure under the filters that apply to it: slicers, the row and column headers, and page filters. The same measure gives North's figure in North's row and the total in the total row. Lesson C6-L2 shows how to change that context on purpose.
+
+  `DIVIDE` returns blank when the denominator is 0 or blank.
+
+  **Storage modes.** **Import** copies the data into the model and refreshes it on a schedule. **DirectQuery** sends each query to the source. **Direct Lake** (GA in Fabric) reads Delta tables in OneLake directly, without an import copy (lesson C6-L3).
+
+why_it_matters: |
+  A dashboard showed "average reach %" as the average of a calculated column, reach divided by base for each region-wave row. Small regions counted as much as large ones, and the national figure read 70% where the true weighted reach was 83%. A measure dividing the summed reach by the summed base gives 83% at every level, including the total row.
+
+worked_example:
+  language: dax
+  weak:
+    code: |
+      Calculated column: fact[reach_pct] = fact[reach] / fact[base]
+      Visual value: Average of fact[reach_pct]
+    annotations:
+      - find: "Calculated column: fact[reach_pct] = fact[reach] / fact[base]"
+        note: "Worked out once per row and stored, before any filter applies."
+      - find: "Visual value: Average of fact[reach_pct]"
+        note: "Averages the row percentages, so a tiny region counts as much as a large one."
+  strong:
+    code: |
+      Weighted reach % =
+      DIVIDE ( SUM ( fact[reach] ), SUM ( fact[base] ) )
+    annotations:
+      - find: "DIVIDE ( SUM ( fact[reach] ), SUM ( fact[base] ) )"
+        note: "A measure: two totals divided, evaluated for whatever each visual cell shows. DIVIDE returns blank for a zero base."
+  takeaway: |
+    Put ratios in measures that divide totals, and let filter context decide what each total covers.
+
+exercises:
+  - id: C0-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which layer do you change to add a new calculation that every report can use?
+    options:
+      - {id: a, text: "The semantic model, by adding a measure"}
+      - {id: b, text: "One report's visual"}
+      - {id: c, text: "The source Delta table, by adding a column for each possible filter"}
+      - {id: d, text: "The report's page filter"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Reports query the model, so a measure defined there is available to all of them."}
+      - {id: r2, text: "The model is where the data is stored."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "A visual-level calculation lives in that one report. Other reports cannot reuse it."
+      - answer: c
+        feedback: "A measure adapts to any filter at query time. A column per filter does not scale."
+      - answer: d
+        feedback: "A page filter narrows what one page shows. It adds no calculation."
+      - answer: a|r2
+        feedback: "Right layer, wrong reason. With Direct Lake or DirectQuery the model stores no data copy. It is shared because reports query it."
+    hints:
+      - "Which layer do all reports read from?"
+      - "Calculations that adapt to filters are measures."
+      - "Measures live in the model."
+    explanation: |
+      Reports query the semantic model, so a measure there serves every report and adapts to each visual's filters.
+
+  - id: C0-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: dax
+    prompt: |
+      The fact table has two rows: reach 1 with base 2, and reach 9 with base 10. What do the two total cells show, rounded to two decimals? Answer as two numbers: the average of the calculated column, then the measure.
+    code: |
+      Calculated column: fact[reach_pct] = fact[reach] / fact[base]
+      Total cell 1: Average of fact[reach_pct]
+      Total cell 2: DIVIDE ( SUM ( fact[reach] ), SUM ( fact[base] ) )
+    answer: |
+      0.7 0.83
+    accepted:
+      - "0.70 0.83"
+    wrong_answers:
+      - answer: "0.83 0.83"
+        feedback: "The column holds 0.5 and 0.9 per row. Their plain average is 0.7."
+      - answer: "0.7 0.7"
+        feedback: "The measure divides the totals: 10 / 12 is 0.83."
+    hints:
+      - "Row ratios: 1 / 2 and 9 / 10."
+      - "Average them: (0.5 + 0.9) / 2."
+      - "The measure: (1 + 9) / (2 + 10)."
+    explanation: |
+      The average of row ratios is 0.7, because the small row counts as much as the large one. The measure divides the totals: 10 / 12 = 0.83.
+
+  - id: C0-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: dax
+    prompt: |
+      Write the weighted reach measure so a zero base gives a blank.
+    template: |
+      Weighted reach % =
+      [[g1]] ( [[g2]] ( fact[reach] ), SUM ( fact[base] ) )
+    gaps:
+      g1: {accepted: [DIVIDE]}
+      g2: {accepted: [SUM]}
+    wrong_answers:
+      - answer: {g1: DIVIDE, g2: AVERAGE}
+        feedback: "Divide total by total. An average of reach over a sum of base mixes two different levels."
+    hints:
+      - "The DAX function that divides safely."
+      - "Total the reach the same way you total the base."
+      - "`DIVIDE` and `SUM`."
+    explanation: |
+      `DIVIDE` returns blank for a zero denominator, and summing both parts makes the ratio correct at any level of the report.
+
+  - id: C0-L2-E4
+    type: design
+    difficulty: 2
+    prompt: |
+      A survey model has these tables. Classify each one.
+    slots:
+      - id: responses
+        label: "fact_response: one row per respondent per wave, with weight, reach and keys"
+        options: &kinds
+          - {id: fact, text: "Fact table"}
+          - {id: dimension, text: "Dimension table"}
+        answer: fact
+      - id: region
+        label: "dim_region: one row per region code, with the region's name"
+        options: *kinds
+        answer: dimension
+      - id: wave
+        label: "dim_wave: one row per wave, with its fieldwork dates"
+        options: *kinds
+        answer: dimension
+    model_answer: |
+      - fact_response holds the events and numbers, one row per respondent per wave.
+      - dim_region and dim_wave describe keys, one row per key, and filter the facts through one-to-many relationships.
+    wrong_answers:
+      - answer: {region: fact}
+        feedback: "dim_region describes a key, one row per region. It filters the facts, so it is a dimension."
+      - answer: {responses: dimension}
+        feedback: "fact_response holds the numbers you add up, one row per event: a fact table."
+    hints:
+      - "Which table holds numbers you add up?"
+      - "Which tables have one row per key?"
+      - "Describing tables are dimensions."
+    explanation: |
+      The fact table records events with numbers. Dimensions describe the keys and filter the facts.
+
+  - id: C0-L2-E5
+    type: order
+    difficulty: 3
+    prompt: |
+      A report shows weighted reach for North. Put the path from data to that number in order.
+    items:
+      - {id: a, text: "Gold Delta tables hold the responses in OneLake."}
+      - {id: b, text: "The semantic model uses those tables and relates dim_region to the fact table."}
+      - {id: c, text: "A slicer on the report page selects North."}
+      - {id: d, text: "The filter flows from dim_region to the fact rows for North."}
+      - {id: e, text: "The measure divides the summed reach by the summed base for those rows."}
+    answer: [a, b, c, d, e]
+    wrong_answers:
+      - answer: [a, b, c, e, d]
+        feedback: "The filter narrows the rows first. The measure then evaluates over what is left."
+      - answer: [b, a, c, d, e]
+        feedback: "The model describes tables that already exist at the source."
+    hints:
+      - "Data, then model, then report."
+      - "The slicer sets the filter context."
+      - "Filter first, then calculate."
+    explanation: |
+      Data sits in tables, the model relates them, the slicer sets the filter, the filter narrows the facts, and the measure computes over the remaining rows.
+
+recap:
+  - front: "Data, semantic model, report"
+    back: "Data sits in source tables. The model describes tables, relationships and measures. Reports hold visuals that query the model."
+  - front: "Calculated column against measure"
+    back: "A column is worked out per row and stored. A measure is worked out when a visual asks, in that visual's filter context."
+  - front: "Ratios in Power BI"
+    back: "A measure dividing totals: DIVIDE ( SUM ( reach ), SUM ( base ) ). Never average per-row percentages."
+  - front: "Import, DirectQuery, Direct Lake"
+    back: "Import copies and refreshes. DirectQuery queries the source each time. Direct Lake (GA) reads OneLake Delta tables directly."
+
+claims:
+  - claim: "DIVIDE returns BLANK for a zero or BLANK denominator unless an alternate result is passed."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/dax/best-practices/dax-divide-function-operator (as cited in C6-L2)"
+  - claim: "Direct Lake is GA in Fabric; Import and DirectQuery are Power BI storage modes."
+    status: search-only
+    source: "VERSIONS.md Fabric feature status (fundamentals/direct-lake-overview, 2026-09-02) and Power BI storage mode documentation."

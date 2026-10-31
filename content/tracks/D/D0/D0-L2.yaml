@@ -1,0 +1,310 @@
+id: D0-L2
+title: Read code you did not write
+
+concept: |
+  Most code you debug was written by someone else: a colleague, your past self or an AI assistant. Read it in a fixed order, so you understand it before you trust it or change it.
+
+  1. **The contract.** Read the name, the signature and the docstring. What does it promise to take and return? `get_unprocessed_waves(...) -> list[str]` promises a list and no side effects.
+  2. **Inputs and outputs.** Which values come in, and what leaves: the return value, a written table, a printed line?
+  3. **Side effects.** Look for anything that changes the world: writing files or tables, network calls, `print`, and changes to arguments, such as `list.remove` or `df[col] = ...` on a frame passed in. A function named `get_` or `check_` should have none.
+  4. **Trace by hand.** Pick a tiny input, three values, and follow the code line by line. Write each variable's value in a small table after every step. It is slow for one minute and saves an hour.
+  5. **Edges.** Ask what happens with an empty input, a zero, a `None`, a duplicate key and one row. Most bugs live there.
+  6. **Assumptions.** Note what the code takes for granted: sorted input, unique IDs, a column that is never missing. Each one is a question for its author, or a check to add.
+
+  Only then run it, on a small input whose right answer you worked out by hand.
+
+  While you read, watch for code that changes a list while looping over it. `for w in weights: weights.remove(w)` skips the element after each removal, so some values survive.
+
+  If the code is hard to read, restate it: rename variables, add type hints, and split it into small functions. Rewriting it clearly, with the same behaviour, is often how you find the bug.
+
+why_it_matters: |
+  A helper called `clean_weights` was reused in four notebooks. It also sorted the caller's list in place, which nobody noticed from its name. One notebook relied on the original order to pair weights with respondent IDs, and every respondent after the first got someone else's weight. Reading the helper for side effects, step 3 above, finds the `sort()` in seconds.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def f(a, b):
+          r = []
+          for i in range(len(a)):
+              if a[i] is not None and b[i] > 0:
+                  r.append(a[i] / b[i])
+          return r
+    annotations:
+      - find: "def f(a, b):"
+        note: "No contract: the name, the parameters and the result tell a reader nothing."
+      - find: "for i in range(len(a)):"
+        note: "Assumes b is at least as long as a, and says nothing if it is longer."
+      - find: "if a[i] is not None and b[i] > 0:"
+        note: "Silently drops pairs, so the result can be shorter than the inputs."
+  strong:
+    code: |
+      def ratios(numerators: list[float | None], denominators: list[float]) -> list[float]:
+          """Ratio of each pair, skipping missing numerators and non-positive denominators.
+
+          Raises:
+              ValueError: If the lists differ in length.
+          """
+          return [
+              num / den
+              for num, den in zip(numerators, denominators, strict=True)
+              if num is not None and den > 0
+          ]
+    annotations:
+      - find: "def ratios(numerators: list[float | None], denominators: list[float]) -> list[float]:"
+        note: "The restated contract: names and types say what goes in and what comes out."
+      - find: "for num, den in zip(numerators, denominators, strict=True)"
+        note: "strict=True raises on unequal lengths, an assumption the original never checked."
+      - find: "if num is not None and den > 0"
+        note: "The skipping rule, now visible and documented."
+  takeaway: |
+    Read the contract, the inputs and outputs and the side effects first, trace a tiny input by hand, then probe the edges and list the assumptions.
+
+exercises:
+  - id: D0-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You are handed a 60-line function to review. What do you read first?
+    options:
+      - {id: a, text: "Its name, signature and docstring: what it promises."}
+      - {id: b, text: "The most complicated loop, because bugs hide there."}
+      - {id: c, text: "Nothing: run it on production data and see what happens."}
+      - {id: d, text: "The last line, because that is what it returns."}
+    answer: a
+    reasons:
+      - {id: r1, text: "You cannot judge whether code is right until you know what it is meant to do."}
+      - {id: r2, text: "The signature is the shortest part."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Without the contract, you cannot tell a bug from intended behaviour."
+      - answer: c
+        feedback: "Running unread code on production data can change or delete real data."
+      - answer: d
+        feedback: "The return line makes sense only once you know what the function promises."
+      - answer: a|r2
+        feedback: "Right first step, wrong reason. It comes first because it defines what right means."
+    hints:
+      - "What do you compare the code against?"
+      - "What the function promises."
+      - "Name, signature, docstring."
+    explanation: |
+      The contract defines what "correct" means. Every later step compares the code with it.
+
+  - id: D0-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      Trace this by hand. What does it print?
+    code: |
+      def running_max(values):
+          best = None
+          out = []
+          for v in values:
+              if best is None or v > best:
+                  best = v
+              out.append(best)
+          return out
+
+
+      print(running_max([3, 1, 4, 1, 5]))
+    answer: |
+      [3, 3, 4, 4, 5]
+    wrong_answers:
+      - answer: "[3, 4, 5]"
+        feedback: "`out.append(best)` runs on every step, not only when best changes, so the list has five values."
+      - answer: "[3, 1, 4, 1, 5]"
+        feedback: "Each step appends the best value so far, not the current value."
+      - answer: "5"
+        feedback: "The function returns the whole list `out`, not only the final maximum."
+    hints:
+      - "Keep a table with v, best and out after each step."
+      - "Step 1: v 3, best 3, out [3]. Step 2: v 1, best stays 3."
+      - "out grows by one value on every step."
+    explanation: |
+      `best` changes only when a larger value arrives, and `out` records it on every step: 3, 3, 4, 4, 5.
+
+  - id: D0-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Trace this code by hand and fill in `total` after each step.
+
+      ```python
+      total = 0
+      for v in [2, 5, 1]:
+          total = total * 2 + v
+      ```
+    template: |
+      step 1: v = 2, total = [[g1]]
+      step 2: v = 5, total = [[g2]]
+      step 3: v = 1, total = [[g3]]
+    gaps:
+      g1: {accepted: ["2"]}
+      g2: {accepted: ["9"]}
+      g3: {accepted: ["19"]}
+    wrong_answers:
+      - answer: {g1: "2", g2: "7", g3: "8"}
+        feedback: "That is a plain running sum. Each step doubles the old total before adding v."
+      - answer: {g1: "4", g2: "13", g3: "27"}
+        feedback: "The doubling applies to the old total, not to v: 0 x 2 + 2 is 2."
+    hints:
+      - "Start from total = 0."
+      - "Step 1: 0 x 2 + 2."
+      - "Step 2: 2 x 2 + 5. Step 3: 9 x 2 + 1."
+    explanation: |
+      Each step doubles the previous total and adds v: 2, then 9, then 19.
+
+  - id: D0-L2-E4
+    type: refactor
+    difficulty: 3
+    language: python
+    prompt: |
+      Restate `f` clearly, with the same behaviour, as `ratios(numerators, denominators)`:
+
+      - type hints and a docstring,
+      - `zip(..., strict=True)` instead of indexing, so lists of different lengths raise `ValueError`,
+      - a list comprehension that skips a missing numerator or a denominator that is not positive.
+    starter: |
+      def f(a, b):
+          r = []
+          for i in range(len(a)):
+              if a[i] is not None and b[i] > 0:
+                  r.append(a[i] / b[i])
+          return r
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: ratios
+          typed: true
+          docstring: true
+          message: "Define ratios with type hints and a docstring."
+        - id: strict_zip
+          kind: requires_pattern
+          pattern: "zip\\([^)]*strict\\s*=\\s*True"
+          message: "Pair the lists with zip(..., strict=True), so unequal lengths raise."
+      tests:
+        - id: same_behaviour
+          code: |
+            assert ratios([1.0, None, 3.0, 4.0], [2.0, 5.0, 0.0, 8.0]) == [0.5, 0.5]
+          message: "Skip a missing numerator and a non-positive denominator, and divide the rest: [0.5, 0.5]."
+        - id: zero_numerator
+          code: |
+            assert ratios([0.0, 2.0], [4.0, 4.0]) == [0.0, 0.5]
+          message: "A numerator of 0.0 is a real value. Test for a missing one with `is None`."
+        - id: empty
+          code: |
+            assert ratios([], []) == []
+          message: "Empty inputs give an empty list."
+        - id: unequal
+          code: |
+            try:
+                ratios([1.0, 2.0], [1.0])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for lists of different lengths")
+          message: "Lists of different lengths must raise ValueError. zip(..., strict=True) does that."
+    solution: |
+      def ratios(numerators: list[float | None], denominators: list[float]) -> list[float]:
+          """Ratio of each pair, skipping missing numerators and non-positive denominators.
+
+          Args:
+              numerators: Values to divide, None when missing.
+              denominators: Values to divide by.
+
+          Returns:
+              One ratio per usable pair, in order.
+
+          Raises:
+              ValueError: If the lists differ in length.
+          """
+          return [
+              num / den
+              for num, den in zip(numerators, denominators, strict=True)
+              if num is not None and den > 0
+          ]
+    seeded_bugs:
+      - |
+        def ratios(numerators: list[float | None], denominators: list[float]) -> list[float]:
+            """Drops strict, so a short list truncates silently."""
+            return [num / den for num, den in zip(numerators, denominators) if num is not None and den > 0]
+      - |
+        def ratios(numerators: list[float | None], denominators: list[float]) -> list[float]:
+            """Uses truthiness, so a 0.0 numerator is dropped."""
+            return [num / den for num, den in zip(numerators, denominators, strict=True) if num and den > 0]
+    wrong_answers:
+      - answer: |
+          def ratios(numerators: list[float | None], denominators: list[float]) -> list[float]:
+              """Drops strict, so a short list truncates silently."""
+              return [num / den for num, den in zip(numerators, denominators) if num is not None and den > 0]
+        triggers: strict_zip
+    hints:
+      - "`for num, den in zip(numerators, denominators, strict=True)` pairs the values."
+      - "Keep a pair when `num is not None and den > 0`."
+      - "Put it in one list comprehension and return it."
+    explanation: |
+      The restated function says what it does in its name, types and docstring, and `strict=True` turns a silent assumption into an error.
+
+  - id: D0-L2-E5
+    type: spot_bug
+    difficulty: 3
+    language: python
+    prompt: |
+      `drop_negative([-1, -2, 3])` returns `[-2, 3]`, and it changes the caller's list too. Tap the line with the bug, then fix it so it returns a new list and leaves the input alone.
+    code: |
+      def drop_negative(weights: list[float]) -> list[float]:
+          """Return the weights without negative values."""
+          for w in weights:
+              if w < 0:
+                  weights.remove(w)
+          return weights
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      tests:
+        - id: removes_all
+          code: |
+            assert drop_negative([-1, -2, 3]) == [3]
+          message: "Every negative value must go, including neighbours."
+        - id: input_unchanged
+          code: |
+            original = [-1, 2]
+            drop_negative(original)
+            assert original == [-1, 2], original
+          message: "Return a new list. Do not change the list passed in."
+    fix_solution: |
+      def drop_negative(weights: list[float]) -> list[float]:
+          """Return the weights without negative values."""
+          return [w for w in weights if w >= 0]
+    wrong_answers:
+      - lines: [3]
+        feedback: "Looping over the list is fine on its own. The trouble starts when the loop body changes the same list."
+      - lines: [4]
+        feedback: "The condition is right: -1 and -2 are negative."
+    hints:
+      - "Trace it: which index does the loop look at after removing -1?"
+      - "Removing an element shifts the rest left, so the loop skips the next one."
+      - "Build a new list with a comprehension instead."
+    explanation: |
+      `remove` shifts the remaining elements left while the loop moves on, so -2 is never checked. It also changes the caller's list, a side effect the name does not promise. A comprehension fixes both.
+
+recap:
+  - front: "Order for reading unfamiliar code"
+    back: "Contract, inputs and outputs, side effects, a hand trace on a tiny input, edges, assumptions. Then run it on a known answer."
+  - front: "Side effects to look for"
+    back: "Writes to files or tables, network calls, prints, and changes to arguments, such as list.remove or df[col] = ... on a frame passed in."
+  - front: "Why not remove items while looping over a list"
+    back: "Each removal shifts the rest left, so the loop skips the next element."
+  - front: "How to trace by hand"
+    back: "Pick three values and write each variable's value in a table after every step."
+
+claims:
+  - claim: "Removing items from a list inside a for loop over it skips elements: drop_negative([-1, -2, 3]) returns [-2, 3]; zip(..., strict=True) raises ValueError on unequal lengths (Python 3.10 and later)."
+    status: verified
+    source: "Run on Python 3.11 and 3.13."

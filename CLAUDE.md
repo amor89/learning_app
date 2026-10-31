@@ -65,7 +65,7 @@ These are the "strong code" side of every worked example.
 
 ## Tooling and quality gates
 
-- `ruff check` and `ruff format` on all Python. `mypy --strict` on `scripts/`, `checkers/` and `practice/`.
+- `ruff check` and `ruff format` on all Python. `mypy --strict` on `scripts/`, `checkers/`, `practice/` and `labs/testing/src/`.
 - Every reference solution passes its checker. Every seeded bug fails its checker. Every listed wrong answer triggers its feedback. `pytest tests/content` enforces all three.
 - Regenerate the handbook (`python scripts/build_handbook.py`) after every content change and commit the output.
 - Test the app at 390px width.

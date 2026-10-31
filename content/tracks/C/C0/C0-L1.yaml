@@ -1,0 +1,228 @@
+id: C0-L1
+title: Data platform vocabulary, files, tables, lakes and warehouses
+
+concept: |
+  Fabric lessons assume a shared vocabulary. Here it is, platform first, then how Fabric maps onto it.
+
+  **Files and formats.**
+
+  - **CSV** is plain text. It stores no types, so a reader guesses them, and a postcode `01234` can come back as the number `1234`.
+  - **Parquet** stores data by column, with each column's type, and compresses it. Reading two columns of a wide table reads only those two.
+  - **Delta** is a folder of Parquet files plus a **transaction log**, `_delta_log`. The log turns files into a table: each write is a numbered version, readers never see a half-finished write, and you can read an older version.
+
+  **Places for data.**
+
+  - A **data lake** holds files of any shape, cheaply. Structure is applied when you read.
+  - A **data warehouse** holds tables with a fixed schema, queried with SQL.
+  - A **lakehouse** keeps tables in an open format, such as Delta, in a lake, so a Spark notebook and a SQL engine read the same data.
+
+  **Storage and compute are separate.** Data sits once in storage. Engines, such as Spark, SQL and Power BI, bring compute to it when they run.
+
+  **How data moves.** **Batch** processing handles a delivery at a time, such as a nightly file. **Streaming** handles events as they arrive, seconds apart. With **ELT**, you load raw data first, then transform it inside the platform. Many teams name the stages **bronze** (raw, as received), **silver** (cleaned) and **gold** (aggregated for reports).
+
+  **In Fabric**, all of this lives in **OneLake**, one logical lake for the whole organisation (GA). Lakehouse tables are Delta tables (GA). Spark reads them, and the **SQL analytics endpoint** (GA) queries the same tables with T-SQL. Lessons C1-L2 and C2-L1 go deeper.
+
+why_it_matters: |
+  A team exported its gold tables to CSV for a reporting tool. Store codes such as `00042` became `42`, and the join to the store list silently matched nothing for 300 stores. Reading the Delta table directly, with its types intact, avoided both the copy and the broken join.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      # Export gold to CSV, then read it back for a report
+      gold.to_csv("gold_stores.csv", index=False)
+      report = pd.read_csv("gold_stores.csv")
+    annotations:
+      - find: 'gold.to_csv("gold_stores.csv", index=False)'
+        note: "A second copy of the data, in a format that stores no types."
+      - find: 'report = pd.read_csv("gold_stores.csv")'
+        note: "The reader guesses types: store code 00042 comes back as 42."
+  strong:
+    code: |
+      # Read the one Delta table that every engine shares
+      report = spark.read.table("gold.store_sales")
+    annotations:
+      - find: 'report = spark.read.table("gold.store_sales")'
+        note: "No copy, and the column types travel with the table."
+  takeaway: |
+    Keep data once, in a typed table format such as Delta, and let each engine read it, instead of exporting copies to untyped files.
+
+exercises:
+  - id: C0-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      What makes a folder of Parquet files a Delta table?
+    options:
+      - {id: a, text: "A transaction log that records every write as a numbered version"}
+      - {id: b, text: "A different file extension"}
+      - {id: c, text: "Storing the data as CSV"}
+      - {id: d, text: "Running a SQL engine on top"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The log tells readers which files form each version, so writes are all-or-nothing and old versions stay readable."}
+      - {id: r2, text: "The log compresses the data."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Delta data files are ordinary Parquet files. The log beside them makes the table."
+      - answer: c
+        feedback: "Delta stores data as Parquet, which keeps types. CSV keeps none."
+      - answer: d
+        feedback: "Engines read Delta tables, but the table exists without any engine running."
+      - answer: a|r2
+        feedback: "Right part, wrong reason. Parquet does the compressing. The log records versions."
+    hints:
+      - "The data files are Parquet either way."
+      - "What sits in `_delta_log`?"
+      - "A record of every write."
+    explanation: |
+      Delta is Parquet plus a transaction log. The log gives versions, all-or-nothing writes and reads of older versions.
+
+  - id: C0-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (pandas 3.0 with pyarrow)
+    primer: |
+      The code uses pandas, Python's table library, and the `io` module:
+
+      - `pd.DataFrame({"postcode": ["01234"]})` builds a one-column table.
+      - `df.to_csv(index=False)` writes it as CSV text. `pd.read_csv(...)` reads CSV back.
+      - `df.to_parquet(buffer)` writes it as Parquet. `pd.read_parquet(buffer)` reads Parquet back.
+      - `io.StringIO(text)` and `io.BytesIO()` are in-memory stand-ins for a text file and a binary file. `buffer.seek(0)` rewinds to the start before reading.
+      - `["postcode"].iloc[0]` takes the first value of the column.
+    code: |
+      import io
+
+      import pandas as pd
+
+      df = pd.DataFrame({"postcode": ["01234"]})
+      csv_text = df.to_csv(index=False)
+      buffer = io.BytesIO()
+      df.to_parquet(buffer)
+      buffer.seek(0)
+      print(pd.read_csv(io.StringIO(csv_text))["postcode"].iloc[0], pd.read_parquet(buffer)["postcode"].iloc[0])
+    answer: |
+      1234 01234
+    wrong_answers:
+      - answer: "01234 01234"
+        feedback: "CSV stores no types, so read_csv guesses a number and drops the leading zero."
+      - answer: "1234 1234"
+        feedback: "Parquet stores the column's type, text, so the leading zero survives."
+    hints:
+      - "Which format stores the column type?"
+      - "What does a reader guess for `01234` in a text file?"
+      - "CSV guesses a number. Parquet remembers text."
+    explanation: |
+      CSV keeps only text, so the reader infers a number and the zero is gone. Parquet records that the column is text and returns it unchanged.
+
+  - id: C0-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the definitions.
+    template: |
+      A Delta table is a folder of [[g1]] files plus a transaction log.
+      A [[g2]] keeps open-format tables in a lake, so Spark and SQL read the same data.
+      With [[g3]], you load raw data first and transform it inside the platform.
+    gaps:
+      g1: {accepted: [Parquet, parquet]}
+      g2: {accepted: [lakehouse, Lakehouse]}
+      g3: {accepted: [ELT]}
+    wrong_answers:
+      - answer: {g1: CSV, g2: lakehouse, g3: ELT}
+        feedback: "Delta data files are Parquet, which keeps types and compresses by column."
+      - answer: {g1: Parquet, g2: warehouse, g3: ELT}
+        feedback: "A warehouse holds tables for SQL. Open tables in a lake, shared by Spark and SQL, make a lakehouse."
+      - answer: {g1: Parquet, g2: lakehouse, g3: ETL}
+        feedback: "ETL transforms before loading. Loading first, then transforming, is ELT."
+    hints:
+      - "A columnar, typed file format."
+      - "Lake plus warehouse."
+      - "Extract, load, then transform."
+    explanation: |
+      Delta is Parquet plus a log, a lakehouse puts open tables in a lake, and ELT loads before it transforms.
+
+  - id: C0-L1-E4
+    type: order
+    difficulty: 2
+    prompt: |
+      Put the stages of a typical ELT flow for a nightly delivery in order.
+    items:
+      - {id: a, text: "The delivery file lands in the lake, unchanged."}
+      - {id: b, text: "Load it into a bronze table, as received, with audit columns."}
+      - {id: c, text: "Clean, rename and type it into a silver table."}
+      - {id: d, text: "Aggregate it into gold tables for reporting."}
+      - {id: e, text: "A semantic model and its reports read the gold tables."}
+    answer: [a, b, c, d, e]
+    wrong_answers:
+      - answer: [a, c, b, d, e]
+        feedback: "Bronze keeps the delivery as received. Cleaning comes after, in silver, so you can always rebuild from the original."
+      - answer: [a, b, d, c, e]
+        feedback: "Aggregate clean data. Gold builds on silver."
+    hints:
+      - "Raw first, clean next, summary last."
+      - "Bronze, silver, gold."
+      - "Reports read the summary."
+    explanation: |
+      Land, load raw to bronze, clean to silver, aggregate to gold, then report. Each stage keeps the one before it, so you can rebuild after a fix.
+
+  - id: C0-L1-E5
+    type: design
+    difficulty: 3
+    prompt: |
+      Pick the best fit for each need.
+    slots:
+      - id: files
+        label: "Keep supplier PDFs and raw JSON exports cheaply, structure unknown"
+        options: &places
+          - {id: lake, text: "Files in a data lake"}
+          - {id: lakehouse, text: "Delta tables in a lakehouse"}
+          - {id: streaming, text: "Streaming ingestion"}
+          - {id: csv_export, text: "A nightly CSV export"}
+        answer: lake
+      - id: shared
+        label: "A table that a Spark notebook and a SQL report must both read, with types intact"
+        options: *places
+        answer: lakehouse
+      - id: telemetry
+        label: "Vehicle readings that must reach a dashboard within seconds"
+        options: *places
+        answer: streaming
+    model_answer: |
+      - Unknown structure, kept cheaply: files in a lake.
+      - One typed table for several engines: Delta in a lakehouse.
+      - Seconds matter: streaming, not nightly batches.
+      - A CSV export copies the data and loses its types, so it fits none of these.
+    wrong_answers:
+      - answer: {shared: csv_export}
+        feedback: "A CSV export makes a second copy without types. Both engines can read the Delta table directly."
+      - answer: {telemetry: lakehouse}
+        feedback: "A lakehouse table can hold the readings, but getting them there within seconds is a streaming job."
+    hints:
+      - "Structure known or unknown?"
+      - "One copy, several engines."
+      - "Seconds, not nights."
+    explanation: |
+      Raw, unknown files go to the lake, shared typed tables go to the lakehouse, and seconds-fresh data needs streaming.
+
+recap:
+  - front: "CSV, Parquet and Delta"
+    back: "CSV: text, no types. Parquet: columnar, typed, compressed. Delta: Parquet files plus a transaction log with versions."
+  - front: "Lake, warehouse, lakehouse"
+    back: "Lake: files, structure on read. Warehouse: typed tables for SQL. Lakehouse: open tables in a lake, read by Spark and SQL."
+  - front: "ELT and medallion stages"
+    back: "Load raw first, transform inside the platform: bronze (as received), silver (clean), gold (aggregated)."
+  - front: "Fabric's names for these"
+    back: "OneLake is the one lake (GA). Lakehouse tables are Delta (GA). The SQL analytics endpoint queries them with T-SQL (GA)."
+
+claims:
+  - claim: "A CSV round trip turns the text 01234 into 1234 in pandas 3.0, while a Parquet round trip keeps 01234."
+    status: verified
+    source: "Run on pandas 3.0.2 with pyarrow 22.0.0 and pandas 3.0.6 with pyarrow 26.0.0."
+  - claim: "OneLake, Lakehouse (Delta tables) and the SQL analytics endpoint are GA."
+    status: search-only
+    source: "VERSIONS.md Fabric feature status, checked on Microsoft Learn in September 2026."
