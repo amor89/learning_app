@@ -1,0 +1,359 @@
+id: B19-L6
+title: Testing machine learning pipelines
+
+concept: |
+  You cannot assert that a model's AUC is exactly 0.873. The next scikit-learn release, a new seed or one more row changes it. Test what must hold for any correct pipeline instead. With scikit-learn 1.8 and a few hundred synthetic rows, each of these tests runs in under a second.
+
+  **Contracts.** `predict_proba` returns one row per input and one column per class. Every row sums to 1, and every value lies between 0 and 1.
+
+  **No leakage.** Fit the pipeline on the training split only, then check what it learned. A `StandardScaler` inside it must hold the training means: `pipe.named_steps["standardscaler"].mean_` equals `X_train.mean(axis=0)`. If it holds the mean of all the data, the test rows leaked into preprocessing (lesson B10-L2).
+
+  **Determinism.** Set `random_state` in every splitter and estimator. Two fits on the same data must give the same predictions. A split without `random_state` gives different rows every run, and the test becomes flaky.
+
+  **Beats a baseline.** `DummyClassifier(strategy="prior")` ignores the features, so its AUC is 0.5. On fixed data from `make_classification(random_state=0)`, assert that the model clearly beats it. A fixed high bar, such as AUC above 0.9, breaks on harmless changes. A margin over the baseline catches a pipeline that has stopped learning.
+
+  **Behaviour.** A model's prediction for a row must not depend on where the row sits. Shuffle the rows, predict, put the predictions back in the original order, and compare. A feature that raises risk must not lower the predicted risk when it alone increases, if the model promises that.
+
+  For your own transformers, scikit-learn's `parametrize_with_checks` from `sklearn.utils.estimator_checks` runs its standard API checks as pytest tests.
+
+why_it_matters: |
+  A churn pipeline's only test asserted `auc > 0.85` on a split without `random_state`. It failed one run in eight, and the team added a retry. Later a refactor moved the scaler outside the pipeline and fitted it on all rows. Offline AUC rose by 0.03 and the test stayed green. In production, AUC fell by 0.05. A one-line test comparing the fitted scaler's means with the training means fails on that refactor.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def test_model():
+          X_train, X_test, y_train, y_test = train_test_split(X, y)
+          model = build_pipeline().fit(X_train, y_train)
+          assert roc_auc_score(y_test, model.predict_proba(X_test)[:, 1]) > 0.85
+    annotations:
+      - find: "X_train, X_test, y_train, y_test = train_test_split(X, y)"
+        note: "No random_state: different rows every run, so the test is flaky."
+      - find: "assert roc_auc_score(y_test, model.predict_proba(X_test)[:, 1]) > 0.85"
+        note: "One fixed bar. It cannot tell leakage from skill, and it fails on harmless changes."
+  strong:
+    code: |
+      import numpy as np
+      from sklearn.datasets import make_classification
+      from sklearn.dummy import DummyClassifier
+      from sklearn.metrics import roc_auc_score
+      from sklearn.model_selection import train_test_split
+
+
+      def split():
+          X, y = make_classification(n_samples=300, random_state=0)
+          return train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+
+
+      def test_scaler_fitted_on_training_rows_only() -> None:
+          X_train, _, y_train, _ = split()
+          pipe = build_pipeline().fit(X_train, y_train)
+          np.testing.assert_allclose(pipe.named_steps["standardscaler"].mean_, X_train.mean(axis=0))
+
+
+      def test_probabilities_are_valid() -> None:
+          X_train, X_test, y_train, _ = split()
+          proba = build_pipeline().fit(X_train, y_train).predict_proba(X_test)
+          assert proba.shape == (len(X_test), 2)
+          np.testing.assert_allclose(proba.sum(axis=1), 1.0)
+
+
+      def test_beats_baseline() -> None:
+          X_train, X_test, y_train, y_test = split()
+          model = build_pipeline().fit(X_train, y_train)
+          baseline = DummyClassifier(strategy="prior").fit(X_train, y_train)
+          model_auc = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])
+          base_auc = roc_auc_score(y_test, baseline.predict_proba(X_test)[:, 1])
+          assert model_auc > base_auc + 0.2
+    annotations:
+      - find: "return train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)"
+        note: "Fixed synthetic data and a seeded split: the same rows every run."
+      - find: 'np.testing.assert_allclose(pipe.named_steps["standardscaler"].mean_, X_train.mean(axis=0))'
+        note: "A leakage test: the scaler must have learned from training rows only."
+      - find: "assert proba.shape == (len(X_test), 2)"
+        note: "A contract: one row per input, one column per class."
+      - find: "assert model_auc > base_auc + 0.2"
+        note: "A margin over a baseline that ignores the features, not a fixed bar."
+  takeaway: |
+    Test contracts, leakage, determinism and a margin over a baseline on fixed data, not one exact score.
+
+exercises:
+  - id: B19-L6-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which test fails when the scaler has been fitted on all the data instead of the training rows?
+    options:
+      - {id: a, text: "Fit on the training split, then assert the scaler's `mean_` equals `X_train.mean(axis=0)`."}
+      - {id: b, text: "Assert test AUC is above 0.85."}
+      - {id: c, text: "Assert `predict_proba` rows sum to 1."}
+      - {id: d, text: "Assert the pipeline fits without raising."}
+    answer: a
+    reasons:
+      - {id: r1, text: "It checks what the pipeline learned, which differs exactly when test rows leak in."}
+      - {id: r2, text: "Means are faster to compute than AUC."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Leakage usually raises offline AUC, so this test passes more easily, not less."
+      - answer: c
+        feedback: "Probabilities sum to 1 with or without leakage."
+      - answer: d
+        feedback: "A leaky pipeline fits without errors."
+      - answer: a|r2
+        feedback: "Right test, wrong reason. It works because it inspects the fitted state, not because of speed."
+    hints:
+      - "Which assertion changes when the scaler sees test rows?"
+      - "What does a fitted StandardScaler store?"
+      - "Its means."
+    explanation: |
+      A scaler fitted on all rows stores the overall mean. Comparing its `mean_` with the training mean detects that directly.
+
+  - id: B19-L6-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (scikit-learn 1.8)
+    code: |
+      import numpy as np
+      from sklearn.linear_model import LogisticRegression
+      from sklearn.pipeline import make_pipeline
+      from sklearn.preprocessing import StandardScaler
+
+      X_train = np.array([[1.0], [3.0], [5.0], [7.0]])
+      y_train = np.array([0, 0, 1, 1])
+      X_test = np.array([[100.0]])
+
+      pipe = make_pipeline(StandardScaler(), LogisticRegression()).fit(X_train, y_train)
+      pipe.predict(X_test)
+      print(pipe.named_steps["standardscaler"].mean_[0])
+    answer: |
+      4.0
+    wrong_answers:
+      - answer: "23.2"
+        feedback: "That is the mean of all five values. The scaler learned from the four training rows only. predict uses it and changes nothing."
+      - answer: "100.0"
+        feedback: "predict transforms the test row with the training mean. It does not refit the scaler."
+    hints:
+      - "Which rows does fit see?"
+      - "Does predict change what the scaler learned?"
+      - "(1 + 3 + 5 + 7) / 4."
+    explanation: |
+      `fit` learns the mean from the four training rows, 4.0. `predict` only applies it, so the stored mean stays 4.0.
+
+  - id: B19-L6-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Compare the model with a baseline that ignores the features.
+    template: |
+      baseline = DummyClassifier(strategy="[[g1]]").fit(X_train, y_train)
+      base_auc = roc_auc_score(y_test, baseline.[[g2]](X_test)[:, 1])
+      model_auc = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])
+      assert model_auc > base_auc + 0.2
+    gaps:
+      g1: {accepted: [prior, most_frequent]}
+      g2: {accepted: [predict_proba]}
+    wrong_answers:
+      - answer: {g1: prior, g2: predict}
+        feedback: "AUC needs scores, not class labels. Use predict_proba and take column 1."
+    hints:
+      - "A DummyClassifier strategy that predicts the class shares."
+      - "AUC needs probabilities."
+      - "`prior` and `predict_proba`."
+    explanation: |
+      `DummyClassifier(strategy="prior")` gives every row the same scores, so its AUC is 0.5. The model must beat that by a clear margin.
+
+  - id: B19-L6-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy, scikit-learn]
+    prompt: |
+      Write `order_invariant(model, X, rng) -> bool`, a behavioural check. Draw a permutation with `rng.permutation(len(X))`, predict probabilities for the original rows and for the shuffled rows, and return `True` when each row gets the same probabilities either way (within `np.allclose`). `X` is a NumPy array. Do not change it.
+    primer: |
+      `np.allclose(a, b)` returns `True` when every pair of values is close, with `rtol=1e-05` and `atol=1e-08` by default. Unlike `np.testing.assert_allclose`, it returns a bool instead of raising.
+
+      Indexing an array with an array of positions picks rows in that order and returns a new array:
+
+      ```python
+      scores = np.array([[10], [20], [30]])
+      scores[[2, 0, 1]]   # rows 30, 10, 20
+      ```
+    starter: |
+      import numpy as np
+
+
+      def order_invariant(model, X, rng):
+          return True
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+        from sklearn.datasets import make_classification
+        from sklearn.linear_model import LogisticRegression
+
+        _X, _y = make_classification(n_samples=60, n_features=4, random_state=0)
+        _model = LogisticRegression().fit(_X, _y)
+
+        class _PositionModel:
+            """Scores depend on row position, a bug order_invariant must catch."""
+
+            def predict_proba(self, X):
+                pos = np.arange(len(X)) / (10 * len(X))
+                p1 = np.clip(0.5 + pos, 0, 1)
+                return np.column_stack([1 - p1, p1])
+      ast_rules:
+        - id: defined
+          kind: requires_function
+          name: order_invariant
+          typed: true
+          message: "Define order_invariant with type hints."
+        - id: uses_permutation
+          kind: requires_call
+          name: rng.permutation
+          message: "Shuffle with rng.permutation(len(X))."
+      tests:
+        - id: real_model
+          code: |
+            assert order_invariant(_model, _X, np.random.default_rng(1)) is True
+          message: "A logistic regression scores each row on its own, so the check must return True."
+        - id: position_model
+          code: |
+            assert order_invariant(_PositionModel(), _X, np.random.default_rng(1)) is False
+          message: "Compare each row's probabilities with the same row's shuffled result: align them with the permutation before comparing."
+        - id: input_unchanged
+          code: |
+            before = _X.copy()
+            order_invariant(_model, _X, np.random.default_rng(2))
+            assert np.array_equal(_X, before)
+          message: "Leave X unchanged. Index with the permutation instead of shuffling in place."
+    solution: |
+      import numpy as np
+
+
+      def order_invariant(model: object, X: np.ndarray, rng: np.random.Generator) -> bool:
+          """True when each row's predicted probabilities do not depend on row order.
+
+          Args:
+              model: Fitted estimator with predict_proba.
+              X: Feature matrix.
+              rng: Seeded generator for the permutation.
+
+          Returns:
+              Whether shuffling the rows leaves each row's probabilities unchanged.
+          """
+          perm = rng.permutation(len(X))
+          original = model.predict_proba(X)
+          shuffled = model.predict_proba(X[perm])
+          return bool(np.allclose(shuffled, original[perm]))
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def order_invariant(model: object, X: np.ndarray, rng: np.random.Generator) -> bool:
+            """Compares without aligning rows."""
+            perm = rng.permutation(len(X))
+            return bool(np.allclose(np.sort(model.predict_proba(X[perm])[:, 1]), np.sort(model.predict_proba(X)[:, 1])))
+      - |
+        import numpy as np
+
+
+        def order_invariant(model: object, X: np.ndarray, rng: np.random.Generator) -> bool:
+            """Shuffles X in place."""
+            original = model.predict_proba(X)
+            perm = rng.permutation(len(X))
+            rng.shuffle(X)
+            return bool(np.allclose(model.predict_proba(X[perm]), original[perm]))
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def order_invariant(model: object, X: np.ndarray, rng: np.random.Generator) -> bool:
+              """Compares without aligning rows."""
+              perm = rng.permutation(len(X))
+              return bool(np.allclose(np.sort(model.predict_proba(X[perm])[:, 1]), np.sort(model.predict_proba(X)[:, 1])))
+        triggers: position_model
+    hints:
+      - "`perm = rng.permutation(len(X))`, then `X[perm]` is a shuffled copy."
+      - "Row i of `model.predict_proba(X[perm])` belongs to original row `perm[i]`."
+      - "Compare with `original[perm]` using `np.allclose`, and return a bool."
+    explanation: |
+      Indexing the original predictions with the same permutation lines every row up with its shuffled twin. Sorting the scores instead would hide a model that swaps them between rows.
+
+  - id: B19-L6-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      This test fails about one run in seven, with no code change. Tap the line that makes it flaky, then fix it.
+    code: |
+      from sklearn.datasets import make_classification
+      from sklearn.ensemble import RandomForestClassifier
+      from sklearn.metrics import roc_auc_score
+      from sklearn.model_selection import train_test_split
+
+
+      def test_model_beats_threshold():
+          X, y = make_classification(n_samples=300, random_state=0)
+          X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
+          model = RandomForestClassifier(n_estimators=50, random_state=0).fit(X_train, y_train)
+          auc = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])
+          assert auc > 0.97
+    bug_lines: [9]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: seeded_split
+          kind: requires_pattern
+          pattern: "train_test_split\\([^)]*random_state\\s*=\\s*\\d+"
+          message: "Pass random_state to train_test_split, so every run uses the same rows."
+    fix_solution: |
+      from sklearn.datasets import make_classification
+      from sklearn.ensemble import RandomForestClassifier
+      from sklearn.metrics import roc_auc_score
+      from sklearn.model_selection import train_test_split
+
+
+      def test_model_beats_threshold():
+          X, y = make_classification(n_samples=300, random_state=0)
+          X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+          model = RandomForestClassifier(n_estimators=50, random_state=0).fit(X_train, y_train)
+          auc = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])
+          assert auc > 0.97
+    wrong_answers:
+      - lines: [10]
+        feedback: "The forest has random_state=0, so it is deterministic for a given split."
+      - lines: [8]
+        feedback: "make_classification has random_state=0, so the data is the same every run."
+      - lines: [12]
+        feedback: "A fixed bar is fragile, but it would fail every run or none. Something changes between runs."
+    hints:
+      - "What differs between two runs of this test?"
+      - "Check every call that draws random numbers for a seed."
+      - "One of them has none."
+    explanation: |
+      The split draws a new random set of test rows each run, so the AUC varies. Seed the split, and stratify it so both classes appear in the same shares.
+
+recap:
+  - front: "Leakage test for a pipeline"
+    back: "Fit on the training split, then assert pipe.named_steps[\"standardscaler\"].mean_ equals X_train.mean(axis=0)."
+  - front: "Contract tests for a classifier"
+    back: "predict_proba shape is (n_rows, n_classes), each row sums to 1, values lie in [0, 1]."
+  - front: "Performance test that is not fragile"
+    back: "On fixed data from make_classification(random_state=0), assert the model beats DummyClassifier(strategy=\"prior\") by a margin."
+  - front: "Behavioural test: row order"
+    back: "Shuffle with a seeded permutation and check each row's prediction is unchanged: compare with original[perm]."
+
+claims:
+  - claim: "DummyClassifier with strategy prior or most_frequent gives AUC 0.5; a fitted StandardScaler in a pipeline holds the training means, unchanged by predict; train_test_split without random_state returns different rows on each call; parametrize_with_checks and check_estimator import from sklearn.utils.estimator_checks."
+    status: verified
+    source: "Run on scikit-learn 1.8.0 (Pyodide pin) and 1.9.1."
+  - claim: "The E5 test with an unseeded split fails (AUC <= 0.97) in 14.3% of 1,000 seeded splits; its AUC never fell to 0.9 in 1,000 splits."
+    status: verified
+    source: "Run on scikit-learn 1.9.1 with make_classification(n_samples=300, random_state=0) and a 50-tree forest."

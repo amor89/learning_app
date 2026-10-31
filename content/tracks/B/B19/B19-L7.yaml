@@ -1,0 +1,403 @@
+id: B19-L7
+title: Isolate I/O with fakes, monkeypatch and mocks
+
+concept: |
+  A unit test should not call a survey API, read a production table or depend on today's date. Lesson B2-L1 pushed side effects to the edges. Three tools handle what is left at those edges.
+
+  **Pass the dependency in.** A function that takes `get` or `now` as a parameter needs no tricks to test. The test passes a small fake:
+
+  ```python
+  class FakeResponse:
+      status_code = 200
+
+      def json(self) -> dict[str, int]:
+          return {"respondents": 812}
+
+
+  assert wave_count("W14", get=lambda url, timeout: FakeResponse()) == 812
+  ```
+
+  **`monkeypatch`**, a built-in fixture, changes something for one test and undoes it afterwards. `monkeypatch.setenv("SURVEY_API_TOKEN", "test-token")` sets an environment variable. `monkeypatch.delenv("SURVEY_API_TOKEN", raising=False)` removes it. `monkeypatch.setattr(module, "name", value)` replaces an attribute.
+
+  **`unittest.mock`** from the standard library builds stand-ins that record how they were called:
+
+  - `Mock(return_value=x)` returns `x` on every call.
+  - `Mock(side_effect=[a, ConnectionError("down")])` returns `a`, then raises on the next call.
+  - `fake.assert_called_once_with(url, timeout=30)` checks the arguments.
+  - `fake.call_count` counts calls, including calls that raised.
+
+  `patch("module.name")` swaps a name for the length of a `with` block. Patch the name **where the code looks it up**. If `reports.py` does `from requests import get`, patch `reports.get`. Patching `requests.get` leaves `reports.get` pointing at the real function, and the test makes a real call.
+
+  Use mocks sparingly. A mock checks how your code talks to the outside world, not whether its result is right. Mock the boundary, such as HTTP, the clock or a database, and test the logic with real objects. Never mock pandas.
+
+why_it_matters: |
+  A test of a weekly loader patched `requests.get`, but the loader imported `get` by name. Every CI run quietly called the supplier's live API with a test token. The supplier rate-limited the account during a delivery week, and the real nightly load failed. Patching `loader.get` instead, or passing `get` in as a parameter, would have kept the tests offline.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import requests
+
+
+      def wave_count(wave_id: str) -> int:
+          response = requests.get(f"https://survey.example/api/waves/{wave_id}", timeout=30)
+          return response.json()["respondents"]
+
+
+      def test_wave_count():
+          assert wave_count("W14") > 0
+    annotations:
+      - find: 'response = requests.get(f"https://survey.example/api/waves/{wave_id}", timeout=30)'
+        note: "The network call is buried inside the logic, so the test cannot avoid it."
+      - find: 'assert wave_count("W14") > 0'
+        note: "Calls the live API on every run, and asserts almost nothing."
+  strong:
+    code: |
+      from collections.abc import Callable
+      from typing import Any
+
+      import pytest
+
+      API = "https://survey.example/api/waves"
+
+
+      def wave_count(wave_id: str, get: Callable[..., Any]) -> int:
+          response = get(f"{API}/{wave_id}", timeout=30)
+          if response.status_code != 200:
+              raise RuntimeError(f"wave API returned {response.status_code}")
+          return int(response.json()["respondents"])
+
+
+      class FakeResponse:
+          def __init__(self, status_code: int, payload: dict[str, int]) -> None:
+              self.status_code = status_code
+              self._payload = payload
+
+          def json(self) -> dict[str, int]:
+              return self._payload
+
+
+      def test_wave_count_reads_respondents() -> None:
+          calls = []
+
+          def fake_get(url: str, timeout: int) -> FakeResponse:
+              calls.append((url, timeout))
+              return FakeResponse(200, {"respondents": 812})
+
+          assert wave_count("W14", fake_get) == 812
+          assert calls == [(f"{API}/W14", 30)]
+
+
+      def test_wave_count_raises_on_error_status() -> None:
+          with pytest.raises(RuntimeError, match="503"):
+              wave_count("W14", lambda url, timeout: FakeResponse(503, {}))
+    annotations:
+      - find: "def wave_count(wave_id: str, get: Callable[..., Any]) -> int:"
+        note: "The HTTP function is a parameter. Production passes requests.get, tests pass a fake."
+      - find: "class FakeResponse:"
+        note: "A tiny fake with only what the code uses: status_code and json()."
+      - find: 'assert calls == [(f"{API}/W14", 30)]'
+        note: "Checks the request too: the right URL and a timeout."
+      - find: 'with pytest.raises(RuntimeError, match="503"):'
+        note: "The error path is tested without a real outage."
+  takeaway: |
+    Pass I/O in as a parameter where you can, use monkeypatch for settings, and patch a name where the code looks it up.
+
+exercises:
+  - id: B19-L7-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      `fetch.py` starts with `from requests import get` and calls `get(url, timeout=30)`. Which patch keeps a test of `fetch.load()` offline?
+    options:
+      - {id: a, text: "`patch(\"requests.get\")`"}
+      - {id: b, text: "`patch(\"fetch.get\")`"}
+      - {id: c, text: "`patch(\"get\")`"}
+      - {id: d, text: "`patch(\"fetch.requests.get\")`"}
+    answer: b
+    reasons:
+      - {id: r1, text: "fetch.py looks up the name get in its own module, so that is the name to replace."}
+      - {id: r2, text: "Patching a module's name is faster than patching requests."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "fetch.get still points at the original function, so the test makes a real request."
+      - answer: c
+        feedback: "patch needs a full dotted path to an importable name."
+      - answer: d
+        feedback: "fetch.py never imports the requests module itself, so there is no fetch.requests to patch."
+      - answer: b|r2
+        feedback: "Right patch, wrong reason. It works because that is where the code looks the name up."
+    hints:
+      - "`from requests import get` copies the name into fetch.py."
+      - "Which name does load() look up when it runs?"
+      - "The one in fetch."
+    explanation: |
+      `from requests import get` creates the name `fetch.get`. Replace that name, where the code looks it up.
+
+  - id: B19-L7-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      from unittest.mock import Mock
+
+      api = Mock(side_effect=[{"n": 10}, ConnectionError("down")])
+      print(api("W1")["n"])
+      try:
+          api("W2")
+      except ConnectionError as err:
+          print("error:", err)
+      print(api.call_count)
+    answer: |
+      10
+      error: down
+      2
+    wrong_answers:
+      - answer: |
+          10
+          error: down
+          1
+        feedback: "call_count counts every call, including the one that raised."
+      - answer: |
+          {'n': 10}
+          error: down
+          2
+        feedback: "The first call returns the dict, and `[\"n\"]` takes its value, 10."
+    hints:
+      - "side_effect as a list: one item per call, in order."
+      - "An exception in the list is raised instead of returned."
+      - "Does a call that raises still count?"
+    explanation: |
+      The first call returns the dict, the second raises the ConnectionError, and the mock records both calls.
+
+  - id: B19-L7-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Test both paths of `load_token()`, which reads `SURVEY_API_TOKEN` and raises `RuntimeError` when it is missing. Leave the real environment untouched.
+    template: |
+      def test_missing_token_raises(monkeypatch):
+          monkeypatch.[[g1]]("SURVEY_API_TOKEN", raising=False)
+          with pytest.raises(RuntimeError, match="SURVEY_API_TOKEN"):
+              load_token()
+
+
+      def test_token_is_read(monkeypatch):
+          monkeypatch.[[g2]]("SURVEY_API_TOKEN", "test-token")
+          assert load_token() == "test-token"
+    gaps:
+      g1: {accepted: [delenv]}
+      g2: {accepted: [setenv]}
+    wrong_answers:
+      - answer: {g1: setenv, g2: setenv}
+        feedback: "The first test needs the variable gone. `delenv` removes it, and `raising=False` allows it to be missing already."
+    hints:
+      - "One test removes the variable, the other sets it."
+      - "Both methods end in `env`."
+      - "`delenv` and `setenv`."
+    explanation: |
+      `monkeypatch.delenv` and `monkeypatch.setenv` change the environment for one test, and pytest restores it afterwards.
+
+  - id: B19-L7-E4
+    type: refactor
+    difficulty: 3
+    language: python
+    prompt: |
+      Make `wave_count` testable without a network. Its new signature is `wave_count(wave_id: str, get: Callable[..., Any]) -> int`.
+
+      - Call `get(f"https://survey.example/api/waves/{wave_id}", timeout=30)`.
+      - Raise `RuntimeError` naming the status code when `response.status_code` is not 200.
+      - Return `int(response.json()["respondents"])`.
+      - Remove the `requests` import. The caller passes `requests.get` in production.
+    starter: |
+      import requests
+
+
+      def wave_count(wave_id):
+          response = requests.get(f"https://survey.example/api/waves/{wave_id}", timeout=30)
+          return response.json()["respondents"]
+    checker:
+      kind: python
+      setup: |
+        class _Response:
+            def __init__(self, status_code, payload):
+                self.status_code = status_code
+                self._payload = payload
+
+            def json(self):
+                return self._payload
+      ast_rules:
+        - id: no_requests
+          kind: forbids_pattern
+          pattern: "import requests"
+          message: "Remove the requests import. The HTTP function now arrives as the get parameter."
+        - id: typed_documented
+          kind: requires_function
+          name: wave_count
+          typed: true
+          docstring: true
+          message: "Give wave_count type hints and a docstring."
+      tests:
+        - id: reads_count
+          code: |
+            calls = []
+            def fake_get(url, timeout):
+                calls.append((url, timeout))
+                return _Response(200, {"respondents": "812"})
+            assert wave_count("W14", fake_get) == 812
+            assert calls == [("https://survey.example/api/waves/W14", 30)], calls
+          message: "Call get once with the wave URL and timeout=30, and return the respondents count as an int."
+        - id: error_status
+          code: |
+            try:
+                wave_count("W14", lambda url, timeout: _Response(503, {}))
+            except RuntimeError as err:
+                assert "503" in str(err), str(err)
+            else:
+                raise AssertionError("no RuntimeError for status 503")
+          message: "Raise RuntimeError naming the status code when it is not 200."
+    solution: |
+      from collections.abc import Callable
+      from typing import Any
+
+      API = "https://survey.example/api/waves"
+
+
+      def wave_count(wave_id: str, get: Callable[..., Any]) -> int:
+          """Number of respondents in one wave, from the survey API.
+
+          Args:
+              wave_id: Wave to look up.
+              get: HTTP GET function, such as requests.get.
+
+          Returns:
+              The respondent count.
+
+          Raises:
+              RuntimeError: If the API does not answer with status 200.
+          """
+          response = get(f"{API}/{wave_id}", timeout=30)
+          if response.status_code != 200:
+              raise RuntimeError(f"wave API returned {response.status_code}")
+          return int(response.json()["respondents"])
+    seeded_bugs:
+      - |
+        from collections.abc import Callable
+        from typing import Any
+
+
+        def wave_count(wave_id: str, get: Callable[..., Any]) -> int:
+            """Ignores the status code."""
+            response = get(f"https://survey.example/api/waves/{wave_id}", timeout=30)
+            return int(response.json()["respondents"])
+      - |
+        from collections.abc import Callable
+        from typing import Any
+
+
+        def wave_count(wave_id: str, get: Callable[..., Any]) -> int:
+            """Drops the timeout."""
+            response = get(f"https://survey.example/api/waves/{wave_id}")
+            if response.status_code != 200:
+                raise RuntimeError(f"wave API returned {response.status_code}")
+            return int(response.json()["respondents"])
+    wrong_answers:
+      - answer: |
+          from collections.abc import Callable
+          from typing import Any
+
+
+          def wave_count(wave_id: str, get: Callable[..., Any]) -> int:
+              """Ignores the status code."""
+              response = get(f"https://survey.example/api/waves/{wave_id}", timeout=30)
+              return int(response.json()["respondents"])
+        triggers: error_status
+    hints:
+      - "Add `get` as a parameter and call it where `requests.get` was."
+      - "Check `response.status_code != 200` before reading the body."
+      - "Wrap the count in `int(...)`, and import `Callable` from `collections.abc` and `Any` from `typing`."
+    explanation: |
+      With `get` as a parameter, a test passes a fake response for each case: a normal count and an error status. Production passes `requests.get`.
+
+  - id: B19-L7-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      This test calls the live API on every run. Tap the line that lets the real call through, then fix it.
+    code: |
+      # reports.py contains:
+      #     from requests import get
+      #
+      #     def wave_count(wave_id):
+      #         url = f"https://survey.example/api/waves/{wave_id}"
+      #         return get(url, timeout=30).json()["respondents"]
+
+      from unittest.mock import patch
+
+      import reports
+
+
+      def test_wave_count_reads_respondents():
+          with patch("requests.get") as fake_get:
+              fake_get.return_value.json.return_value = {"respondents": 812}
+              assert reports.wave_count("W14") == 812
+    bug_lines: [14]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: patch_lookup
+          kind: requires_pattern
+          pattern: "patch\\(\\s*[\"']reports\\.get[\"']"
+          message: "Patch the name where reports.py looks it up: patch(\"reports.get\")."
+    fix_solution: |
+      # reports.py contains:
+      #     from requests import get
+      #
+      #     def wave_count(wave_id):
+      #         url = f"https://survey.example/api/waves/{wave_id}"
+      #         return get(url, timeout=30).json()["respondents"]
+
+      from unittest.mock import patch
+
+      import reports
+
+
+      def test_wave_count_reads_respondents():
+          with patch("reports.get") as fake_get:
+              fake_get.return_value.json.return_value = {"respondents": 812}
+              assert reports.wave_count("W14") == 812
+    wrong_answers:
+      - lines: [15]
+        feedback: "Setting the fake's return value is fine. The fake is never used, because of which name it replaced."
+      - lines: [10]
+        feedback: "Importing reports is needed. The patch target is the problem."
+    hints:
+      - "Read the first line of reports.py."
+      - "Which name does wave_count look up when it runs?"
+      - "`reports.get`, not `requests.get`."
+    explanation: |
+      `from requests import get` binds `reports.get` to the real function at import. Patching `requests.get` changes a different name. Patch `reports.get`, or pass `get` in as a parameter.
+
+recap:
+  - front: "Easiest way to test code that does I/O"
+    back: "Pass the dependency in as a parameter, such as get or now. Tests pass a small fake."
+  - front: "Change an environment variable for one test"
+    back: "monkeypatch.setenv(name, value) or monkeypatch.delenv(name, raising=False). pytest restores it afterwards."
+  - front: "Mock that fails on the second call"
+    back: "Mock(side_effect=[result, ConnectionError(\"down\")]). call_count counts both calls."
+  - front: "Where to patch"
+    back: "Where the code looks the name up. After from requests import get in reports.py, patch reports.get."
+
+claims:
+  - claim: "patch on the original module leaves a name imported with from ... import pointing at the real function; patching the importing module's name works; assert_called_once_with checks arguments."
+    status: verified
+    source: "Run on Python 3.11 with pytest 9.2.0, using a stand-in module for requests."
+  - claim: "Mock(side_effect=[value, exception]) returns then raises, and call_count counts the raising call; monkeypatch.delenv(raising=False) and setenv are undone after the test."
+    status: verified
+    source: "Run on Python 3.11 and 3.13."

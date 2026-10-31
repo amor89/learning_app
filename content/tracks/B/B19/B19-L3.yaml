@@ -1,0 +1,473 @@
+id: B19-L3
+title: Parametrize, one test and many readable cases
+
+concept: |
+  `@pytest.mark.parametrize` runs one test function once per row of a table. Each row becomes its own test, with its own pass or fail:
+
+  ```python
+  @pytest.mark.parametrize(
+      ("age", "expected"),
+      [
+          pytest.param(34, "16-34", id="below-35"),
+          pytest.param(35, "35-54", id="at-35"),
+          pytest.param(None, None, id="missing"),
+      ],
+  )
+  def test_age_band(age: int | None, expected: str | None) -> None:
+      assert age_band(age) == expected
+  ```
+
+  pytest names each case from its values, such as `test_share[1-4-0.25]`. Give a case a name with `pytest.param(..., id="missing")`, so a failure reads `test_age_band[missing]`.
+
+  Choose rows on purpose. For every threshold, test the value just below it, the value on it, and a missing value. Most banding bugs are a `<` that should be a `<=`.
+
+  Mark a known bug on one row with `pytest.param(..., marks=pytest.mark.xfail(reason="bug #41", strict=True))`. The row is expected to fail. With `strict=True`, the run fails as soon as the row starts passing, which tells you to remove the mark once the bug is fixed.
+
+  Two `parametrize` decorators on one test run every combination: two values times three values make six tests.
+
+  To run every test that uses a fixture once per value, give the fixture `params`. Read the current value from the built-in `request` fixture:
+
+  ```python
+  @pytest.fixture(params=["pandas", "polars"])
+  def backend(request: pytest.FixtureRequest) -> str:
+      return request.param
+  ```
+
+  Keep the test body free of `if` statements that pick a behaviour per row. When some rows should raise and others return a value, write two tables and two tests.
+
+why_it_matters: |
+  An age banding function had one test, for age 40. A refactor changed `age < 35` to `age <= 35`, and every 35-year-old moved into the younger band. In a tracker with 800 respondents a wave, about 16 people moved band each wave. The 16-34 share rose by two points, and the client asked why. A parametrized test with rows 34 and 35 fails on that change before review.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def test_age_band():
+          for age, expected in [(20, "16-34"), (40, "35-54"), (70, "55+")]:
+              if age is None:
+                  assert age_band(age) is None
+              else:
+                  assert age_band(age) == expected
+    annotations:
+      - find: "for age, expected in [(20, \"16-34\"), (40, \"35-54\"), (70, \"55+\")]:"
+        note: "One test for three cases: the first failure hides the rest, and the report does not say which case broke."
+      - find: "if age is None:"
+        note: "Branching inside the test. The table never contains None, so this branch never runs."
+  strong:
+    code: |
+      import pytest
+
+
+      @pytest.mark.parametrize(
+          ("age", "expected"),
+          [
+              pytest.param(34, "16-34", id="below-35"),
+              pytest.param(35, "35-54", id="at-35"),
+              pytest.param(54, "35-54", id="below-55"),
+              pytest.param(55, "55+", id="at-55"),
+              pytest.param(None, None, id="missing"),
+          ],
+      )
+      def test_age_band(age: int | None, expected: str | None) -> None:
+          assert age_band(age) == expected
+    annotations:
+      - find: 'pytest.param(35, "35-54", id="at-35"),'
+        note: "Each threshold is tested on both sides. This row catches a < that became <=."
+      - find: 'pytest.param(None, None, id="missing"),'
+        note: "The missing value gets its own named row."
+      - find: "    assert age_band(age) == expected"
+        note: "One assertion, no branching. Every row runs and reports separately."
+  takeaway: |
+    One row per case, with both sides of every threshold and the missing value, each named so a failure explains itself.
+
+exercises:
+  - id: B19-L3-E1
+    type: predict_output
+    difficulty: 1
+    language: python
+    prompt: |
+      How many tests does pytest collect from this file?
+    code: |
+      import pytest
+
+
+      @pytest.mark.parametrize("total", [1, 4, 10])
+      @pytest.mark.parametrize("part", [0, 1])
+      def test_grid(part, total):
+          assert part <= total
+
+
+      @pytest.fixture(params=["pandas", "polars"])
+      def backend(request):
+          return request.param
+
+
+      def test_backend(backend):
+          assert backend in {"pandas", "polars"}
+    answer: |
+      8
+    wrong_answers:
+      - answer: "7"
+        feedback: "Stacked parametrize decorators multiply: 2 parts times 3 totals is 6, plus 2 backends."
+      - answer: "3"
+        feedback: "Each row and each fixture param becomes its own test. Count the combinations."
+      - answer: "5"
+        feedback: "Two stacked decorators give every combination, 2 x 3 = 6, not 2 + 3."
+    hints:
+      - "Two decorators on one test combine every value with every value."
+      - "A fixture with params runs each test that uses it once per value."
+      - "6 + 2."
+    explanation: |
+      `test_grid` runs for 2 x 3 = 6 combinations and `test_backend` once per param: 8 tests.
+
+  - id: B19-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A row is marked `pytest.param(1, 3, 0.33, marks=pytest.mark.xfail(reason="rounding bug #41", strict=True))`. A colleague fixes the rounding bug. What happens on the next run?
+    options:
+      - {id: a, text: "The row passes and the suite stays green."}
+      - {id: b, text: "The row is reported as XPASS(strict) and the run fails."}
+      - {id: c, text: "pytest skips the row."}
+      - {id: d, text: "pytest removes the mark itself."}
+    answer: b
+    reasons:
+      - {id: r1, text: "strict=True turns an unexpected pass into a failure, so the stale mark gets removed."}
+      - {id: r2, text: "xfail rows always fail."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "That is what happens without strict=True: an xpass is reported, and the stale mark stays forever."
+      - answer: c
+        feedback: "xfail runs the row. skip does not."
+      - answer: d
+        feedback: "pytest never edits your code. Failing the run is how it tells you."
+      - answer: b|r2
+        feedback: "Right outcome, wrong reason. An xfail row can pass. strict=True makes that pass fail the run."
+    hints:
+      - "The row now passes. Is that expected?"
+      - "What does strict change?"
+      - "An unexpected pass."
+    explanation: |
+      With strict=True, a row expected to fail that passes is reported as XPASS(strict) and fails the run, so you remove the mark.
+
+  - id: B19-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Name the row for age 34, so a failure reads `test_age_band[just-below-35]`.
+    template: |
+      @pytest.mark.parametrize(
+          ("age", "expected"),
+          [
+              pytest.[[g1]](34, "16-34", [[g2]]="just-below-35"),
+              pytest.param(35, "35-54", id="at-35"),
+          ],
+      )
+      def test_age_band(age, expected):
+          assert age_band(age) == expected
+    gaps:
+      g1: {accepted: [param]}
+      g2: {accepted: [id]}
+    wrong_answers:
+      - answer: {g1: param, g2: name}
+        feedback: "The keyword is `id`, as in the next row."
+      - answer: {g1: mark, g2: id}
+        feedback: "`pytest.mark` holds markers. A single row with options is `pytest.param`."
+    hints:
+      - "The next row shows the pattern."
+      - "One row with options."
+      - "`pytest.param(..., id=...)`."
+    explanation: |
+      `pytest.param` wraps one row so it can carry an `id` and marks.
+
+  - id: B19-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pytest]
+    prompt: |
+      `age_band(age)` returns `"16-34"` under 35, `"35-54"` under 55, `"55+"` from 55, and `None` for a missing age.
+
+      Replace the loop with a parametrized test `test_age_band(age, expected)`. Your table must include the ages 34, 35, 54 and 55, and `None`, each with its correct expected band.
+
+      The checker reads your table, runs every row against a correct `age_band`, then against two broken versions, which your rows must catch.
+    starter: |
+      import pytest
+
+
+      def age_band(age: int | None) -> str | None:
+          """Age group for reporting. None stays None."""
+          if age is None:
+              return None
+          if age < 35:
+              return "16-34"
+          if age < 55:
+              return "35-54"
+          return "55+"
+
+
+      def test_age_band():
+          for age, expected in [(20, "16-34"), (40, "35-54"), (70, "55+")]:
+              assert age_band(age) == expected
+    checker:
+      kind: python
+      setup: |
+        def _good(age):
+            if age is None:
+                return None
+            if age < 35:
+                return "16-34"
+            if age < 55:
+                return "35-54"
+            return "55+"
+
+        def _off_by_one(age):
+            if age is None:
+                return None
+            if age <= 35:
+                return "16-34"
+            if age <= 55:
+                return "35-54"
+            return "55+"
+
+        def _missing_to_old(age):
+            if age is None or age >= 55:
+                return "55+"
+            if age < 35:
+                return "16-34"
+            return "35-54"
+
+        def _rows():
+            marks = [m for m in getattr(test_age_band, "pytestmark", []) if m.name == "parametrize"]
+            assert marks, "test_age_band has no parametrize mark"
+            names, values = marks[0].args[0], marks[0].args[1]
+            if isinstance(names, str):
+                names = [n.strip() for n in names.split(",")]
+            rows = []
+            for value in values:
+                value = getattr(value, "values", value)
+                if not isinstance(value, (tuple, list)):
+                    value = (value,)
+                rows.append(dict(zip(names, value)))
+            return rows
+
+        def _failures():
+            failed = 0
+            for row in _rows():
+                try:
+                    test_age_band(**row)
+                except AssertionError:
+                    failed += 1
+            return failed
+      ast_rules:
+        - id: test_exists
+          kind: requires_function
+          name: test_age_band
+          message: "Define test_age_band(age, expected)."
+        - id: parametrized
+          kind: requires_pattern
+          pattern: "@pytest\\.mark\\.parametrize\\("
+          message: "Decorate test_age_band with @pytest.mark.parametrize."
+      tests:
+        - id: boundaries
+          code: |
+            ages = {row.get("age") for row in _rows()}
+            assert {34, 35, 54, 55, None} <= ages, sorted(ages, key=str)
+          message: "Include rows for ages 34, 35, 54, 55 and None, both sides of each threshold and the missing value."
+        - id: passes_good
+          code: |
+            age_band = _good
+            assert _failures() == 0
+          message: "Every row must pass for a correct age_band. Check the expected band for each age."
+        - id: catches_off_by_one
+          code: |
+            age_band = _off_by_one
+            assert _failures() > 0, "no row failed when < became <="
+          message: "Your rows must catch a < that became <=. Ages 35 and 55 do that when their expected bands are right."
+        - id: catches_missing
+          code: |
+            age_band = _missing_to_old
+            assert _failures() > 0, "no row failed when a missing age became 55+"
+          message: "Add a row (None, None), so a missing age that lands in 55+ fails."
+    solution: |
+      import pytest
+
+
+      def age_band(age: int | None) -> str | None:
+          """Age group for reporting. None stays None."""
+          if age is None:
+              return None
+          if age < 35:
+              return "16-34"
+          if age < 55:
+              return "35-54"
+          return "55+"
+
+
+      @pytest.mark.parametrize(
+          ("age", "expected"),
+          [
+              pytest.param(34, "16-34", id="below-35"),
+              pytest.param(35, "35-54", id="at-35"),
+              pytest.param(54, "35-54", id="below-55"),
+              pytest.param(55, "55+", id="at-55"),
+              pytest.param(None, None, id="missing"),
+          ],
+      )
+      def test_age_band(age: int | None, expected: str | None) -> None:
+          assert age_band(age) == expected
+    seeded_bugs:
+      - |
+        import pytest
+
+
+        def age_band(age: int | None) -> str | None:
+            """Age group for reporting. None stays None."""
+            if age is None:
+                return None
+            if age < 35:
+                return "16-34"
+            if age < 55:
+                return "35-54"
+            return "55+"
+
+
+        @pytest.mark.parametrize(("age", "expected"), [(20, "16-34"), (40, "35-54"), (70, "55+"), (None, None)])
+        def test_age_band(age: int | None, expected: str | None) -> None:
+            assert age_band(age) == expected
+      - |
+        import pytest
+
+
+        def age_band(age: int | None) -> str | None:
+            """Age group for reporting. None stays None."""
+            if age is None:
+                return None
+            if age < 35:
+                return "16-34"
+            if age < 55:
+                return "35-54"
+            return "55+"
+
+
+        @pytest.mark.parametrize(
+            ("age", "expected"),
+            [(34, "16-34"), (35, "16-34"), (54, "35-54"), (55, "35-54"), (None, None)],
+        )
+        def test_age_band(age: int | None, expected: str | None) -> None:
+            assert age_band(age) == expected
+    wrong_answers:
+      - answer: |
+          import pytest
+
+
+          def age_band(age: int | None) -> str | None:
+              """Age group for reporting. None stays None."""
+              if age is None:
+                  return None
+              if age < 35:
+                  return "16-34"
+              if age < 55:
+                  return "35-54"
+              return "55+"
+
+
+          @pytest.mark.parametrize(("age", "expected"), [(20, "16-34"), (40, "35-54"), (70, "55+"), (None, None)])
+          def test_age_band(age: int | None, expected: str | None) -> None:
+              assert age_band(age) == expected
+        triggers: boundaries
+      - answer: |
+          import pytest
+
+
+          def age_band(age: int | None) -> str | None:
+              """Age group for reporting. None stays None."""
+              if age is None:
+                  return None
+              if age < 35:
+                  return "16-34"
+              if age < 55:
+                  return "35-54"
+              return "55+"
+
+
+          @pytest.mark.parametrize(
+              ("age", "expected"),
+              [(34, "16-34"), (35, "16-34"), (54, "35-54"), (55, "35-54"), (None, None)],
+          )
+          def test_age_band(age: int | None, expected: str | None) -> None:
+              assert age_band(age) == expected
+        triggers: passes_good
+    hints:
+      - "One row per age, with its expected band: `(34, \"16-34\")`."
+      - "At 35 the band is already 35-54. At 55 it is already 55+."
+      - "Add `(None, None)` and keep a single assertion in the test body."
+    explanation: |
+      Rows on both sides of each threshold catch an off-by-one change, and the missing-value row catches None falling into the last band.
+
+  - id: B19-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Pick the tool for each testing need.
+    slots:
+      - id: table
+        label: "The same rule checked on 12 input and output pairs"
+        options: &tools
+          - {id: parametrize, text: "@pytest.mark.parametrize table"}
+          - {id: fixture_params, text: "Fixture with params"}
+          - {id: hypothesis, text: "Hypothesis property (lesson B17-L2)"}
+          - {id: errors_table, text: "A second parametrized test for the error cases"}
+        answer: parametrize
+      - id: backends
+        label: "Every QA test must run against both the pandas and the Polars implementation"
+        options: *tools
+        answer: fixture_params
+      - id: property
+        label: "Normalised weights must sum to 1 for any non-empty list of positive weights"
+        options: *tools
+        answer: hypothesis
+      - id: errors
+        label: "Five invalid inputs must each raise ValueError"
+        options: *tools
+        answer: errors_table
+    model_answer: |
+      - A table of known cases: parametrize.
+      - The same tests against several implementations: a fixture with params, used by every test.
+      - A rule for all inputs: a Hypothesis property.
+      - Invalid inputs: their own parametrized test with pytest.raises, not an if inside the value test.
+    wrong_answers:
+      - answer: {backends: parametrize}
+        feedback: "Parametrizing each test by hand repeats the backend list in every test. A fixture with params applies it to all of them."
+      - answer: {errors: parametrize}
+        feedback: "Mixing raising and non-raising rows in one table forces an if into the test body. Give errors their own test."
+      - answer: {property: parametrize}
+        feedback: "A table checks the cases you thought of. A property checks generated cases, including the ones you did not."
+    hints:
+      - "Known pairs, or any input?"
+      - "Which tool applies to every test that uses it?"
+      - "Keep raising and non-raising cases apart."
+    explanation: |
+      Tables for known cases, fixture params for implementations, properties for general rules, and a separate table for errors.
+
+recap:
+  - front: "Run one test over a table of cases"
+    back: "@pytest.mark.parametrize((\"age\", \"expected\"), [...]). Each row is its own test."
+  - front: "Name a parametrized case"
+    back: "pytest.param(34, \"16-34\", id=\"below-35\") reports as test_age_band[below-35]."
+  - front: "Mark a known bug on one row"
+    back: "pytest.param(..., marks=pytest.mark.xfail(reason=..., strict=True)). strict fails the run once the row passes."
+  - front: "Run every test once per implementation"
+    back: "@pytest.fixture(params=[...]) and return request.param."
+  - front: "Rows to pick for a threshold"
+    back: "Just below it, on it, and a missing value."
+
+claims:
+  - claim: "Default case IDs join the values (test_share[1-4-0.25]); stacked parametrize runs every combination; fixture params run each test once per value; a strict xfail row that passes reports [XPASS(strict)] and fails the run."
+    status: verified
+    source: "Run on pytest 9.2.0 in this repository's scratch environment."
+  - claim: "test.pytestmark holds the parametrize mark, with argnames in args[0] and rows (tuples or ParameterSet with .values) in args[1], in pytest 9.0.2 and 9.2.0."
+    status: verified
+    source: "Run in the dev and Pyodide-pin environments. The E4 checker reads it."

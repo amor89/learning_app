@@ -95,6 +95,13 @@ def _exec_in(
             except Exception as err:
                 failures.append(test["id"])
                 first = first or (test["id"], f"{test['message']} ({_short_error(err)})")
+            except BaseException as err:
+                # pytest.fail, pytest.skip and a pytest.raises that saw no error raise
+                # outcome exceptions that do not derive from Exception.
+                if isinstance(err, KeyboardInterrupt):
+                    raise
+                failures.append(test["id"])
+                first = first or (test["id"], f"{test['message']} ({_short_error(err)})")
     stdout = buffer.getvalue()[:MAX_OUTPUT_CHARS]
     if first:
         return CheckResult(False, first[0], first[1], failures, stdout)

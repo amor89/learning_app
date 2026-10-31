@@ -1,0 +1,440 @@
+id: B19-L8
+title: Coverage, markers and a test suite you can trust in CI
+
+concept: |
+  **Coverage** tells you which code your tests ran. It does not tell you whether they checked anything. A test whose only assertion is `assert result` reaches every line and catches almost nothing (lesson B17-L1). Use coverage to find code no test reaches, not as proof of quality.
+
+  With pytest-cov 7.1:
+
+  ```bash
+  pytest --cov=survey_stats --cov-branch --cov-report=term-missing --cov-fail-under=90
+  ```
+
+  `--cov-branch` adds **branch coverage**. Line coverage counts a line once it runs. Branch coverage also asks whether each `if` went both ways. A function with `if cap is not None:` and a single test that passes a cap runs every line, 100% line coverage, but never takes the path where `cap` is `None`. The report lists that missed jump as `2->4` in the Missing column, and the file drops to 83%.
+
+  `--cov-fail-under=90` makes pytest exit with an error when total coverage falls below 90%. Agree a floor with the team and raise it over time. Do not chase 100% with tests that assert nothing.
+
+  **Markers** label tests. Register each one in `pyproject.toml`, and turn on `--strict-markers`, so a typo such as `@pytest.mark.slwo` stops the run instead of creating a new, unused marker:
+
+  ```toml
+  [tool.pytest.ini_options]
+  addopts = "--strict-markers"
+  markers = ["slow: takes more than a few seconds"]
+  ```
+
+  Run `pytest -m "not slow"` while you work, and the full suite in CI. pytest 9 also accepts `strict = true`, which turns on strict markers along with other strict checks.
+
+  A **flaky** test passes and fails without a code change. Find the cause: a missing seed, shared state, the clock or the network. Never add a retry and move on.
+
+  Coverage misses weak assertions. **Mutation testing** finds them: mutmut 3.8 changes your code in small ways, such as `<` to `<=`, and reports every change that no test catches. It automates the habit of breaking the code once.
+
+why_it_matters: |
+  A pricing module had 96% line coverage, and the team was proud of it. Branch coverage was 71%. Every `else` path that handled a missing discount code was untested, including one that applied a 100% discount. It shipped and cost a client three days of free orders. `--cov-branch` with a 90% floor would have blocked the merge and pointed at the exact branches.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      # pyproject.toml has no marker settings
+      import pytest
+
+
+      @pytest.mark.slwo
+      def test_coverage_simulation():
+          ...
+
+
+      def test_capped():
+          assert capped(5, cap=3)
+    annotations:
+      - find: "@pytest.mark.slwo"
+        note: "A typo. Without --strict-markers it only warns, so `-m \"not slow\"` still runs this slow test."
+      - find: "assert capped(5, cap=3)"
+        note: "Runs every line of capped, so line coverage says 100%. It checks nothing, and the cap=None path never runs."
+  strong:
+    code: |
+      # pyproject.toml:
+      #   addopts = "--strict-markers"
+      #   markers = ["slow: takes more than a few seconds"]
+      import pytest
+
+
+      @pytest.mark.slow
+      def test_coverage_simulation(rng):
+          ...
+
+
+      @pytest.mark.parametrize(
+          ("weight", "cap", "expected"),
+          [(5, 3, 3), (2, 3, 2), (5, None, 5)],
+      )
+      def test_capped(weight, cap, expected):
+          assert capped(weight, cap=cap) == expected
+    annotations:
+      - find: "#   addopts = \"--strict-markers\""
+        note: "An unregistered marker now stops the run."
+      - find: "@pytest.mark.slow"
+        note: "A registered marker. `pytest -m \"not slow\"` skips it locally, and CI runs it."
+      - find: "[(5, 3, 3), (2, 3, 2), (5, None, 5)],"
+        note: "Rows for both sides of the if, so branch coverage reaches 100% and each row asserts a value."
+  takeaway: |
+    Measure branch coverage and set a floor, register markers strictly, fix flaky tests at the cause, and remember that coverage says what ran, not what was checked.
+
+practical:
+  platform: laptop
+  title: "Build a complete test suite for a survey package"
+  intro: |
+    Work in `labs/testing/` in this repository. It holds a small package, `survey_stats`, with age bands, weight helpers, a Wilson interval and an API client. You need the `dev` dependency group, which includes pytest 9, pytest-cov and statsmodels. Each step uses one lesson of module B19.
+  steps:
+    - "From the repository root, run `pip install -e . --group dev`, then `cd labs/testing` and `pytest`. One example test passes. Read every file in `src/survey_stats/`."
+    - "In `tests/test_bands.py`, write a parametrized test for `age_band` with named rows on both sides of 35 and 55, and a missing age (lesson B19-L3)."
+    - "In `tests/conftest.py`, write a `make_respondents` factory fixture. Use it in `tests/test_weights.py` to test `cap_weights` with `assert_frame_equal`, including a missing weight and a check that the input is unchanged (lessons B19-L2 and B19-L4)."
+    - "Test both errors of `normalise` and of `cap_weights` with `pytest.raises` and `match` (lesson B19-L1)."
+    - "In `tests/test_intervals.py`, compare `wilson_interval` with statsmodels, then write a seeded coverage simulation with a tolerance of four standard errors. Mark it `@pytest.mark.slow` (lessons B19-L5 and B19-L8)."
+    - "In `tests/test_api.py`, test `wave_count` with a fake `get`: one test for a 200 response that also checks the URL and timeout, one for a 503 (lesson B19-L7)."
+    - "Run `pytest --cov=survey_stats --cov-branch --cov-report=term-missing`. Add tests until the Missing column is empty. Then run `pytest -m \"not slow\"` and check the simulation is deselected."
+    - "Break each function once, for example change `<` to `<=` in `age_band`. Confirm a test fails each time, then undo the change. Finally run `pytest reference_tests` and compare the reference suite with yours."
+
+exercises:
+  - id: B19-L8-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A module has 100% line coverage, yet a bug in the path where `cap` is `None` shipped. Which setting would have pointed at the untested path?
+    options:
+      - {id: a, text: "`--cov-branch`"}
+      - {id: b, text: "`--cov-fail-under=100` on line coverage"}
+      - {id: c, text: "`-m \"not slow\"`"}
+      - {id: d, text: "`--strict-markers`"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Branch coverage reports each if that never went one of its two ways, even when every line ran."}
+      - {id: r2, text: "Branch coverage makes the tests run faster."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Line coverage was already 100%, so the floor passes. Lines ran. A path did not."
+      - answer: c
+        feedback: "That deselects slow tests. It measures nothing."
+      - answer: d
+        feedback: "Strict markers catch marker typos, not untested paths."
+      - answer: a|r2
+        feedback: "Right setting, wrong reason. Branch coverage adds measurement. It does not speed anything up."
+    hints:
+      - "Every line ran. What did not happen?"
+      - "An if has two ways out."
+      - "Which report counts both?"
+    explanation: |
+      `--cov-branch` reports a missed jump such as `2->4` for an if whose false path never ran, even at 100% line coverage.
+
+  - id: B19-L8-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      `survey/weights.py` holds this function, and the only test is `assert capped(5, cap=3) == 3`. pytest-cov reports the file's coverage without `--cov-branch` and with it. What are the two percentages? Answer as two numbers, such as `90 75`.
+    code: |
+      def capped(w, cap=None):
+          if cap is not None:
+              w = min(w, cap)
+          return w
+    answer: |
+      100 83
+    accepted:
+      - "100% 83%"
+      - "100, 83"
+      - "100%, 83%"
+    wrong_answers:
+      - answer: "75 67"
+        feedback: "Every line runs when cap=3: the if, the assignment and the return. Line coverage is 100%."
+      - answer: "100 100"
+        feedback: "The if never takes its false path, the jump from line 2 straight to line 4. Branch coverage counts that."
+      - answer: "100 50"
+        feedback: "pytest-cov counts statements and branches together: 4 of 4 statements plus 1 of 2 branches is 5 of 6, 83%."
+    hints:
+      - "Which lines run when cap is 3?"
+      - "The if has two branches. How many were taken?"
+      - "Branch coverage counts statements and branches together: (4 + 1) / (4 + 2)."
+    explanation: |
+      All four statements run, so line coverage is 100%. With branches, 5 of 6 items are covered, 83%, and the report lists the missed jump `2->4`.
+
+  - id: B19-L8-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      In `pyproject.toml`, register a `slow` marker and make any unregistered marker stop the run.
+    template: |
+      [tool.pytest.ini_options]
+      addopts = "[[g1]]"
+      markers = ["[[g2]]: takes more than a few seconds"]
+    gaps:
+      g1: {accepted: [--strict-markers]}
+      g2: {accepted: [slow]}
+    wrong_answers:
+      - answer: {g1: --strict, g2: slow}
+        feedback: "`--strict` is not the option name here. The command-line flag is `--strict-markers`. In config, pytest 9 also offers `strict = true`."
+      - answer: {g1: -m slow, g2: slow}
+        feedback: "`-m slow` would run only slow tests on every run. Registering markers strictly is `--strict-markers`."
+    hints:
+      - "The flag names what it makes strict."
+      - "The marker name goes before the colon."
+      - "`--strict-markers` and `slow`."
+    explanation: |
+      Registered markers document themselves, and `--strict-markers` turns a typo into an error instead of a silently unused marker.
+
+  - id: B19-L8-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pytest]
+    prompt: |
+      `risk_band(score)` is already imported in your test file:
+
+      ```python
+      def risk_band(score: float | None) -> str:
+          if score is None:
+              return "unknown"
+          if score >= 0.8:
+              return "high"
+          if score >= 0.5:
+              return "medium"
+          return "low"
+      ```
+
+      Write tests, as functions whose names start with `test_`, that run every branch **and** catch an off-by-one change. The checker measures which lines your tests run, then runs them against two changed versions: `>= 0.8` becomes `> 0.8`, and `>= 0.5` becomes `> 0.5`. Your tests must fail for both.
+    starter: |
+      def test_risk_band():
+          assert risk_band(0.9) == "high"
+          assert risk_band(0.1) == "low"
+    checker:
+      kind: python
+      setup: |
+        import sys
+
+        def _target(score):
+            if score is None:
+                return "unknown"
+            if score >= 0.8:
+                return "high"
+            if score >= 0.5:
+                return "medium"
+            return "low"
+
+        def _strict_high(score):
+            if score is None:
+                return "unknown"
+            if score > 0.8:
+                return "high"
+            if score >= 0.5:
+                return "medium"
+            return "low"
+
+        def _strict_medium(score):
+            if score is None:
+                return "unknown"
+            if score >= 0.8:
+                return "high"
+            if score > 0.5:
+                return "medium"
+            return "low"
+
+        _RETURN_OFFSETS = {2, 4, 6, 7}
+
+        def _tests():
+            return [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+
+        def _call(test):
+            marks = [m for m in getattr(test, "pytestmark", []) if m.name == "parametrize"]
+            if not marks:
+                test()
+                return
+            names, values = marks[0].args[0], marks[0].args[1]
+            if isinstance(names, str):
+                names = [n.strip() for n in names.split(",")]
+            for value in values:
+                value = getattr(value, "values", value)
+                if not isinstance(value, (tuple, list)):
+                    value = (value,)
+                test(**dict(zip(names, value)))
+
+        def _run_all(fn):
+            globals()["risk_band"] = fn
+            for test in _tests():
+                _call(test)
+
+        def _lines_run():
+            code = _target.__code__
+            seen = set()
+
+            def tracer(frame, event, arg):
+                if frame.f_code is code:
+                    if event == "line":
+                        seen.add(frame.f_lineno - code.co_firstlineno)
+                    return tracer
+                return None
+
+            previous = sys.gettrace()
+            sys.settrace(tracer)
+            try:
+                _run_all(_target)
+            finally:
+                sys.settrace(previous)
+            return seen
+
+        def _some_test_fails(fn):
+            try:
+                _run_all(fn)
+            except AssertionError:
+                return True
+            return False
+      ast_rules:
+        - id: has_tests
+          kind: requires_pattern
+          pattern: "def test_\\w+\\("
+          message: "Write at least one function whose name starts with test_."
+      tests:
+        - id: passes_correct
+          code: |
+            _run_all(_target)
+          message: "Your tests must pass for the correct risk_band. Check each expected band."
+        - id: every_branch
+          code: |
+            missing = _RETURN_OFFSETS - _lines_run()
+            assert not missing, missing
+          message: "Run every branch: include a missing score, a high, a medium and a low score."
+        - id: catches_high_boundary
+          code: |
+            assert _some_test_fails(_strict_high), "no test failed when >= 0.8 became > 0.8"
+          message: "Coverage is not enough: add a case exactly at 0.8, which must be high."
+        - id: catches_medium_boundary
+          code: |
+            assert _some_test_fails(_strict_medium), "no test failed when >= 0.5 became > 0.5"
+          message: "Add a case exactly at 0.5, which must be medium."
+    solution: |
+      import pytest
+
+
+      @pytest.mark.parametrize(
+          ("score", "expected"),
+          [
+              pytest.param(None, "unknown", id="missing"),
+              pytest.param(0.8, "high", id="at-0.8"),
+              pytest.param(0.79, "medium", id="below-0.8"),
+              pytest.param(0.5, "medium", id="at-0.5"),
+              pytest.param(0.49, "low", id="below-0.5"),
+          ],
+      )
+      def test_risk_band(score: float | None, expected: str) -> None:
+          assert risk_band(score) == expected
+    seeded_bugs:
+      - |
+        def test_risk_band():
+            assert risk_band(None) == "unknown"
+            assert risk_band(0.9) == "high"
+            assert risk_band(0.6) == "medium"
+            assert risk_band(0.1) == "low"
+      - |
+        def test_risk_band():
+            assert risk_band(None) == "unknown"
+            assert risk_band(0.8) == "high"
+            assert risk_band(0.6) == "medium"
+            assert risk_band(0.1) == "low"
+    wrong_answers:
+      - answer: |
+          def test_risk_band():
+              assert risk_band(None) == "unknown"
+              assert risk_band(0.9) == "high"
+              assert risk_band(0.6) == "medium"
+              assert risk_band(0.1) == "low"
+        triggers: catches_high_boundary
+      - answer: |
+          def test_risk_band():
+              assert risk_band(None) == "unknown"
+              assert risk_band(0.8) == "high"
+              assert risk_band(0.6) == "medium"
+              assert risk_band(0.1) == "low"
+        triggers: catches_medium_boundary
+      - answer: |
+          def test_risk_band():
+              assert risk_band(0.9) == "high"
+              assert risk_band(0.1) == "low"
+        triggers: every_branch
+    hints:
+      - "Four return statements need at least four cases, including None."
+      - "A score of 0.9 runs the high branch but cannot tell `>=` from `>`."
+      - "Test exactly 0.8 and exactly 0.5, the values where the two versions disagree."
+    explanation: |
+      Cases at 0.9, 0.6, 0.1 and None reach every line, yet miss both off-by-one changes. Only values on the thresholds tell `>=` from `>`. Coverage shows what ran. Mutants show what was checked.
+
+  - id: B19-L8-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Set up the team's test runs.
+    slots:
+      - id: pr
+        label: "Every pull request"
+        options:
+          - {id: fast_cov, text: "pytest with --cov-branch and --cov-fail-under at the agreed floor, all tests including slow"}
+          - {id: none, text: "No tests, to keep pull requests quick"}
+        answer: fast_cov
+      - id: local
+        label: "While you work on your laptop"
+        options:
+          - {id: not_slow, text: "pytest -m \"not slow\", plus -x and --lf to iterate"}
+          - {id: full, text: "The full suite with coverage after every edit"}
+        answer: not_slow
+      - id: flaky
+        label: "A test fails one run in ten with no code change"
+        options:
+          - {id: root_cause, text: "Find the cause: seed, shared state, clock or network, and fix it"}
+          - {id: retry, text: "Add an automatic retry"}
+        answer: root_cause
+      - id: floor
+        label: "The coverage floor"
+        options:
+          - {id: ratchet, text: "Start near today's branch coverage and raise it as tests improve"}
+          - {id: hundred, text: "Require 100% from day one, whatever the tests assert"}
+        answer: ratchet
+    model_answer: |
+      - Pull requests run everything, with branch coverage and a floor.
+      - Locally, deselect slow tests and iterate with -x and --lf.
+      - Flaky tests get a root cause, never a retry.
+      - The floor starts where the team is and only rises.
+    wrong_answers:
+      - answer: {flaky: retry}
+        feedback: "A retry hides the failure and whatever causes it. Seeds, isolation and fakes remove the cause."
+      - answer: {floor: hundred}
+        feedback: "A 100% demand produces tests that run lines and assert nothing. Set a floor and raise it."
+      - answer: {local: full}
+        feedback: "A slow loop makes people stop running tests. Keep the full run for CI."
+    hints:
+      - "Where must everything run?"
+      - "What keeps the local loop fast?"
+      - "Fix causes, raise floors gradually."
+    explanation: |
+      CI runs the whole suite with branch coverage and a rising floor. Developers run the fast subset. Flaky tests are fixed at the cause.
+
+recap:
+  - front: "Line coverage against branch coverage"
+    back: "Line: did each line run? Branch (--cov-branch): did each if go both ways? A missed jump shows as 2->4 in Missing."
+  - front: "Fail CI when coverage drops"
+    back: "pytest --cov=pkg --cov-branch --cov-fail-under=90. Start near today's level and raise it."
+  - front: "Catch marker typos"
+    back: "Register markers under markers = [...] and add --strict-markers to addopts. pytest 9 also offers strict = true."
+  - front: "What coverage cannot tell you"
+    back: "Whether tests check anything. Mutation testing (mutmut 3.8) changes the code and reports changes no test catches."
+  - front: "A flaky test"
+    back: "Fix the cause: seed, shared state, clock or network. A retry hides it."
+
+claims:
+  - claim: "With one test passing a cap, pytest-cov reports 100% line coverage and 83% with --cov-branch, listing the missed jump 2->4; --cov-fail-under=90 exits 1 with 'Coverage failure'."
+    status: verified
+    source: "Run on pytest 9.2.0, pytest-cov 7.1.0, coverage 7.17.0."
+  - claim: "An unregistered marker warns (PytestUnknownMarkWarning) without strict mode, and stops collection with --strict-markers or strict = true; -m \"not slow\" deselects marked tests."
+    status: verified
+    source: "Run on pytest 9.0.2 and 9.2.0."
+  - claim: "mutmut 3.8.1 is the current release on PyPI."
+    status: search-only
+    source: "pip index versions mutmut, October 2026."

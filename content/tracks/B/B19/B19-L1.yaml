@@ -1,0 +1,464 @@
+id: B19-L1
+title: How pytest finds, runs and reports your tests
+
+concept: |
+  pytest only runs what it **collects**. With default settings in pytest 9, it looks for:
+
+  - files named `test_*.py` or `*_test.py`,
+  - functions in those files whose names start with `test`,
+  - methods starting with `test` inside classes whose names start with `Test`, as long as the class has no `__init__`.
+
+  A function called `check_weights` in `validation.py` never runs. pytest does not warn you about it.
+
+  Use plain `assert`. pytest rewrites assert statements, so a failure shows the values on both sides and the call that produced them:
+
+  ```text
+  E       assert 0.3333333333333333 == 0.33
+  E        +  where 0.3333333333333333 = share(1, 3)
+  ```
+
+  Test errors on purpose with `pytest.raises`. Pass `match=` a regular expression. pytest searches the error message for it, so a `ValueError` raised for a different reason fails the test:
+
+  ```python
+  with pytest.raises(ValueError, match="negative weight"):
+      normalise([2.0, -1.0])
+  ```
+
+  If nothing is raised, the test fails with "DID NOT RAISE". An exception of another type passes straight through and fails the test too.
+
+  Run less while you work:
+
+  - `pytest tests/test_share.py::test_zero_total` runs one test by its **node ID**.
+  - `pytest -k "zero and not slow"` runs tests whose names match the expression.
+  - `pytest -x` stops at the first failure. `pytest --lf` reruns only the tests that failed last time.
+
+  The exit code tells CI what happened: 0 when everything passed, 1 when a test failed, and 5 when pytest collected no tests at all. Set where tests live once, in `pyproject.toml`: `testpaths = ["tests"]` under `[tool.pytest.ini_options]`, or under `[tool.pytest]`, which pytest 9 also reads.
+
+why_it_matters: |
+  A team kept 30 data checks in `validation_checks.py`, as functions named `validate_*`. The rest of the suite lived in properly named files, so every CI run was green. pytest never collected the 30 checks. A broken weight cap shipped in four monthly reports before anyone noticed. Renaming the file and the functions turned up two failures on the first run.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      # validation_checks.py
+      def check_negative_weights():
+          try:
+              normalise([2.0, -1.0])
+              print("no error!")
+          except Exception:
+              print("ok")
+    annotations:
+      - find: "# validation_checks.py"
+        note: "The file name does not match test_*.py, so pytest never collects it."
+      - find: "def check_negative_weights():"
+        note: "The function name does not start with test either."
+      - find: "except Exception:"
+        note: "Any error passes, including a TypeError from a typo."
+      - find: 'print("no error!")'
+        note: "A print never fails a test. Nobody reads it in CI."
+  strong:
+    code: |
+      # tests/test_normalise.py
+      import pytest
+
+      from survey.weights import normalise
+
+
+      def test_weights_sum_to_one() -> None:
+          assert sum(normalise([1.0, 3.0])) == pytest.approx(1.0)
+
+
+      def test_negative_weight_raises() -> None:
+          with pytest.raises(ValueError, match="negative weight"):
+              normalise([2.0, -1.0])
+    annotations:
+      - find: "# tests/test_normalise.py"
+        note: "A collected file name, in the folder that testpaths names."
+      - find: "def test_negative_weight_raises() -> None:"
+        note: "A collected function, named for the behaviour it checks."
+      - find: 'with pytest.raises(ValueError, match="negative weight"):'
+        note: "Fails if nothing is raised, if another type is raised, or if the message differs."
+  takeaway: |
+    Name files and functions so pytest collects them, assert instead of printing, and pin expected errors with pytest.raises and match.
+
+exercises:
+  - id: B19-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      With default settings, which of these does pytest 9 collect and run?
+    options:
+      - {id: a, text: "`def check_weights():` in `tests/test_weights.py`"}
+      - {id: b, text: "`def test_weights():` in `tests/weight_checks.py`"}
+      - {id: c, text: "`def test_weights():` in `tests/weights_test.py`"}
+      - {id: d, text: "`def test_total(self):` in `class WeightTests:` in `tests/test_weights.py`"}
+    answer: c
+    reasons:
+      - {id: r1, text: "Both the file name (`*_test.py`) and the function name (`test*`) match the default patterns."}
+      - {id: r2, text: "pytest runs every function in the tests folder."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The file matches, but the function name must start with `test`."
+      - answer: b
+        feedback: "The function matches, but `weight_checks.py` matches neither `test_*.py` nor `*_test.py`."
+      - answer: d
+        feedback: "Test classes must start with `Test`. `WeightTests` does not."
+      - answer: c|r2
+        feedback: "Right choice, wrong reason. pytest collects only names that match its patterns."
+    hints:
+      - "Check the file name and the function name separately."
+      - "Files: `test_*.py` or `*_test.py`. Functions: `test*`."
+      - "Only one option matches both."
+    explanation: |
+      Collection needs a matching file name and a matching function name. A class needs a `Test` prefix and no `__init__`.
+
+  - id: B19-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (pytest 9)
+    code: |
+      import pytest
+
+
+      def check(total):
+          if total < 0:
+              raise ValueError(f"total must be >= 0, got {total}")
+
+
+      with pytest.raises(ValueError, match=r"got -\d"):
+          check(-5)
+      print("first ok")
+
+      try:
+          with pytest.raises(ValueError, match="must be > 0"):
+              check(-5)
+      except AssertionError:
+          print("pattern did not match")
+    answer: |
+      first ok
+      pattern did not match
+    wrong_answers:
+      - answer: |
+          first ok
+        feedback: "The second block raises a ValueError, but its message does not contain `must be > 0`. A failed match raises AssertionError, which the `except` catches."
+      - answer: |
+          pattern did not match
+        feedback: "`match` is a regular expression searched in the message. `got -\\d` finds `got -5`, so the first block passes."
+    hints:
+      - "`match` is searched in the message with a regular expression."
+      - "Does `total must be >= 0, got -5` contain `got -` and a digit?"
+      - "Does it contain `must be > 0`?"
+    explanation: |
+      Both blocks raise a ValueError. Only the first message matches its pattern. A failed match is reported as an AssertionError.
+
+  - id: B19-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Run only the tests whose names contain `zero`, and stop at the first failure.
+    template: |
+      pytest -k [[g1]] -[[g2]]
+    gaps:
+      g1: {accepted: [zero, '"zero"', "'zero'"]}
+      g2: {accepted: [x]}
+    wrong_answers:
+      - answer: {g1: zero, g2: s}
+        feedback: "`-s` shows print output. The flag that stops at the first failure is `-x`."
+      - answer: {g1: zero, g2: q}
+        feedback: "`-q` makes the output shorter. Stopping early is `-x`."
+    hints:
+      - "`-k` takes an expression matched against test names."
+      - "The stop-early flag is one letter."
+      - "`-k zero -x`."
+    explanation: |
+      `-k zero` selects tests whose names contain `zero`. `-x` stops the run at the first failure.
+
+  - id: B19-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pytest]
+    prompt: |
+      `normalise(weights)` divides each weight by the total. It must raise `ValueError` with a message containing `negative weight` for any negative weight, and `ValueError` containing `total weight is 0` when the weights sum to 0.
+
+      Write two tests with `pytest.raises` and `match=`:
+
+      - `test_negative_weight_raises()` calls `normalise([2.0, -1.0])`.
+      - `test_zero_total_raises()` calls `normalise([0.0, 0.0])`.
+
+      The checker runs your tests against a correct `normalise`, which must pass, and against three broken versions, which your tests must catch.
+    starter: |
+      import pytest
+
+
+      def normalise(weights: list[float]) -> list[float]:
+          """Scale weights so they sum to 1."""
+          for i, w in enumerate(weights):
+              if w < 0:
+                  raise ValueError(f"negative weight at index {i}")
+          total = sum(weights)
+          if total == 0:
+              raise ValueError("total weight is 0")
+          return [w / total for w in weights]
+
+
+      def test_negative_weight_raises():
+          try:
+              normalise([2.0, -1.0])
+          except ValueError:
+              pass
+
+
+      def test_zero_total_raises():
+          try:
+              normalise([0.0, 0.0])
+          except Exception:
+              pass
+    checker:
+      kind: python
+      setup: |
+        def _good(weights):
+            for i, w in enumerate(weights):
+                if w < 0:
+                    raise ValueError(f"negative weight at index {i}")
+            total = sum(weights)
+            if total == 0:
+                raise ValueError("total weight is 0")
+            return [w / total for w in weights]
+
+        def _no_negative_check(weights):
+            total = sum(weights)
+            if total == 0:
+                raise ValueError("total weight is 0")
+            return [w / total for w in weights]
+
+        def _wrong_reason(weights):
+            if len(weights) < 3:
+                raise ValueError("need at least 3 weights")
+            return _good(weights)
+
+        def _divides_by_zero(weights):
+            for i, w in enumerate(weights):
+                if w < 0:
+                    raise ValueError(f"negative weight at index {i}")
+            total = sum(weights)
+            return [w / total for w in weights]
+
+        def _must_fail(test, label):
+            try:
+                test()
+            except BaseException:
+                return
+            raise AssertionError(label)
+      ast_rules:
+        - id: negative_exists
+          kind: requires_function
+          name: test_negative_weight_raises
+          message: "Define test_negative_weight_raises."
+        - id: zero_exists
+          kind: requires_function
+          name: test_zero_total_raises
+          message: "Define test_zero_total_raises."
+        - id: uses_raises
+          kind: requires_pattern
+          pattern: "pytest\\.raises\\("
+          message: "Use `with pytest.raises(...)` so the test fails when nothing is raised."
+      tests:
+        - id: passes_good
+          code: |
+            normalise = _good
+            test_negative_weight_raises()
+            test_zero_total_raises()
+          message: "Your tests must pass for a correct normalise."
+        - id: catches_no_raise
+          code: |
+            normalise = _no_negative_check
+            _must_fail(test_negative_weight_raises, "test_negative_weight_raises passed when no error was raised")
+          message: "test_negative_weight_raises must fail when normalise accepts a negative weight. A try/except that passes on no error cannot catch that."
+        - id: catches_zero_division
+          code: |
+            normalise = _divides_by_zero
+            _must_fail(test_zero_total_raises, "test_zero_total_raises passed when normalise raised ZeroDivisionError")
+          message: "test_zero_total_raises must expect ValueError, not any exception. A ZeroDivisionError is a bug."
+        - id: catches_wrong_reason
+          code: |
+            normalise = _wrong_reason
+            _must_fail(test_negative_weight_raises, "test_negative_weight_raises passed for a ValueError about something else")
+            _must_fail(test_zero_total_raises, "test_zero_total_raises passed for a ValueError about something else")
+          message: "Add `match=` with the expected message, so a ValueError raised for another reason fails the test."
+    solution: |
+      import pytest
+
+
+      def normalise(weights: list[float]) -> list[float]:
+          """Scale weights so they sum to 1."""
+          for i, w in enumerate(weights):
+              if w < 0:
+                  raise ValueError(f"negative weight at index {i}")
+          total = sum(weights)
+          if total == 0:
+              raise ValueError("total weight is 0")
+          return [w / total for w in weights]
+
+
+      def test_negative_weight_raises() -> None:
+          with pytest.raises(ValueError, match="negative weight"):
+              normalise([2.0, -1.0])
+
+
+      def test_zero_total_raises() -> None:
+          with pytest.raises(ValueError, match="total weight is 0"):
+              normalise([0.0, 0.0])
+    seeded_bugs:
+      - |
+        import pytest
+
+
+        def normalise(weights: list[float]) -> list[float]:
+            """Scale weights so they sum to 1."""
+            for i, w in enumerate(weights):
+                if w < 0:
+                    raise ValueError(f"negative weight at index {i}")
+            total = sum(weights)
+            if total == 0:
+                raise ValueError("total weight is 0")
+            return [w / total for w in weights]
+
+
+        def test_negative_weight_raises() -> None:
+            with pytest.raises(ValueError):
+                normalise([2.0, -1.0])
+
+
+        def test_zero_total_raises() -> None:
+            with pytest.raises(ValueError):
+                normalise([0.0, 0.0])
+      - |
+        import pytest
+
+
+        def normalise(weights: list[float]) -> list[float]:
+            """Scale weights so they sum to 1."""
+            for i, w in enumerate(weights):
+                if w < 0:
+                    raise ValueError(f"negative weight at index {i}")
+            total = sum(weights)
+            if total == 0:
+                raise ValueError("total weight is 0")
+            return [w / total for w in weights]
+
+
+        def test_negative_weight_raises() -> None:
+            with pytest.raises(ValueError, match="negative weight"):
+                normalise([2.0, -1.0])
+
+
+        def test_zero_total_raises() -> None:
+            with pytest.raises(Exception):
+                normalise([0.0, 0.0])
+    wrong_answers:
+      - answer: |
+          import pytest
+
+
+          def normalise(weights: list[float]) -> list[float]:
+              """Scale weights so they sum to 1."""
+              for i, w in enumerate(weights):
+                  if w < 0:
+                      raise ValueError(f"negative weight at index {i}")
+              total = sum(weights)
+              if total == 0:
+                  raise ValueError("total weight is 0")
+              return [w / total for w in weights]
+
+
+          def test_negative_weight_raises() -> None:
+              with pytest.raises(ValueError):
+                  normalise([2.0, -1.0])
+
+
+          def test_zero_total_raises() -> None:
+              with pytest.raises(ValueError):
+                  normalise([0.0, 0.0])
+        triggers: catches_wrong_reason
+      - answer: |
+          import pytest
+
+
+          def normalise(weights: list[float]) -> list[float]:
+              """Scale weights so they sum to 1."""
+              for i, w in enumerate(weights):
+                  if w < 0:
+                      raise ValueError(f"negative weight at index {i}")
+              total = sum(weights)
+              if total == 0:
+                  raise ValueError("total weight is 0")
+              return [w / total for w in weights]
+
+
+          def test_negative_weight_raises() -> None:
+              with pytest.raises(ValueError, match="negative weight"):
+                  normalise([2.0, -1.0])
+
+
+          def test_zero_total_raises() -> None:
+              with pytest.raises(Exception):
+                  normalise([0.0, 0.0])
+        triggers: catches_zero_division
+    hints:
+      - "A try/except that ignores the 'no error' case passes for broken code."
+      - "`with pytest.raises(ValueError, match=\"...\"):` around the call."
+      - "Use `negative weight` and `total weight is 0` as the patterns."
+    explanation: |
+      `pytest.raises` fails when nothing is raised and lets other exception types through. `match` rules out a ValueError raised for the wrong reason.
+
+  - id: B19-L1-E5
+    type: order
+    difficulty: 3
+    prompt: |
+      A test fails in CI. Put the steps to fix it in order.
+    items:
+      - {id: a, text: "Copy the failing test's node ID from the CI log."}
+      - {id: b, text: "Run that one test locally: `pytest tests/test_share.py::test_zero_total`."}
+      - {id: c, text: "Read the assertion output: the values on both sides and the call that produced them."}
+      - {id: d, text: "Change the code until that test passes."}
+      - {id: e, text: "Run `pytest --lf` to rerun every test that failed last time."}
+      - {id: f, text: "Run the whole suite, then push."}
+    answer: [a, b, c, d, e, f]
+    wrong_answers:
+      - answer: [a, b, d, c, e, f]
+        feedback: "Read the failure before you change code. The assertion output often names the bug."
+      - answer: [a, b, c, d, f, e]
+        feedback: "`--lf` is the quick check before the full run, not after it."
+    hints:
+      - "Start from what CI tells you."
+      - "Reproduce and read before you change anything."
+      - "Widen the run step by step: one test, last failures, everything."
+    explanation: |
+      Reproduce the single failure, read pytest's output, fix, then widen the run: last failures first, the whole suite last.
+
+recap:
+  - front: "What pytest collects by default"
+    back: "Files test_*.py or *_test.py, functions starting with test, and test methods in Test classes without __init__."
+  - front: "Test that code raises the right error"
+    back: "with pytest.raises(ValueError, match=\"pattern\"): call(). match searches the message with a regular expression."
+  - front: "Run one test, or only failures"
+    back: "pytest path::test_name for one test. -k expr selects by name. -x stops at the first failure. --lf reruns last failures."
+  - front: "pytest exit codes"
+    back: "0 all passed, 1 a test failed, 5 no tests collected."
+
+claims:
+  - claim: "Default collection: test_*.py and *_test.py files, test-prefixed functions, Test-prefixed classes without __init__ (with a PytestCollectionWarning)."
+    status: verified
+    source: "Run on pytest 9.2.0 in this repository's scratch environment."
+  - claim: "pytest.raises fails with 'DID NOT RAISE' when nothing is raised, lets other exception types through, and raises AssertionError when match does not find the pattern."
+    status: verified
+    source: "Run on pytest 9.0.2 (Pyodide pin) and 9.2.0."
+  - claim: "Exit codes 0, 1 and 5; -k, -x, --lf and node IDs; testpaths read from [tool.pytest.ini_options] and from [tool.pytest]."
+    status: verified
+    source: "Run on pytest 9.0.2 and 9.2.0."

@@ -33,7 +33,8 @@ Checked on 25 September 2026. Status key:
 | delta-spark (local harness) | 4.4.0 latest. 4.0.1 pairs with Spark 4.0 | 4.0.1 | Verified: `pytest practice --solutions` passes with PySpark 4.0.4 and delta-spark 4.0.1 on Java 21 |
 | ruff | 0.16.9 | 0.16.x | Verified (PyPI) |
 | mypy | 2.3.1 | 2.3.x | Verified (PyPI) |
-| pytest | 9.1.1 | 9.x | Verified (PyPI) |
+| pytest | 9.2.0 | 9.x | Verified (PyPI, local run) |
+| pytest-cov | 7.1.0, with coverage 7.17.0 | 7.1.x | Verified (PyPI, local run). Dev group, for module B19 and its lab |
 | python-docx | 1.2.0 | 1.2.x | Verified (PyPI) |
 | WeasyPrint (PDF build) | 70.0 | 70.x | Verified (PyPI) |
 
@@ -50,6 +51,7 @@ Checked on 25 September 2026. Status key:
 | PyTorch | 2.14.0, CPU | scratch environment, Python 3.12, PyPI wheel | Verified (local run). Not in the dev group or Pyodide |
 | sentence-transformers | Not installed | none | Unverified. Its API in B15-L1 comes from the library documentation |
 | uv | 0.8.17 | build machine | Verified (local run) |
+| mutmut | 3.8.1 | not installed | Search only (PyPI listing). B19-L8 names it as an example of mutation testing and teaches no commands |
 
 ## Browser runtime
 
@@ -170,6 +172,12 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 | PyTorch 2.14: `Tensor.to` returns a copy, `Module.to` is in place, gradients accumulate, weights-only `torch.load`, same-seed CPU runs identical. | Verified | Local, torch 2.14.0 CPU |
 | PyTorch `worker_init_fn` seeding and `CUBLAS_WORKSPACE_CONFIG` for deterministic CUDA. | Search only | PyTorch reproducibility notes |
 | sentence-transformers `encode(..., normalize_embeddings=True)`, 384 dimensions for all-MiniLM-L6-v2. | Unverified | Library docs and model card; not run |
+| pytest 9 collection rules, exit codes 0/1/5, `-k`, `-x`, `--lf`, node IDs, `[tool.pytest]` and `[tool.pytest.ini_options]`, `pytest.raises` (DID NOT RAISE is a `Failed` BaseException; a failed `match` is an AssertionError). | Verified | Local, pytest 9.0.2 and 9.2.0 |
+| Fixtures: function scope by default, teardown after `yield` runs on failure, `conftest.py` reach, module-scope leak between tests, `fixture.__wrapped__` for direct calls in checkers. Parametrize IDs, stacked combinations, fixture `params`, strict xfail reported as XPASS(strict). | Verified | Local, pytest 9.0.2 and 9.2.0 |
+| pandas `assert_frame_equal`: NaN equal in place, float rtol 1e-5, integers exact, `check_like` by label. NumPy `assert_allclose` rtol 1e-7, atol 0; `np.allclose` rtol 1e-5, atol 1e-8. | Verified | Local, pandas 3.0.2 and 3.0.6, NumPy 2.4.6 |
+| Wilson against statsmodels `proportion_confint(method="wilson")` within rtol 1e-6; seeded coverage: Wilson 0.9415 and Wald 0.7865 at p = 0.05, n = 30, 2,000 simulations. | Verified | Local, statsmodels 0.14.6 and 0.15.0, NumPy 2.4.6 |
+| `unittest.mock`: `side_effect` lists, `call_count` includes raising calls, patch where the name is looked up. `monkeypatch.setenv` and `delenv` undone after the test. | Verified | Local, Python 3.11 and 3.13 |
+| pytest-cov branch coverage: 100% line and 83% branch for one-sided `if`, missing jump `2->4`; `--cov-fail-under` exits 1; `--strict-markers` and `strict = true` reject unregistered markers. | Verified | Local, pytest-cov 7.1.0, coverage 7.17.0 |
 
 ## Track D facts (checked September 2026)
 

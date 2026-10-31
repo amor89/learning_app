@@ -1,0 +1,380 @@
+id: B19-L4
+title: Testing pandas and NumPy code
+
+concept: |
+  `==` on DataFrames compares cell by cell and returns another DataFrame. It treats two missing values as different and ignores dtypes. Use the pandas testing helpers instead. In pandas 3.0, `pd.testing.assert_frame_equal(result, expected)` checks:
+
+  - values, with missing values in the same place counted as equal,
+  - dtypes, so a count that silently became float fails,
+  - column names and their order,
+  - the index.
+
+  Float columns are compared with a relative tolerance of 1e-5 by default, so `0.1 + 0.2` matches `0.3`. Integer columns must match exactly. `pd.testing.assert_series_equal` does the same for one column.
+
+  Two options matter most:
+
+  - `check_like=True` ignores the order of columns, and of rows with the same index labels.
+  - `check_dtype=False` ignores dtypes. Reach for it rarely: a dtype change is often the bug.
+
+  Filtering keeps the original index labels. After `df[df["w"] > 0]` drops row 1, the index is `[0, 2]`, and a comparison with a freshly built expected frame fails on the index. Decide what the function promises. If it promises a fresh index, it calls `.reset_index(drop=True)` and the test stays strict.
+
+  To compare rows whatever their order, sort both frames by their key columns and reset both indexes before comparing.
+
+  For NumPy arrays, use `np.testing.assert_allclose(actual, expected)`. Its defaults are `rtol=1e-7` and `atol=0`, and it treats NaN as equal to NaN. A relative tolerance never accepts any difference from an expected 0, so add `atol` when an expected value is 0.
+
+  Test that a function leaves its input alone. Take `before = df.copy()`, call the function, then compare `df` with `before`. Without `.copy()`, `before` is the same object and the comparison can never fail.
+
+why_it_matters: |
+  A refactor of a respondent-count function introduced a missing value, so pandas turned the integer `n` column into float. Every downstream check still compared with `==` and passed. The report template formatted `n` with `{:,}` and printed "1,204.0 respondents" on 40 pages. `assert_frame_equal` against an expected frame with an `int64` column fails on that change.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def test_drop_zero_weights():
+          df = pd.DataFrame({"id": ["R1", "R2", "R3"], "w": [1.0, 0.0, 2.0]})
+          result = drop_zero_weights(df)
+          assert (result["w"].values == [1.0, 2.0]).all()
+    annotations:
+      - find: 'assert (result["w"].values == [1.0, 2.0]).all()'
+        note: "Checks one column's values only. A dropped id column, a dtype change or a mutated input all pass."
+  strong:
+    code: |
+      import pandas as pd
+
+
+      def test_drop_zero_weights() -> None:
+          df = pd.DataFrame({"id": ["R1", "R2", "R3"], "w": [1.0, 0.0, 2.0]})
+          before = df.copy()
+
+          result = drop_zero_weights(df)
+
+          expected = pd.DataFrame({"id": ["R1", "R3"], "w": [1.0, 2.0]})
+          pd.testing.assert_frame_equal(result, expected)
+          pd.testing.assert_frame_equal(df, before)
+    annotations:
+      - find: "before = df.copy()"
+        note: "A real copy, so the last line can detect a function that changes its input."
+      - find: 'expected = pd.DataFrame({"id": ["R1", "R3"], "w": [1.0, 2.0]})'
+        note: "The whole expected frame, written out. Its fresh index states that the function resets it."
+      - find: "pd.testing.assert_frame_equal(result, expected)"
+        note: "Checks every column, the dtypes and the index, with float tolerance."
+  takeaway: |
+    Compare whole frames with assert_frame_equal against an expected frame you write out, and copy the input to prove the function leaves it alone.
+
+exercises:
+  - id: B19-L4-E1
+    type: predict_output
+    difficulty: 1
+    language: python
+    prompt: |
+      What does this print? (pandas 3.0)
+    code: |
+      import numpy as np
+      import pandas as pd
+
+      a = pd.DataFrame({"share": [0.5, np.nan]})
+      b = pd.DataFrame({"share": [0.5, np.nan]})
+      print((a == b).all().all())
+      pd.testing.assert_frame_equal(a, b)
+      print("equal")
+    answer: |
+      False
+      equal
+    wrong_answers:
+      - answer: |
+          True
+          equal
+        feedback: "NaN is never equal to NaN under `==`, so the second cell is False and so is `.all().all()`."
+      - answer: |
+          False
+        feedback: "`assert_frame_equal` counts missing values in the same place as equal, so it does not raise and `equal` prints."
+    hints:
+      - "Is NaN == NaN?"
+      - "How does assert_frame_equal treat missing values in the same place?"
+      - "One check says different, the other says equal."
+    explanation: |
+      `==` follows NaN != NaN. `assert_frame_equal` treats missing values in matching positions as equal, which is what a test needs.
+
+  - id: B19-L4-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      `drop_zero_weights(df)` returns `df[df["w"] > 0]`. Its test fails with `DataFrame.index are different`, although the rows look right. The function should return a fresh index. What is the right fix?
+    options:
+      - {id: a, text: "End the function with `.reset_index(drop=True)` and keep the test as it is."}
+      - {id: b, text: "Add `check_dtype=False` to the assertion."}
+      - {id: c, text: "Compare `result.values == expected.values` instead."}
+      - {id: d, text: "Add `check_like=True` to the assertion."}
+    answer: a
+    reasons:
+      - {id: r1, text: "Filtering keeps the old labels [0, 2]. The function promises a fresh index, so the function resets it, and the strict test protects that promise."}
+      - {id: r2, text: "Indexes never matter in tests."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The dtypes match. The failure is about the index."
+      - answer: c
+        feedback: "That hides the index, the dtypes and the column names, so later bugs pass too."
+      - answer: d
+        feedback: "check_like reorders by label. It cannot turn labels [0, 2] into [0, 1]."
+      - answer: a|r2
+        feedback: "Right fix, wrong reason. The index matters: a caller that uses .loc[1] gets an error with labels [0, 2]."
+    hints:
+      - "What index does a filter keep?"
+      - "Which side should change: the test or the function?"
+      - "The function promises a fresh index."
+    explanation: |
+      Filtering keeps the original labels. When the contract says the index is fresh, the function resets it and the test stays strict.
+
+  - id: B19-L4-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Compare an array of shares with the expected values. One expected value is exactly 0, and the result there is `1e-15`, so a relative tolerance alone fails.
+    template: |
+      np.testing.[[g1]](shares, [0.25, 0.75, 0.0], [[g2]]=1e-12)
+    gaps:
+      g1: {accepted: [assert_allclose]}
+      g2: {accepted: [atol]}
+    wrong_answers:
+      - answer: {g1: assert_allclose, g2: rtol}
+        feedback: "A relative tolerance is a share of the expected value. A share of 0 is 0, so 1e-15 still fails. Use an absolute tolerance."
+      - answer: {g1: assert_array_equal, g2: atol}
+        feedback: "assert_array_equal checks exact equality and has no tolerance."
+    hints:
+      - "The NumPy helper that compares with a tolerance."
+      - "Relative tolerance times 0 is 0."
+      - "An absolute tolerance."
+    explanation: |
+      `assert_allclose` passes when `|actual - expected| <= atol + rtol * |expected|`. For an expected 0, only `atol` helps.
+
+  - id: B19-L4-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [pandas]
+    prompt: |
+      Write `assert_same_rows(actual, expected, keys)` for tests whose result order does not matter. It raises `AssertionError` unless both frames hold the same rows, values and dtypes, whatever the order of rows and columns.
+
+      Sort both frames by the `keys` columns, reset both indexes, then compare with `pd.testing.assert_frame_equal(..., check_like=True)`. Do not change the frames passed in.
+    starter: |
+      import pandas as pd
+
+
+      def assert_same_rows(actual, expected, keys):
+          assert (actual.values == expected.values).all()
+    checker:
+      kind: python
+      setup: |
+        import pandas as pd
+
+        def _frames():
+            expected = pd.DataFrame({"id": ["R1", "R2", "R3"], "wave": ["W1", "W1", "W2"], "w": [1.0, 2.0, 3.0]})
+            shuffled = expected.iloc[[2, 0, 1]][["w", "wave", "id"]]
+            return expected, shuffled
+
+        def _raises(actual, expected):
+            try:
+                assert_same_rows(actual, expected, ["id"])
+            except AssertionError:
+                return True
+            return False
+      ast_rules:
+        - id: defined
+          kind: requires_function
+          name: assert_same_rows
+          message: "Define assert_same_rows(actual, expected, keys)."
+        - id: uses_pandas_helper
+          kind: requires_pattern
+          pattern: "assert_frame_equal\\("
+          message: "Compare with pd.testing.assert_frame_equal, which checks values, dtypes and missing values properly."
+      tests:
+        - id: order_ignored
+          code: |
+            expected, shuffled = _frames()
+            assert_same_rows(shuffled, expected, ["id"])
+          message: "Rows and columns in a different order must pass. Sort by keys, reset the index and use check_like=True."
+        - id: value_differs
+          code: |
+            expected, shuffled = _frames()
+            changed = shuffled.copy()
+            changed.loc[changed["id"] == "R2", "w"] = 2.5
+            assert _raises(changed, expected), "a changed weight passed"
+          message: "A different value must raise AssertionError."
+        - id: dtype_differs
+          code: |
+            expected, _ = _frames()
+            ints = expected.assign(w=[1, 2, 3])
+            assert _raises(ints, expected), "an int column passed against a float column"
+          message: "A dtype change must raise. Do not pass check_dtype=False."
+        - id: extra_row
+          code: |
+            import pandas as pd
+            expected, _ = _frames()
+            extra = pd.concat([expected, expected.iloc[[0]]])
+            assert _raises(extra, expected), "an extra row passed"
+          message: "A frame with an extra row must raise."
+        - id: inputs_unchanged
+          code: |
+            expected, shuffled = _frames()
+            before = shuffled.copy()
+            assert_same_rows(shuffled, expected, ["id"])
+            pd.testing.assert_frame_equal(shuffled, before)
+          message: "Leave the frames passed in unchanged. sort_values and reset_index return new frames."
+    solution: |
+      import pandas as pd
+
+
+      def assert_same_rows(actual: pd.DataFrame, expected: pd.DataFrame, keys: list[str]) -> None:
+          """Assert two frames hold the same rows, ignoring row and column order.
+
+          Args:
+              actual: Frame produced by the code under test.
+              expected: Frame the test expects.
+              keys: Columns that identify a row, used to sort both frames.
+
+          Raises:
+              AssertionError: If rows, values or dtypes differ.
+          """
+          left = actual.sort_values(keys).reset_index(drop=True)
+          right = expected.sort_values(keys).reset_index(drop=True)
+          pd.testing.assert_frame_equal(left, right, check_like=True)
+    seeded_bugs:
+      - |
+        import pandas as pd
+
+
+        def assert_same_rows(actual: pd.DataFrame, expected: pd.DataFrame, keys: list[str]) -> None:
+            """Forgets to sort, so order still matters."""
+            pd.testing.assert_frame_equal(actual.reset_index(drop=True), expected.reset_index(drop=True), check_like=True)
+      - |
+        import pandas as pd
+
+
+        def assert_same_rows(actual: pd.DataFrame, expected: pd.DataFrame, keys: list[str]) -> None:
+            """Ignores dtypes."""
+            left = actual.sort_values(keys).reset_index(drop=True)
+            right = expected.sort_values(keys).reset_index(drop=True)
+            pd.testing.assert_frame_equal(left, right, check_like=True, check_dtype=False)
+    wrong_answers:
+      - answer: |
+          import pandas as pd
+
+
+          def assert_same_rows(actual: pd.DataFrame, expected: pd.DataFrame, keys: list[str]) -> None:
+              """Ignores dtypes."""
+              left = actual.sort_values(keys).reset_index(drop=True)
+              right = expected.sort_values(keys).reset_index(drop=True)
+              pd.testing.assert_frame_equal(left, right, check_like=True, check_dtype=False)
+        triggers: dtype_differs
+      - answer: |
+          import pandas as pd
+
+
+          def assert_same_rows(actual: pd.DataFrame, expected: pd.DataFrame, keys: list[str]) -> None:
+              """Forgets to sort, so order still matters."""
+              pd.testing.assert_frame_equal(actual.reset_index(drop=True), expected.reset_index(drop=True), check_like=True)
+        triggers: order_ignored
+    hints:
+      - "`actual.sort_values(keys)` returns a new, sorted frame."
+      - "After sorting, `.reset_index(drop=True)` gives both frames the index 0, 1, 2."
+      - "Finish with `pd.testing.assert_frame_equal(left, right, check_like=True)`."
+    explanation: |
+      Sorting by the keys and resetting the index makes row order irrelevant. `check_like=True` makes column order irrelevant. Everything else stays strict.
+
+  - id: B19-L4-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [pandas]
+    prompt: |
+      `add_share` changes its input, which the team rule forbids. This test was written to catch exactly that, yet it passes. Tap the line in the test that hides the problem, then fix the test. Leave `add_share` as it is.
+    code: |
+      import pandas as pd
+
+
+      def add_share(df: pd.DataFrame) -> pd.DataFrame:
+          df["share"] = df["w"] / df["w"].sum()
+          return df
+
+
+      def test_add_share_keeps_input():
+          df = pd.DataFrame({"w": [1.0, 3.0]})
+          before = df
+          add_share(df)
+          pd.testing.assert_frame_equal(df, before)
+    bug_lines: [11]
+    fix_checker:
+      kind: python
+      setup: |
+        import pandas as pd
+
+        def _mutating(df):
+            df["share"] = df["w"] / df["w"].sum()
+            return df
+
+        def _pure(df):
+            return df.assign(share=df["w"] / df["w"].sum())
+      tests:
+        - id: catches_mutation
+          code: |
+            add_share = _mutating
+            try:
+                test_add_share_keeps_input()
+            except AssertionError:
+                pass
+            else:
+                raise AssertionError("the test still passes when add_share changes its input")
+          message: "The test must fail while add_share changes its input. `before` must be a separate copy."
+        - id: passes_pure
+          code: |
+            add_share = _pure
+            test_add_share_keeps_input()
+          message: "The test must pass for an add_share that returns a new frame."
+    fix_solution: |
+      import pandas as pd
+
+
+      def add_share(df: pd.DataFrame) -> pd.DataFrame:
+          df["share"] = df["w"] / df["w"].sum()
+          return df
+
+
+      def test_add_share_keeps_input():
+          df = pd.DataFrame({"w": [1.0, 3.0]})
+          before = df.copy()
+          add_share(df)
+          pd.testing.assert_frame_equal(df, before)
+    wrong_answers:
+      - lines: [5]
+        feedback: "That line does change the input, but the task is the test: why does it not notice?"
+      - lines: [13]
+        feedback: "The comparison is fine. It compares df with itself, because of how `before` was made."
+    hints:
+      - "What object does `before` refer to?"
+      - "Assignment copies a reference, not the data."
+      - "`before = df.copy()`."
+    explanation: |
+      `before = df` makes a second name for the same frame, so the comparison checks the frame against itself. `df.copy()` keeps the original values.
+
+recap:
+  - front: "What assert_frame_equal checks"
+    back: "Values (missing values in the same place count as equal), dtypes, column names and order, and the index. Floats with rtol 1e-5."
+  - front: "Compare rows whatever their order"
+    back: "Sort both frames by the key columns, reset both indexes, then assert_frame_equal(..., check_like=True)."
+  - front: "Why a filtered result fails on the index"
+    back: "Filtering keeps the old labels, such as [0, 2]. Reset the index in the function if it promises a fresh one."
+  - front: "assert_allclose and an expected 0"
+    back: "Defaults are rtol=1e-7, atol=0. A relative tolerance of 0 accepts nothing, so add atol."
+  - front: "Test that a function leaves its input alone"
+    back: "before = df.copy(), call the function, then assert_frame_equal(df, before)."
+
+claims:
+  - claim: "assert_frame_equal: NaN in the same place is equal; float columns use relative tolerance 1e-5 (1.000005 passes, 1.00002 fails); integers compare exactly; column order, index and dtype differences fail; check_like=True ignores column and row order by label."
+    status: verified
+    source: "Run on pandas 3.0.6 and 3.0.2 (Pyodide pin)."
+  - claim: "np.testing.assert_allclose defaults rtol=1e-07, atol=0, equal_nan=True; 1e-12 against 0.0 fails without atol."
+    status: verified
+    source: "Run on NumPy 2.4.6."
