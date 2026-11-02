@@ -1,0 +1,490 @@
+id: B21-L2
+title: Retrieve with embeddings, keywords and rank fusion
+
+concept: |
+  Retrieval turns a question into a ranked list of chunk IDs. Embed every chunk once and store the vectors with the chunk metadata (lesson B15-L1). At question time, embed the question with the same model.
+
+  With unit-length vectors, cosine similarity is a dot product, so one matrix product scores every chunk:
+
+  ```python
+  scores = chunk_vecs @ query_vec
+  top = np.argsort(-scores)[:k]
+  ```
+
+  `np.argsort` sorts in ascending order, so negate the scores to put the best first. If the vectors are not unit length, divide by their lengths first, and guard against a length of zero.
+
+  Three refinements matter in practice:
+
+  - **Filter before you rank.** Keep only chunks the question may use, such as the current tracker or the latest version of each document. A retired rule that scores well is still wrong.
+  - **Add keyword search.** Embeddings match meaning and can miss exact tokens: wave codes such as `W14`, variable names, product names. A keyword ranking, such as BM25, catches those. Combine the two rankings with **reciprocal rank fusion** (RRF). In each ranking, a chunk at rank `r` (counting from 1) scores `1 / (k + r)`, and its scores add up across rankings. The paper that proposed RRF (Cormack, Clarke and Buettcher, SIGIR 2009) fixed `k = 60` and found the choice not critical. RRF uses ranks only, so the two kinds of score never need to share a scale.
+  - **Know when nothing matches.** A low best score means retrieval found nothing relevant. Pass that on, so the assistant says it does not know instead of answering from weak matches. Set the threshold from your evaluation set, not by feel.
+
+  Choose the number of chunks so they fit in the prompt and the answer is usually among them. Lesson B22-L1 measures how often it is.
+
+why_it_matters: |
+  Analysts asked the methodology assistant "What changed in the W14 weighting?" The embedding search returned three general chunks about weighting. The one note that named W14 ranked eleventh, outside the top five, so the answer described the standard method. A keyword ranking put the W14 note first, and fusing the two lists with RRF brought it into the top three.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import numpy as np
+
+
+      def retrieve(query_vec, chunk_vecs, k):
+          scores = chunk_vecs @ query_vec
+          return list(np.argsort(scores)[:k])
+    annotations:
+      - find: "return list(np.argsort(scores)[:k])"
+        note: "Ascending order returns the least similar chunks. No filter, no keyword ranking."
+  strong:
+    code: |
+      import numpy as np
+      from numpy.typing import NDArray
+
+      RRF_K = 60
+
+
+      def top_k(query_vec: NDArray[np.float64], chunk_vecs: NDArray[np.float64], k: int) -> list[int]:
+          """Row indices of the k chunks most similar to the query, best first.
+
+          Args:
+              query_vec: The question's embedding.
+              chunk_vecs: One embedding per row.
+              k: How many to return.
+
+          Returns:
+              Indices ordered by cosine similarity, highest first.
+
+          Raises:
+              ValueError: If the query vector has zero length.
+          """
+          q_len = np.linalg.norm(query_vec)
+          if q_len == 0:
+              raise ValueError("query vector has zero length")
+          row_len = np.linalg.norm(chunk_vecs, axis=1)
+          safe_len = np.where(row_len == 0, 1.0, row_len)
+          scores = (chunk_vecs @ query_vec) / (safe_len * q_len)
+          return [int(i) for i in np.argsort(-scores, kind="stable")[:k]]
+
+
+      def rrf(rankings: list[list[str]], k: int = RRF_K) -> list[str]:
+          """Fuse rankings of chunk IDs with reciprocal rank fusion.
+
+          Args:
+              rankings: Each list holds chunk IDs, best first.
+              k: The RRF constant.
+
+          Returns:
+              Chunk IDs by fused score, highest first. Ties go to the smaller ID.
+          """
+          scores: dict[str, float] = {}
+          for ranking in rankings:
+              for rank, chunk_id in enumerate(ranking, start=1):
+                  scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / (k + rank)
+          return sorted(scores, key=lambda cid: (-scores[cid], cid))
+    annotations:
+      - find: 'raise ValueError("query vector has zero length")'
+        note: "An empty question would divide by zero. Fail fast."
+      - find: "safe_len = np.where(row_len == 0, 1.0, row_len)"
+        note: "A zero-length chunk vector scores 0 instead of producing NaN."
+      - find: 'return [int(i) for i in np.argsort(-scores, kind="stable")[:k]]'
+        note: "Negated scores put the best first. A stable sort keeps ties in row order."
+      - find: "for rank, chunk_id in enumerate(ranking, start=1):"
+        note: "Ranks count from 1, as the RRF formula expects."
+      - find: "scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / (k + rank)"
+        note: "A chunk found by both rankings collects two scores."
+  takeaway: |
+    Filter, score by cosine similarity, add a keyword ranking, fuse with RRF, and report when nothing matches well.
+
+exercises:
+  - id: B21-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Questions that name a wave code, such as "W14", often miss the one chunk about that wave. The embedding search returns general chunks on the same topic instead. What do you add?
+    options:
+      - {id: a, text: "A keyword ranking, fused with the embedding ranking by reciprocal rank fusion"}
+      - {id: b, text: "A larger k for the embedding search, with no other change"}
+      - {id: c, text: "A second embedding model, averaging the two vectors"}
+      - {id: d, text: "A system prompt telling the model to pay attention to wave codes"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Keyword search matches exact tokens that embeddings blur, and RRF combines the two rankings using ranks only."}
+      - {id: r2, text: "Keyword search is faster than embedding search."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "A larger k may pull the chunk in, but it fills the prompt with weak matches. The ranking itself misses exact tokens."
+      - answer: c
+        feedback: "Vectors from different models live in different spaces. Never average or mix them."
+      - answer: d
+        feedback: "The model only sees what retrieval returns. If the W14 chunk is not retrieved, no prompt can use it."
+      - answer: a|r2
+        feedback: "Right fix, wrong reason. It is about matching exact tokens, not speed."
+    hints:
+      - "What do embeddings do with a code such as W14?"
+      - "Which search matches exact tokens?"
+      - "Combine rankings with RRF."
+    explanation: |
+      Keyword search finds exact codes and names. RRF merges it with the embedding ranking without comparing their scores.
+
+  - id: B21-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (NumPy 2.4)
+    code: |
+      import numpy as np
+
+      chunk_vecs = np.array([[1.0, 0.0], [0.6, 0.8], [0.0, 1.0], [-1.0, 0.0]])
+      query = np.array([0.8, 0.6])
+      scores = chunk_vecs @ query
+      print(np.round(scores, 2))
+      print(np.argsort(-scores)[:2])
+    answer: |
+      [ 0.8   0.96  0.6  -0.8 ]
+      [1 0]
+    accepted:
+      - "[0.8 0.96 0.6 -0.8]\n[1 0]"
+    wrong_answers:
+      - answer: |
+          [ 0.8   0.96  0.6  -0.8 ]
+          [3 2]
+        feedback: "That is np.argsort(scores), lowest first. The minus sign puts the highest scores first."
+      - answer: |
+          [ 0.8   0.96  0.6  -0.8 ]
+          [0.96 0.8]
+        feedback: "argsort returns positions, not the scores themselves."
+    hints:
+      - "Row 1: 0.6 * 0.8 + 0.8 * 0.6."
+      - "Which two scores are highest?"
+      - "argsort returns indices."
+    explanation: |
+      The scores are dot products of unit vectors, so cosine similarities. Sorting the negated scores puts row 1 (0.96) and row 0 (0.8) first.
+
+  - id: B21-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete reciprocal rank fusion, with ranks counted from 1.
+    template: |
+      for ranking in rankings:
+          for rank, chunk_id in enumerate(ranking, start=[[g1]]):
+              scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / ([[g2]] + rank)
+    gaps:
+      g1: {accepted: ["1"]}
+      g2: {accepted: [k]}
+    wrong_answers:
+      - answer: {g1: "0", g2: k}
+        feedback: "RRF counts ranks from 1. With start=0 the top chunk scores 1/k instead of 1/(k + 1)."
+    hints:
+      - "The best chunk has rank 1."
+      - "The constant in the formula."
+      - "`1` and `k`."
+    explanation: |
+      Each chunk scores `1 / (k + rank)` per ranking, with rank 1 for the best. Scores add across rankings.
+
+  - id: B21-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `top_k(query_vec, chunk_vecs, k) -> list[int]`: the row indices of the `k` most similar chunks by cosine similarity, best first.
+
+      - Vectors may not have unit length. Divide each score by both lengths.
+      - Raise `ValueError` when the query has zero length.
+      - A chunk row of zero length scores 0, never NaN.
+      - Break ties by row order, and return plain `int` values.
+    starter: |
+      import numpy as np
+
+
+      def top_k(query_vec, chunk_vecs, k):
+          scores = chunk_vecs @ query_vec
+          return list(np.argsort(-scores)[:k])
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: top_k
+          typed: true
+          docstring: true
+          message: "Give top_k type hints and a docstring."
+      tests:
+        - id: cosine_not_dot
+          code: |
+            chunks = np.array([[10.0, 10.0], [1.0, 0.0], [0.0, 3.0]])
+            out = top_k(np.array([2.0, 0.0]), chunks, 2)
+            assert out == [1, 0], out
+          message: "Divide by the vector lengths. Row 0 has the biggest dot product but a smaller cosine than row 1."
+        - id: zero_row
+          code: |
+            chunks = np.array([[0.0, 0.0], [1.0, 1.0], [-1.0, 0.0]])
+            out = top_k(np.array([1.0, 0.0]), chunks, 3)
+            assert out == [1, 0, 2], out
+            assert all(type(i) is int for i in out), [type(i) for i in out]
+          message: "A zero-length row scores 0 (between positive and negative scores). Return plain ints."
+        - id: zero_query
+          code: |
+            try:
+                top_k(np.array([0.0, 0.0]), np.eye(2), 1)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for a zero-length query")
+          message: "Raise ValueError when the query vector has zero length."
+        - id: ties
+          code: |
+            chunks = np.array([[1.0, 0.0], [0.0, 1.0], [2.0, 0.0]])
+            assert top_k(np.array([1.0, 0.0]), chunks, 2) == [0, 2]
+          message: "Break ties by row order: use a stable sort on the negated scores."
+    solution: |
+      import numpy as np
+      from numpy.typing import NDArray
+
+
+      def top_k(query_vec: NDArray[np.float64], chunk_vecs: NDArray[np.float64], k: int) -> list[int]:
+          """Row indices of the k chunks most similar to the query, best first.
+
+          Args:
+              query_vec: The question's embedding.
+              chunk_vecs: One embedding per row.
+              k: How many to return.
+
+          Returns:
+              Indices ordered by cosine similarity, highest first.
+
+          Raises:
+              ValueError: If the query vector has zero length.
+          """
+          q_len = np.linalg.norm(query_vec)
+          if q_len == 0:
+              raise ValueError("query vector has zero length")
+          row_len = np.linalg.norm(chunk_vecs, axis=1)
+          safe_len = np.where(row_len == 0, 1.0, row_len)
+          scores = (chunk_vecs @ query_vec) / (safe_len * q_len)
+          return [int(i) for i in np.argsort(-scores, kind="stable")[:k]]
+    seeded_bugs:
+      - |
+        import numpy as np
+        from numpy.typing import NDArray
+
+
+        def top_k(query_vec: NDArray[np.float64], chunk_vecs: NDArray[np.float64], k: int) -> list[int]:
+            """Dot product, not cosine."""
+            scores = chunk_vecs @ query_vec
+            return [int(i) for i in np.argsort(-scores, kind="stable")[:k]]
+      - |
+        import numpy as np
+        from numpy.typing import NDArray
+
+
+        def top_k(query_vec: NDArray[np.float64], chunk_vecs: NDArray[np.float64], k: int) -> list[int]:
+            """Zero rows give NaN."""
+            q_len = np.linalg.norm(query_vec)
+            if q_len == 0:
+                raise ValueError("query vector has zero length")
+            row_len = np.linalg.norm(chunk_vecs, axis=1)
+            with np.errstate(invalid="ignore"):
+                scores = (chunk_vecs @ query_vec) / (row_len * q_len)
+            return [int(i) for i in np.argsort(-scores, kind="stable")[:k]]
+      - |
+        import numpy as np
+        from numpy.typing import NDArray
+
+
+        def top_k(query_vec: NDArray[np.float64], chunk_vecs: NDArray[np.float64], k: int) -> list[int]:
+            """Lowest first."""
+            q_len = np.linalg.norm(query_vec)
+            if q_len == 0:
+                raise ValueError("query vector has zero length")
+            row_len = np.linalg.norm(chunk_vecs, axis=1)
+            safe_len = np.where(row_len == 0, 1.0, row_len)
+            scores = (chunk_vecs @ query_vec) / (safe_len * q_len)
+            return [int(i) for i in np.argsort(scores, kind="stable")[:k]]
+    wrong_answers:
+      - answer: |
+          import numpy as np
+          from numpy.typing import NDArray
+
+
+          def top_k(query_vec: NDArray[np.float64], chunk_vecs: NDArray[np.float64], k: int) -> list[int]:
+              """Dot product, not cosine."""
+              scores = chunk_vecs @ query_vec
+              return [int(i) for i in np.argsort(-scores, kind="stable")[:k]]
+        triggers: cosine_not_dot
+    hints:
+      - "Compute `np.linalg.norm` of the query and of each row (`axis=1`)."
+      - "Replace zero row lengths with 1.0 using `np.where`, then divide."
+      - "`np.argsort(-scores, kind=\"stable\")[:k]`, converted with `int`."
+    explanation: |
+      Dividing by both lengths turns dot products into cosine similarities. The zero guards keep the scores finite, and the stable sort on negated scores gives a repeatable best-first order.
+
+  - id: B21-L2-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `rrf(rankings: list[list[str]], k: int = 60) -> list[str]`.
+
+      - In each ranking, the chunk at rank `r` (from 1) scores `1 / (k + r)`. Scores add across rankings.
+      - Return every chunk ID once, highest fused score first. Break ties by the smaller ID.
+    starter: |
+      def rrf(rankings, k=60):
+          return rankings[0]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: rrf
+          typed: true
+          docstring: true
+          message: "Give rrf type hints and a docstring."
+      tests:
+        - id: fuses
+          code: |
+            dense = ["c1", "c2", "c3"]
+            keyword = ["c9", "c3", "c1"]
+            out = rrf([dense, keyword])
+            assert out == ["c1", "c3", "c9", "c2"], out
+          message: "Add 1 / (k + rank) across rankings, with ranks from 1, and sort highest first."
+        - id: ties
+          code: |
+            assert rrf([["b", "a"], ["a", "b"]]) == ["a", "b"], rrf([["b", "a"], ["a", "b"]])
+          message: "Break ties by the smaller ID."
+        - id: k_used
+          code: |
+            out = rrf([["a", "x", "b"], ["y", "z", "b"]], k=0)
+            assert out == ["a", "y", "b", "x", "z"], out
+            assert rrf([]) == []
+          message: "Use the k argument in the formula, and return [] for no rankings."
+    solution: |
+      def rrf(rankings: list[list[str]], k: int = 60) -> list[str]:
+          """Fuse rankings of chunk IDs with reciprocal rank fusion.
+
+          Args:
+              rankings: Each list holds chunk IDs, best first.
+              k: The RRF constant.
+
+          Returns:
+              Chunk IDs by fused score, highest first. Ties go to the smaller ID.
+          """
+          scores: dict[str, float] = {}
+          for ranking in rankings:
+              for rank, chunk_id in enumerate(ranking, start=1):
+                  scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / (k + rank)
+          return sorted(scores, key=lambda cid: (-scores[cid], cid))
+    seeded_bugs:
+      - |
+        def rrf(rankings: list[list[str]], k: int = 60) -> list[str]:
+            """Ranks from 0, with k ignored."""
+            scores: dict[str, float] = {}
+            for ranking in rankings:
+                for rank, chunk_id in enumerate(ranking):
+                    scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / (60 + rank)
+            return sorted(scores, key=lambda cid: (-scores[cid], cid))
+      - |
+        def rrf(rankings: list[list[str]], k: int = 60) -> list[str]:
+            """Keeps the best single score instead of adding."""
+            scores: dict[str, float] = {}
+            for ranking in rankings:
+                for rank, chunk_id in enumerate(ranking, start=1):
+                    scores[chunk_id] = max(scores.get(chunk_id, 0.0), 1 / (k + rank))
+            return sorted(scores, key=lambda cid: (-scores[cid], cid))
+    wrong_answers:
+      - answer: |
+          def rrf(rankings: list[list[str]], k: int = 60) -> list[str]:
+              """Keeps the best single score instead of adding."""
+              scores: dict[str, float] = {}
+              for ranking in rankings:
+                  for rank, chunk_id in enumerate(ranking, start=1):
+                      scores[chunk_id] = max(scores.get(chunk_id, 0.0), 1 / (k + rank))
+              return sorted(scores, key=lambda cid: (-scores[cid], cid))
+        triggers: fuses
+    hints:
+      - "Keep a dict of scores. Loop over rankings, then `enumerate(ranking, start=1)`."
+      - "Add `1 / (k + rank)` to the chunk's running score."
+      - "`sorted(scores, key=lambda cid: (-scores[cid], cid))`."
+    explanation: |
+      A chunk that both rankings find collects two scores, so agreement between the rankings lifts it. Ranks, not raw scores, decide the result.
+
+  - id: B21-L2-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [numpy]
+    prompt: |
+      The assistant keeps quoting chunks that have nothing to do with the question. Tap the line responsible, then fix it.
+    code: |
+      import numpy as np
+
+
+      def top_k(query_vec, chunk_vecs, k):
+          q_len = np.linalg.norm(query_vec)
+          if q_len == 0:
+              raise ValueError("query vector has zero length")
+          row_len = np.linalg.norm(chunk_vecs, axis=1)
+          safe_len = np.where(row_len == 0, 1.0, row_len)
+          scores = (chunk_vecs @ query_vec) / (safe_len * q_len)
+          return [int(i) for i in np.argsort(scores, kind="stable")[:k]]
+    bug_lines: [11]
+    fix_checker:
+      kind: python
+      setup: |
+        import numpy as np
+      tests:
+        - id: best_first
+          code: |
+            chunks = np.array([[1.0, 0.0], [0.6, 0.8], [0.0, 1.0], [-1.0, 0.0]])
+            out = top_k(np.array([0.8, 0.6]), chunks, 2)
+            assert out == [1, 0], out
+          message: "Sort the negated scores, so the most similar chunks come first."
+    fix_solution: |
+      import numpy as np
+
+
+      def top_k(query_vec, chunk_vecs, k):
+          q_len = np.linalg.norm(query_vec)
+          if q_len == 0:
+              raise ValueError("query vector has zero length")
+          row_len = np.linalg.norm(chunk_vecs, axis=1)
+          safe_len = np.where(row_len == 0, 1.0, row_len)
+          scores = (chunk_vecs @ query_vec) / (safe_len * q_len)
+          return [int(i) for i in np.argsort(-scores, kind="stable")[:k]]
+    wrong_answers:
+      - lines: [10]
+        feedback: "The scores are correct cosine similarities. Look at the order they are sorted in."
+      - lines: [9]
+        feedback: "The zero guard is right. It keeps zero-length rows from producing NaN."
+    hints:
+      - "Which way does np.argsort sort?"
+      - "Which chunks come first in ascending order?"
+      - "Negate the scores."
+    explanation: |
+      `np.argsort` sorts ascending, so `[:k]` takes the least similar chunks. Sort `-scores` instead.
+
+recap:
+  - front: "Top k by cosine similarity with NumPy"
+    back: "Divide dot products by both lengths, then np.argsort(-scores)[:k]. Guard zero lengths."
+  - front: "Reciprocal rank fusion"
+    back: "Each ranking gives a chunk 1 / (k + rank), ranks from 1, summed across rankings. k = 60 in the original paper."
+  - front: "Why add keyword search"
+    back: "Embeddings blur exact tokens such as wave codes and variable names. Keyword ranking matches them."
+  - front: "Before ranking, and after"
+    back: "Filter to chunks the question may use. If the best score is low, report that nothing matched."
+
+claims:
+  - claim: "RRF scores a document as the sum over rankings of 1/(k + rank); Cormack, Clarke and Buettcher (SIGIR 2009) fixed k = 60 in a pilot and found the choice not critical."
+    status: search-only
+    source: "Search results quoting the paper, November 2026. The PDF host (plg.uwaterloo.ca) was not reachable from the build session."
+  - claim: "The E2 code prints [ 0.8   0.96  0.6  -0.8 ] and [1 0]."
+    status: verified
+    source: "Run on NumPy 2.4.6 (Pyodide pins) and the dev environment."

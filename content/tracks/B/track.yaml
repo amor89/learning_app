@@ -36,3 +36,6 @@ modules:
   - {id: B17, title: Testing and performance, tags: [prereq], summary: "Unit tests, Hypothesis, profiling and memory use."}
   - {id: B19, title: Testing in depth, tags: [prereq], summary: "pytest from the inside: fixtures, parametrize, testing pandas, statistics and ML, mocks, coverage and CI."}
   - {id: B18, title: Documentation and communication, tags: [prereq, all-months], summary: "Docstrings, READMEs, model cards and decision logs."}
+  - {id: B20, title: Prompting and structured output, tags: [M13-15], summary: "System prompts, few-shot turns, validated JSON output and model calls you can test and reproduce."}
+  - {id: B21, title: Retrieval-augmented generation, tags: [M13-15], summary: "Chunking, retrieval with embeddings and keywords, and grounded answers with checked citations."}
+  - {id: B22, title: Evaluating LLM systems, tags: [M13-15], summary: "Retrieval metrics, answer checks, LLM judges and regression gates for prompt changes."}

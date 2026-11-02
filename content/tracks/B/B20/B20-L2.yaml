@@ -1,0 +1,555 @@
+id: B20-L2
+title: Structured output, validate every reply and retry once
+
+concept: |
+  A pipeline needs fields, not prose. Ask the model for JSON, then check what comes back. Two layers do the work.
+
+  **Constrain the format.** Describe the JSON in the system prompt, or use the provider's structured output feature. In anthropic 2.4.0, `client.messages.parse(..., output_format=ThemeCoding)` takes a pydantic model, and `response.parsed_output` holds the parsed instance.
+
+  **Validate the meaning.** Valid JSON can still be wrong for you: a theme that is not in your codeframe, or a confidence of 1.4. A pydantic model (lesson B5-L2) checks both:
+
+  ```python
+  from typing import Literal
+
+  from pydantic import BaseModel, ConfigDict, Field
+
+
+  class ThemeCoding(BaseModel):
+      model_config = ConfigDict(extra="forbid")
+
+      theme: Literal["Price", "Service", "Product", "Other"]
+      confidence: float = Field(ge=0, le=1)
+
+
+  coding = ThemeCoding.model_validate_json(reply_text)
+  ```
+
+  `model_validate_json` parses the text and validates it in one step. Broken JSON, such as a reply that starts "Here you go:", raises the same `ValidationError` as a bad field, with error type `json_invalid`. When the codeframe changes between projects, load the theme list from the codeframe file and check membership in a validator.
+
+  Then plan for failure:
+
+  - **Retry once, with the error.** Add the bad reply as an assistant turn and the first error message as a user turn, then call again. The model sees what was wrong.
+  - **Bound the attempts.** After the last attempt fails, store the answer as `needs_review` with the raw reply. Never guess a label, and never let one bad reply stop the batch.
+  - **Count the failures.** Log how many answers needed a retry or review. A rising count shows that a prompt or model change broke the format.
+
+why_it_matters: |
+  A coding job sent 40,000 answers. A handful of replies wrapped the JSON in a sentence, and the code called `json.loads` on each reply with no check. The first bad reply crashed the job at answer 31,207, and the rerun started from zero. With validation per answer, one retry and a `needs_review` status, the job finishes and a few answers wait for a person.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import json
+
+
+      def code_answer(call_model, messages):
+          reply = call_model(messages)
+          return json.loads(reply)["theme"]
+    annotations:
+      - find: 'return json.loads(reply)["theme"]'
+        note: "One reply wrapped in prose crashes the batch, and a theme outside the codeframe goes straight through."
+  strong:
+    code: |
+      from collections.abc import Callable
+      from typing import Literal
+
+      from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+      MAX_ATTEMPTS = 2
+
+
+      class ThemeCoding(BaseModel):
+          """One answer's theme, in the shape the model must return."""
+
+          model_config = ConfigDict(extra="forbid")
+
+          theme: Literal["Price", "Service", "Product", "Other"]
+          confidence: float = Field(ge=0, le=1)
+
+
+      class CodingResult(BaseModel):
+          """What the pipeline stores for one answer."""
+
+          status: Literal["coded", "needs_review"]
+          coding: ThemeCoding | None
+          attempts: int
+          raw_reply: str
+
+
+      def code_with_retry(
+          call_model: Callable[[list[dict[str, str]]], str],
+          messages: list[dict[str, str]],
+      ) -> CodingResult:
+          """Ask for a coding, retrying once with the validation error.
+
+          Args:
+              call_model: Takes messages and returns the reply text.
+              messages: The prompt, ending with a user turn.
+
+          Returns:
+              A coded result, or needs_review with the last raw reply.
+          """
+          history = list(messages)
+          reply = ""
+          for attempt in range(1, MAX_ATTEMPTS + 1):
+              reply = call_model(history)
+              try:
+                  coding = ThemeCoding.model_validate_json(reply)
+              except ValidationError as err:
+                  error = err.errors()[0]["msg"]
+                  history += [
+                      {"role": "assistant", "content": reply},
+                      {"role": "user", "content": f"That reply was invalid: {error}. Reply with the JSON only."},
+                  ]
+                  continue
+              return CodingResult(status="coded", coding=coding, attempts=attempt, raw_reply=reply)
+          return CodingResult(status="needs_review", coding=None, attempts=MAX_ATTEMPTS, raw_reply=reply)
+    annotations:
+      - find: 'theme: Literal["Price", "Service", "Product", "Other"]'
+        note: "Only codeframe themes pass."
+      - find: "history = list(messages)"
+        note: "A copy, so the caller's messages stay unchanged."
+      - find: "coding = ThemeCoding.model_validate_json(reply)"
+        note: "Parses and validates in one step. Broken JSON raises ValidationError too."
+      - find: '{"role": "user", "content": f"That reply was invalid: {error}. Reply with the JSON only."},'
+        note: "The retry tells the model what was wrong."
+      - find: 'return CodingResult(status="needs_review", coding=None, attempts=MAX_ATTEMPTS, raw_reply=reply)'
+        note: "No guess. A person reviews the answer, with the raw reply kept."
+  takeaway: |
+    Validate every reply against a model of what you need, retry once with the error, and send the rest to review.
+
+exercises:
+  - id: B20-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Your codeframe has Price, Service, Product and Other. A reply arrives as valid JSON: `{"theme": "Pricing", "confidence": 0.9}`. What should the pipeline do?
+    options:
+      - {id: a, text: "Store it: the JSON parses"}
+      - {id: b, text: "Fail validation, retry once with the error, then mark the answer needs_review if it fails again"}
+      - {id: c, text: "Map it to the closest theme, Price, without a record"}
+      - {id: d, text: "Stop the batch so someone fixes the prompt"}
+    answer: b
+    reasons:
+      - {id: r1, text: "A theme outside the codeframe is wrong data even when the JSON parses. A bounded retry gives the model one chance, and review keeps a person in charge of the rest."}
+      - {id: r2, text: "Retries cost nothing, so retry until it passes."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Parsing is not validation. Pricing is not in the codeframe."
+      - answer: c
+        feedback: "A silent guess hides the failure. Nobody learns that the format drifted."
+      - answer: d
+        feedback: "One bad reply should not stop thousands of good ones. Retry, then review."
+      - answer: b|r2
+        feedback: "Right action, wrong reason. Each retry is another paid call, so the attempts are bounded."
+    hints:
+      - "Is Pricing one of your themes?"
+      - "What happens to the other answers in the batch?"
+      - "Validate, retry once, then review."
+    explanation: |
+      Validation rejects the theme. One retry with the error often fixes it, and anything still invalid goes to a person.
+
+  - id: B20-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (pydantic 2.12)
+    code: |
+      from typing import Literal
+
+      from pydantic import BaseModel, Field, ValidationError
+
+
+      class ThemeCoding(BaseModel):
+          theme: Literal["Price", "Service", "Product", "Other"]
+          confidence: float = Field(ge=0, le=1)
+
+
+      replies = [
+          '{"theme": "Price", "confidence": 0.8}',
+          '{"theme": "Pricing", "confidence": 0.8}',
+          'Here you go: {"theme": "Price", "confidence": 0.8}',
+          '{"theme": "Service", "confidence": "0.7"}',
+      ]
+      for reply in replies:
+          try:
+              print(ThemeCoding.model_validate_json(reply).theme)
+          except ValidationError as err:
+              print("invalid:", err.errors()[0]["type"])
+    answer: |
+      Price
+      invalid: literal_error
+      invalid: json_invalid
+      Service
+    wrong_answers:
+      - answer: |
+          Price
+          invalid: literal_error
+          Price
+          Service
+        feedback: "model_validate_json needs the whole text to be JSON. A sentence before the brace makes it invalid."
+      - answer: |
+          Price
+          invalid: literal_error
+          invalid: json_invalid
+          invalid: float_parsing
+        feedback: "In lax mode, the default, pydantic converts the string \"0.7\" to the float 0.7."
+    hints:
+      - "Is Pricing one of the four literals?"
+      - "Does the third reply start with a brace?"
+      - "Lax mode converts numeric strings (lesson B5-L2)."
+    explanation: |
+      The first reply passes. Pricing fails the Literal check, prose before the JSON makes it invalid JSON, and lax mode turns "0.7" into a float.
+
+  - id: B20-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Parse and validate a reply in one step, and catch both broken JSON and bad fields.
+    template: |
+      try:
+          coding = ThemeCoding.[[g1]](reply)
+      except [[g2]] as err:
+          error = err.errors()[0]["msg"]
+    gaps:
+      g1: {accepted: [model_validate_json]}
+      g2: {accepted: [ValidationError, pydantic.ValidationError]}
+    wrong_answers:
+      - answer: {g1: model_validate, g2: ValidationError}
+        feedback: "model_validate takes a dict. The reply is text, so use model_validate_json."
+    hints:
+      - "The method takes a JSON string."
+      - "pydantic raises one exception type for every problem."
+      - "`model_validate_json` and `ValidationError`."
+    explanation: |
+      `model_validate_json` parses and validates text. Every failure, including broken JSON, raises `ValidationError`.
+
+  - id: B20-L2-E4
+    type: refactor
+    difficulty: 3
+    language: python
+    packages: [pydantic]
+    prompt: |
+      Rewrite `code_answer` as `code_with_retry(call_model, messages) -> CodingResult`. `ThemeCoding`, `CodingResult` and `MAX_ATTEMPTS = 2` are defined for you, as in the worked example.
+
+      - Copy `messages`. Do not change the caller's list.
+      - Call `call_model(history)` and validate the reply with `ThemeCoding.model_validate_json`.
+      - On `ValidationError`, append the reply as an assistant turn and a user turn that contains `err.errors()[0]["msg"]`, then try again.
+      - Make at most `MAX_ATTEMPTS` calls. Return `status="coded"` with the attempt number on success, or `status="needs_review"`, `coding=None` and the last raw reply when every attempt fails.
+    starter: |
+      import json
+
+
+      def code_answer(call_model, messages):
+          reply = call_model(messages)
+          return json.loads(reply)["theme"]
+    checker:
+      kind: python
+      setup: |
+        from typing import Literal
+
+        from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+        MAX_ATTEMPTS = 2
+
+
+        class ThemeCoding(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
+            theme: Literal["Price", "Service", "Product", "Other"]
+            confidence: float = Field(ge=0, le=1)
+
+
+        class CodingResult(BaseModel):
+            status: Literal["coded", "needs_review"]
+            coding: ThemeCoding | None
+            attempts: int
+            raw_reply: str
+
+
+        class _Fake:
+            def __init__(self, replies):
+                self.replies = list(replies)
+                self.seen = []
+
+            def __call__(self, messages):
+                self.seen.append([dict(m) for m in messages])
+                return self.replies.pop(0)
+
+
+        _PROMPT = [{"role": "user", "content": "<answer>Too dear</answer>"}]
+        _GOOD = '{"theme": "Price", "confidence": 0.9}'
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: code_with_retry
+          typed: true
+          docstring: true
+          message: "Give code_with_retry type hints and a docstring."
+        - id: no_json_loads
+          kind: forbids_pattern
+          pattern: "json\\.loads"
+          message: "Validate with ThemeCoding.model_validate_json, which also catches broken JSON."
+      tests:
+        - id: first_try
+          code: |
+            fake = _Fake([_GOOD])
+            result = code_with_retry(fake, list(_PROMPT))
+            assert result.status == "coded" and result.attempts == 1, result
+            assert result.coding.theme == "Price", result
+            assert len(fake.seen) == 1, len(fake.seen)
+          message: "A valid first reply returns status coded with attempts=1, after one call."
+        - id: retry_with_error
+          code: |
+            prompt = list(_PROMPT)
+            fake = _Fake(['{"theme": "Pricing", "confidence": 0.9}', _GOOD])
+            result = code_with_retry(fake, prompt)
+            assert result.status == "coded" and result.attempts == 2, result
+            second = fake.seen[1]
+            assert len(second) == 3, second
+            assert second[1] == {"role": "assistant", "content": '{"theme": "Pricing", "confidence": 0.9}'}, second[1]
+            assert second[2]["role"] == "user" and "Input should be" in second[2]["content"], second[2]
+            assert prompt == _PROMPT, prompt
+          message: "On failure, add the bad reply as an assistant turn and the error message as a user turn, without changing the caller's list."
+        - id: bounded
+          code: |
+            fake = _Fake(["not json", '{"theme": "Price", "confidence": 1.4}', _GOOD])
+            result = code_with_retry(fake, list(_PROMPT))
+            assert len(fake.seen) == 2, f"{len(fake.seen)} calls"
+            assert result.status == "needs_review" and result.coding is None, result
+            assert result.raw_reply == '{"theme": "Price", "confidence": 1.4}', result.raw_reply
+            assert result.attempts == 2, result
+          message: "Stop after MAX_ATTEMPTS calls and return needs_review with the last raw reply."
+    solution: |
+      from collections.abc import Callable
+
+
+      def code_with_retry(
+          call_model: Callable[[list[dict[str, str]]], str],
+          messages: list[dict[str, str]],
+      ) -> CodingResult:
+          """Ask for a coding, retrying once with the validation error.
+
+          Args:
+              call_model: Takes messages and returns the reply text.
+              messages: The prompt, ending with a user turn.
+
+          Returns:
+              A coded result, or needs_review with the last raw reply.
+          """
+          history = list(messages)
+          reply = ""
+          for attempt in range(1, MAX_ATTEMPTS + 1):
+              reply = call_model(history)
+              try:
+                  coding = ThemeCoding.model_validate_json(reply)
+              except ValidationError as err:
+                  error = err.errors()[0]["msg"]
+                  history += [
+                      {"role": "assistant", "content": reply},
+                      {"role": "user", "content": f"That reply was invalid: {error}. Reply with the JSON only."},
+                  ]
+                  continue
+              return CodingResult(status="coded", coding=coding, attempts=attempt, raw_reply=reply)
+          return CodingResult(status="needs_review", coding=None, attempts=MAX_ATTEMPTS, raw_reply=reply)
+    seeded_bugs:
+      - |
+        from collections.abc import Callable
+
+
+        def code_with_retry(
+            call_model: Callable[[list[dict[str, str]]], str],
+            messages: list[dict[str, str]],
+        ) -> CodingResult:
+            """Retries without telling the model what was wrong."""
+            reply = ""
+            for attempt in range(1, MAX_ATTEMPTS + 1):
+                reply = call_model(messages)
+                try:
+                    coding = ThemeCoding.model_validate_json(reply)
+                except ValidationError:
+                    continue
+                return CodingResult(status="coded", coding=coding, attempts=attempt, raw_reply=reply)
+            return CodingResult(status="needs_review", coding=None, attempts=MAX_ATTEMPTS, raw_reply=reply)
+      - |
+        from collections.abc import Callable
+
+
+        def code_with_retry(
+            call_model: Callable[[list[dict[str, str]]], str],
+            messages: list[dict[str, str]],
+        ) -> CodingResult:
+            """Changes the caller's list."""
+            reply = ""
+            for attempt in range(1, MAX_ATTEMPTS + 1):
+                reply = call_model(messages)
+                try:
+                    coding = ThemeCoding.model_validate_json(reply)
+                except ValidationError as err:
+                    messages += [
+                        {"role": "assistant", "content": reply},
+                        {"role": "user", "content": f"Invalid: {err.errors()[0]['msg']}"},
+                    ]
+                    continue
+                return CodingResult(status="coded", coding=coding, attempts=attempt, raw_reply=reply)
+            return CodingResult(status="needs_review", coding=None, attempts=MAX_ATTEMPTS, raw_reply=reply)
+      - |
+        from collections.abc import Callable
+
+
+        def code_with_retry(
+            call_model: Callable[[list[dict[str, str]]], str],
+            messages: list[dict[str, str]],
+        ) -> CodingResult:
+            """Keeps calling until a reply passes."""
+            history = list(messages)
+            attempt = 0
+            while True:
+                attempt += 1
+                reply = call_model(history)
+                try:
+                    coding = ThemeCoding.model_validate_json(reply)
+                except ValidationError as err:
+                    history += [
+                        {"role": "assistant", "content": reply},
+                        {"role": "user", "content": f"Invalid: {err.errors()[0]['msg']}"},
+                    ]
+                    continue
+                return CodingResult(status="coded", coding=coding, attempts=attempt, raw_reply=reply)
+    wrong_answers:
+      - answer: |
+          from collections.abc import Callable
+
+
+          def code_with_retry(
+              call_model: Callable[[list[dict[str, str]]], str],
+              messages: list[dict[str, str]],
+          ) -> CodingResult:
+              """Keeps calling until a reply passes."""
+              history = list(messages)
+              attempt = 0
+              while True:
+                  attempt += 1
+                  reply = call_model(history)
+                  try:
+                      coding = ThemeCoding.model_validate_json(reply)
+                  except ValidationError as err:
+                      history += [
+                          {"role": "assistant", "content": reply},
+                          {"role": "user", "content": f"Invalid: {err.errors()[0]['msg']}"},
+                      ]
+                      continue
+                  return CodingResult(status="coded", coding=coding, attempts=attempt, raw_reply=reply)
+        triggers: bounded
+    hints:
+      - "Loop `for attempt in range(1, MAX_ATTEMPTS + 1)` over a copy of the messages."
+      - "Inside `try`, validate. In `except ValidationError as err`, extend the history and `continue`."
+      - "After the loop, return needs_review with `coding=None` and the last reply."
+    explanation: |
+      A copied history carries the bad reply and its error into the second call. The loop bound caps the cost, and needs_review keeps every failure visible.
+
+  - id: B20-L2-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [pydantic]
+    prompt: |
+      After a model update, the share of "Other" doubled, yet the run log showed no review cases. Tap the line that hides the failures, then fix it.
+    code: |
+      def code_with_retry(call_model, messages):
+          history = list(messages)
+          reply = ""
+          for attempt in range(1, MAX_ATTEMPTS + 1):
+              reply = call_model(history)
+              try:
+                  coding = ThemeCoding.model_validate_json(reply)
+              except ValidationError as err:
+                  history += [
+                      {"role": "assistant", "content": reply},
+                      {"role": "user", "content": f"Invalid: {err.errors()[0]['msg']}"},
+                  ]
+                  continue
+              return CodingResult(status="coded", coding=coding, attempts=attempt, raw_reply=reply)
+          return CodingResult(status="coded", coding=ThemeCoding(theme="Other", confidence=0.0), attempts=MAX_ATTEMPTS, raw_reply=reply)
+    bug_lines: [15]
+    fix_checker:
+      kind: python
+      setup: |
+        from typing import Literal
+
+        from pydantic import BaseModel, Field, ValidationError
+
+        MAX_ATTEMPTS = 2
+
+
+        class ThemeCoding(BaseModel):
+            theme: Literal["Price", "Service", "Product", "Other"]
+            confidence: float = Field(ge=0, le=1)
+
+
+        class CodingResult(BaseModel):
+            status: Literal["coded", "needs_review"]
+            coding: ThemeCoding | None
+            attempts: int
+            raw_reply: str
+      tests:
+        - id: review
+          code: |
+            result = code_with_retry(lambda messages: "not json", [{"role": "user", "content": "x"}])
+            assert result.status == "needs_review", result
+            assert result.coding is None, result
+            assert result.raw_reply == "not json", result
+          message: "When every attempt fails, return status needs_review with coding=None, not a guessed Other."
+        - id: still_codes
+          code: |
+            result = code_with_retry(lambda messages: '{"theme": "Price", "confidence": 0.5}', [{"role": "user", "content": "x"}])
+            assert result.status == "coded" and result.coding.theme == "Price", result
+          message: "Valid replies still return status coded."
+    fix_solution: |
+      def code_with_retry(call_model, messages):
+          history = list(messages)
+          reply = ""
+          for attempt in range(1, MAX_ATTEMPTS + 1):
+              reply = call_model(history)
+              try:
+                  coding = ThemeCoding.model_validate_json(reply)
+              except ValidationError as err:
+                  history += [
+                      {"role": "assistant", "content": reply},
+                      {"role": "user", "content": f"Invalid: {err.errors()[0]['msg']}"},
+                  ]
+                  continue
+              return CodingResult(status="coded", coding=coding, attempts=attempt, raw_reply=reply)
+          return CodingResult(status="needs_review", coding=None, attempts=MAX_ATTEMPTS, raw_reply=reply)
+    wrong_answers:
+      - lines: [13]
+        feedback: "continue moves to the next attempt, which is what a retry needs."
+      - lines: [2]
+        feedback: "Copying the messages keeps the caller's list unchanged. That is right."
+    hints:
+      - "What happens when both attempts fail?"
+      - "Would anyone see those answers in the review queue?"
+      - "Return needs_review with coding=None."
+    explanation: |
+      The last line turns every failure into a confident-looking Other, with status coded. Return `needs_review` and `coding=None`, so failures reach a person and show up in the counts.
+
+recap:
+  - front: "Parse and validate a model reply in one step"
+    back: "Model.model_validate_json(reply). Broken JSON and bad fields both raise ValidationError."
+  - front: "Structured output in anthropic 2.4.0"
+    back: "client.messages.parse(..., output_format=PydanticModel), then response.parsed_output."
+  - front: "When a reply fails validation"
+    back: "Add the reply as an assistant turn and the error as a user turn, retry, and stop after a fixed number of attempts."
+  - front: "When every attempt fails"
+    back: "Store needs_review with the raw reply. Never guess a label."
+
+claims:
+  - claim: "anthropic 2.4.0: client.messages.parse takes output_format (a type such as a pydantic model), and ParsedMessage.parsed_output returns the parsed object from the first text block that has one."
+    status: verified
+    source: "inspect.signature and the ParsedMessage source in anthropic 2.4.0; no live API call."
+  - claim: "pydantic model_validate_json reports json_invalid for prose before the JSON, literal_error for a value outside a Literal, and converts the JSON string \"0.7\" to a float in lax mode."
+    status: verified
+    source: "Run on pydantic 2.12.5 and 2.14.2."

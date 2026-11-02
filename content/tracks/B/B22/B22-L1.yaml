@@ -1,0 +1,430 @@
+id: B22-L1
+title: Evaluate retrieval, recall at k and MRR on a gold set
+
+concept: |
+  A RAG answer can fail in two places: retrieval missed the passage, or the model misused it. Measure retrieval on its own first. It is cheap and exact, and needs no model call.
+
+  **Build a gold set.** Write questions the way users ask them, and record for each one the IDs of the sections that answer it. Take questions from real requests where you can: users phrase things in ways you do not expect. Mark relevance by section, not by chunk, so a new chunk size does not invalidate the labels. Keep the set in version control, and add every question that failed in use.
+
+  **Two metrics.**
+
+  - **Recall at k** is the share of a question's relevant sections found in the top k. With one relevant section it is 1 or 0, and its mean over questions is the hit rate.
+  - **Reciprocal rank** is 1 divided by the rank of the first relevant result, counting from 1, or 0 when none appears. Its mean over questions is the **mean reciprocal rank** (MRR). It rewards putting the answer first, not only somewhere in the list.
+
+  ```python
+  def recall_at_k(ranked: list[str], relevant: set[str], k: int) -> float:
+      return len(set(ranked[:k]) & relevant) / len(relevant)
+
+
+  def reciprocal_rank(ranked: list[str], relevant: set[str]) -> float:
+      for rank, item in enumerate(ranked, start=1):
+          if item in relevant:
+              return 1 / rank
+      return 0.0
+  ```
+
+  `&` intersects two sets. Rank sections, not chunks: when several chunks of one section come back, keep the section at its first position with `list(dict.fromkeys(section_ids))`, which drops repeats and keeps order.
+
+  **Compare settings on the same set.** Chunk size, k, the keyword ranking and the filters all change retrieval. Run each on the same gold set and keep the best. Report intervals: 45 hits out of 50 has a 95% Wilson interval of 78.6% to 95.7% (lesson B8-L2), so one question more or less proves nothing.
+
+why_it_matters: |
+  A team spent two weeks rewriting its answer prompt because a third of answers were wrong. A retrieval check on 60 gold questions then showed recall at 5 of 0.68: for about a third of the questions, the right section never reached the prompt. No prompt could fix that. Adding a keyword ranking raised recall at 5 to 0.93, and most wrong answers went with it.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def check_retrieval(search):
+          results = search("What is the weight cap?")
+          print(results[:5])
+    annotations:
+      - find: 'results = search("What is the weight cap?")'
+        note: "One question, read by eye. No gold labels, no metric, nothing to compare next time."
+  strong:
+    code: |
+      from collections.abc import Callable
+
+
+      def recall_at_k(ranked: list[str], relevant: set[str], k: int) -> float:
+          """Share of the relevant IDs found in the first k of a ranking.
+
+          Raises:
+              ValueError: If relevant is empty or k is below 1.
+          """
+          if not relevant:
+              raise ValueError("relevant is empty: the question has no gold answer")
+          if k < 1:
+              raise ValueError(f"k must be at least 1, got {k}")
+          return len(set(ranked[:k]) & relevant) / len(relevant)
+
+
+      def reciprocal_rank(ranked: list[str], relevant: set[str]) -> float:
+          """1 / rank of the first relevant ID, counting from 1, or 0.0 if none."""
+          for rank, item in enumerate(ranked, start=1):
+              if item in relevant:
+                  return 1 / rank
+          return 0.0
+
+
+      def retrieval_scores(
+          search: Callable[[str], list[str]], gold: list[tuple[str, set[str]]], k: int
+      ) -> dict[str, float]:
+          """Mean recall at k and MRR of a section-level search over gold questions.
+
+          Args:
+              search: Returns section IDs for a question, best first, possibly repeated.
+              gold: (question, relevant section IDs) pairs.
+              k: Cut-off for recall.
+
+          Raises:
+              ValueError: If gold is empty.
+          """
+          if not gold:
+              raise ValueError("no gold questions")
+          recalls, ranks = [], []
+          for question, relevant in gold:
+              ranked = list(dict.fromkeys(search(question)))
+              recalls.append(recall_at_k(ranked, relevant, k))
+              ranks.append(reciprocal_rank(ranked, relevant))
+          return {"recall_at_k": sum(recalls) / len(gold), "mrr": sum(ranks) / len(gold)}
+    annotations:
+      - find: "if not relevant:"
+        note: "A question without gold labels would divide by zero. Fail fast."
+      - find: "return len(set(ranked[:k]) & relevant) / len(relevant)"
+        note: "Divide by the number of relevant IDs, not by k."
+      - find: "for rank, item in enumerate(ranked, start=1):"
+        note: "Ranks count from 1, so a first-place hit scores 1.0."
+      - find: "ranked = list(dict.fromkeys(search(question)))"
+        note: "Repeated sections keep their first position only."
+      - find: 'return {"recall_at_k": sum(recalls) / len(gold), "mrr": sum(ranks) / len(gold)}'
+        note: "Two numbers to compare across chunk sizes, k and rankings."
+  takeaway: |
+    Score retrieval apart from generation, on a versioned gold set, with recall at k and MRR, and compare settings on the same questions.
+
+exercises:
+  - id: B22-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A third of your assistant's answers are wrong. On the same questions, recall at 5 is 0.68. Where do you work first?
+    options:
+      - {id: a, text: "Retrieval: for about a third of the questions, the answer never reaches the prompt"}
+      - {id: b, text: "The answer prompt: add more rules about accuracy"}
+      - {id: c, text: "A larger model"}
+      - {id: d, text: "A higher max_tokens"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The model can only answer from what it is sent, so a retrieval miss caps answer quality."}
+      - {id: r2, text: "Retrieval code is easier to change than prompts."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "No prompt helps when the right section is missing from the sources."
+      - answer: c
+        feedback: "A larger model still cannot cite a passage it was never given."
+      - answer: d
+        feedback: "max_tokens limits the reply length. It does not change which sources arrive."
+      - answer: a|r2
+        feedback: "Right place, wrong reason. Retrieval caps what the model can answer."
+    hints:
+      - "What does recall at 5 of 0.68 mean for the prompt?"
+      - "Can the model answer from a passage it never saw?"
+      - "Fix the step that caps the rest."
+    explanation: |
+      With recall at 5 of 0.68, roughly a third of prompts lack the answer. Fix retrieval first, then measure answers again.
+
+  - id: B22-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      ranked = ["weighting#caps", "weighting#w14", "sampling#bases", "weighting#targets"]
+      relevant = {"weighting#w14", "weighting#targets"}
+
+
+      def recall_at_k(ranked, relevant, k):
+          return len(set(ranked[:k]) & relevant) / len(relevant)
+
+
+      def reciprocal_rank(ranked, relevant):
+          for rank, item in enumerate(ranked, start=1):
+              if item in relevant:
+                  return 1 / rank
+          return 0.0
+
+
+      print(recall_at_k(ranked, relevant, 2), recall_at_k(ranked, relevant, 4), reciprocal_rank(ranked, relevant))
+    answer: |
+      0.5 1.0 0.5
+    wrong_answers:
+      - answer: "0.5 1.0 1.0"
+        feedback: "The first item, weighting#caps, is not relevant. The first hit is at rank 2."
+      - answer: "0.5 0.5 0.5"
+        feedback: "Recall divides by the number of relevant IDs, 2. Both appear in the top 4."
+      - answer: "1.0 1.0 0.5"
+        feedback: "Only one of the two relevant IDs is in the top 2."
+    hints:
+      - "How many relevant IDs are in the first two items?"
+      - "And in all four?"
+      - "Where is the first relevant item?"
+    explanation: |
+      The top 2 hold one of two relevant sections (0.5), the top 4 hold both (1.0), and the first hit is at rank 2 (0.5).
+
+  - id: B22-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Keep each section at its first position, then count the relevant sections in the top k.
+    template: |
+      ranked = list(dict.[[g1]](section_ids))
+      hits = len(set(ranked[:k]) [[g2]] relevant)
+    gaps:
+      g1: {accepted: [fromkeys]}
+      g2: {accepted: ["&"]}
+    wrong_answers:
+      - answer: {g1: fromkeys, g2: "|"}
+        feedback: "| is the union. The hits are the intersection: &."
+    hints:
+      - "Which dict method builds a dict from a sequence of keys?"
+      - "Which set operator keeps only shared items?"
+      - "`fromkeys` and `&`."
+    explanation: |
+      `dict.fromkeys` drops repeats and keeps first positions. `&` keeps the sections that are both retrieved and relevant.
+
+  - id: B22-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `recall_at_k(ranked: list[str], relevant: set[str], k: int) -> float`: the share of `relevant` found in the first `k` items of `ranked`.
+
+      - Raise `ValueError` when `relevant` is empty or `k` is below 1.
+      - Count each relevant ID once, even if `ranked` repeats it.
+      - `k` may be larger than `len(ranked)`.
+    starter: |
+      def recall_at_k(ranked, relevant, k):
+          return 0.0
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: recall_at_k
+          typed: true
+          docstring: true
+          message: "Give recall_at_k type hints and a docstring."
+      tests:
+        - id: share
+          code: |
+            ranked = ["a", "b", "c", "d"]
+            assert recall_at_k(ranked, {"b", "d"}, 2) == 0.5
+            assert recall_at_k(ranked, {"b", "d"}, 4) == 1.0
+            assert recall_at_k(ranked, {"z"}, 4) == 0.0
+          message: "Divide the relevant IDs in the top k by the number of relevant IDs."
+        - id: repeats_and_short
+          code: |
+            assert recall_at_k(["a", "a", "b"], {"a", "c"}, 3) == 0.5
+            assert recall_at_k(["a"], {"a"}, 5) == 1.0
+          message: "Count each relevant ID once, and allow k beyond the end of the list."
+        - id: guards
+          code: |
+            for relevant, k in [(set(), 3), ({"a"}, 0)]:
+                try:
+                    recall_at_k(["a"], relevant, k)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for relevant={relevant}, k={k}")
+          message: "Raise ValueError for an empty relevant set or k below 1."
+    solution: |
+      def recall_at_k(ranked: list[str], relevant: set[str], k: int) -> float:
+          """Share of the relevant IDs found in the first k of a ranking.
+
+          Args:
+              ranked: Retrieved IDs, best first.
+              relevant: IDs a person marked as answering the question.
+              k: Cut-off.
+
+          Returns:
+              A value from 0 to 1.
+
+          Raises:
+              ValueError: If relevant is empty or k is below 1.
+          """
+          if not relevant:
+              raise ValueError("relevant is empty: the question has no gold answer")
+          if k < 1:
+              raise ValueError(f"k must be at least 1, got {k}")
+          return len(set(ranked[:k]) & relevant) / len(relevant)
+    seeded_bugs:
+      - |
+        def recall_at_k(ranked: list[str], relevant: set[str], k: int) -> float:
+            """Divides by k: that is precision."""
+            if not relevant or k < 1:
+                raise ValueError("bad arguments")
+            return len(set(ranked[:k]) & relevant) / k
+      - |
+        def recall_at_k(ranked: list[str], relevant: set[str], k: int) -> float:
+            """Counts repeats."""
+            if not relevant or k < 1:
+                raise ValueError("bad arguments")
+            return sum(item in relevant for item in ranked[:k]) / len(relevant)
+      - |
+        def recall_at_k(ranked: list[str], relevant: set[str], k: int) -> float:
+            """No guards."""
+            return len(set(ranked[:k]) & relevant) / max(len(relevant), 1)
+    wrong_answers:
+      - answer: |
+          def recall_at_k(ranked: list[str], relevant: set[str], k: int) -> float:
+              """Divides by k: that is precision."""
+              if not relevant or k < 1:
+                  raise ValueError("bad arguments")
+              return len(set(ranked[:k]) & relevant) / k
+        triggers: share
+    hints:
+      - "Guard the two bad inputs first."
+      - "`set(ranked[:k]) & relevant` removes repeats."
+      - "Divide by `len(relevant)`."
+    explanation: |
+      The set intersection counts each relevant ID once, and dividing by the number of relevant IDs gives recall. Dividing by k would give precision.
+
+  - id: B22-L1-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `reciprocal_rank(ranked: list[str], relevant: set[str]) -> float`: `1 / rank` of the first item of `ranked` that is in `relevant`, with ranks counted from 1, or `0.0` when none is.
+    starter: |
+      def reciprocal_rank(ranked, relevant):
+          return 0.0
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: reciprocal_rank
+          typed: true
+          docstring: true
+          message: "Give reciprocal_rank type hints and a docstring."
+      tests:
+        - id: first_hit
+          code: |
+            assert reciprocal_rank(["a", "b", "c"], {"a"}) == 1.0
+            assert reciprocal_rank(["a", "b", "c"], {"c", "b"}) == 0.5
+            assert reciprocal_rank(["a", "b", "c", "d"], {"d"}) == 0.25
+          message: "Return 1 / rank of the first relevant item, counting ranks from 1."
+        - id: no_hit
+          code: |
+            assert reciprocal_rank(["a", "b"], {"z"}) == 0.0
+            assert reciprocal_rank([], {"a"}) == 0.0
+          message: "Return 0.0 when no item is relevant, including for an empty ranking."
+    solution: |
+      def reciprocal_rank(ranked: list[str], relevant: set[str]) -> float:
+          """1 / rank of the first relevant ID, counting from 1, or 0.0 if none.
+
+          Args:
+              ranked: Retrieved IDs, best first.
+              relevant: IDs a person marked as answering the question.
+
+          Returns:
+              A value from 0 to 1.
+          """
+          for rank, item in enumerate(ranked, start=1):
+              if item in relevant:
+                  return 1 / rank
+          return 0.0
+    seeded_bugs:
+      - |
+        def reciprocal_rank(ranked: list[str], relevant: set[str]) -> float:
+            """Ranks from 0."""
+            for rank, item in enumerate(ranked):
+                if item in relevant:
+                    return 1 / (rank + 2)
+            return 0.0
+      - |
+        def reciprocal_rank(ranked: list[str], relevant: set[str]) -> float:
+            """Uses the last hit."""
+            score = 0.0
+            for rank, item in enumerate(ranked, start=1):
+                if item in relevant:
+                    score = 1 / rank
+            return score
+    wrong_answers:
+      - answer: |
+          def reciprocal_rank(ranked: list[str], relevant: set[str]) -> float:
+              """Uses the last hit."""
+              score = 0.0
+              for rank, item in enumerate(ranked, start=1):
+                  if item in relevant:
+                      score = 1 / rank
+              return score
+        triggers: first_hit
+    hints:
+      - "`enumerate(ranked, start=1)` gives ranks from 1."
+      - "Return as soon as you find a relevant item."
+      - "After the loop, return 0.0."
+    explanation: |
+      Returning at the first hit gives 1 / rank of the best-placed relevant item. A ranking with no hit scores 0.
+
+  - id: B22-L1-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      Recall at 5 never goes above 0.2, even for questions whose one relevant section comes first. Tap the line responsible, then fix it.
+    code: |
+      def recall_at_k(ranked, relevant, k):
+          if not relevant:
+              raise ValueError("relevant is empty")
+          if k < 1:
+              raise ValueError("k must be at least 1")
+          hits = set(ranked[:k]) & relevant
+          return len(hits) / k
+    bug_lines: [7]
+    fix_checker:
+      kind: python
+      tests:
+        - id: recall
+          code: |
+            assert recall_at_k(["a", "b", "c", "d", "e"], {"a"}, 5) == 1.0
+            assert recall_at_k(["a", "b"], {"a", "z"}, 5) == 0.5
+          message: "Divide by len(relevant), not by k."
+    fix_solution: |
+      def recall_at_k(ranked, relevant, k):
+          if not relevant:
+              raise ValueError("relevant is empty")
+          if k < 1:
+              raise ValueError("k must be at least 1")
+          hits = set(ranked[:k]) & relevant
+          return len(hits) / len(relevant)
+    wrong_answers:
+      - lines: [6]
+        feedback: "The intersection finds the right hits. Look at what they are divided by."
+      - lines: [2]
+        feedback: "The guard is right. It stops a division by zero."
+    hints:
+      - "With one relevant section and k = 5, what is the largest value?"
+      - "Recall is a share of what?"
+      - "Divide by len(relevant)."
+    explanation: |
+      Dividing by k gives precision at k, which cannot exceed 1/5 when a question has one relevant section. Recall divides by the number of relevant sections.
+
+recap:
+  - front: "Recall at k"
+    back: "len(set(ranked[:k]) & relevant) / len(relevant). With one relevant section per question, its mean is the hit rate."
+  - front: "Mean reciprocal rank"
+    back: "Mean over questions of 1 / rank of the first relevant result, ranks from 1, or 0 when none appears."
+  - front: "Gold set rules"
+    back: "Real questions, relevance marked by section, versioned, and every failed question added."
+  - front: "Repeated sections in a ranking"
+    back: "list(dict.fromkeys(section_ids)) keeps each at its first position."
+
+claims:
+  - claim: "45 of 50 has a 95% Wilson interval of 0.786 to 0.957."
+    status: verified
+    source: "statsmodels proportion_confint(45, 50, method=\"wilson\"), statsmodels 0.14."
+  - claim: "The E2 code prints 0.5 1.0 0.5."
+    status: verified
+    source: "Run on Python 3.11 and 3.13."

@@ -1,0 +1,546 @@
+id: B20-L3
+title: Model calls in a pipeline, stop reasons, caching and run logs
+
+concept: |
+  Lesson B19-L7 tested code that does I/O by passing the dependency in. A model call is I/O with three extra traits: every call costs money, a call can stop early, and the same prompt can get a different reply each time.
+
+  **Pass the model in.** Pipeline code takes `call_model`, a function from messages to reply text. Production wraps the SDK client. Tests pass a fake that returns fixed text, so parsing, retries and logging run with no network and no API key.
+
+  **Check why it stopped.** In anthropic 2.4.0 a response has a `stop_reason`. `"end_turn"` means the model finished. `"max_tokens"` means the reply hit your `max_tokens` limit, so any JSON in it is likely cut off. `"refusal"` means the model declined. Treat every value except `"end_turn"` as a failed attempt, never as an answer. Then take the first block whose `type` is `"text"`.
+
+  **Cache by everything that shapes the reply.** A rerun should not pay again for replies it already has, and should give the same labels. Store each reply under a key built from the model ID, the prompt version and the messages:
+
+  ```python
+  text = json.dumps({"model": model, "prompt_version": version, "messages": messages}, sort_keys=True)
+  key = hashlib.sha256(text.encode()).hexdigest()
+  ```
+
+  `sort_keys=True` turns equal dicts into equal text, whatever their key order. `hexdigest()` returns 64 hex characters. Leave the model ID out and a model upgrade returns old replies without a single new call.
+
+  **Log every call.** Append one record per call to the run log: `run_id`, a UTC timestamp, model, prompt version, cache hit or miss, stop reason, and the token counts in `response.usage.input_tokens` and `response.usage.output_tokens`. Cost and drift then come from data.
+
+  The SDK retries some failures for you. anthropic 2.4.0 retries connection errors and status codes 408, 409, 429 and 500 or above, twice by default (`max_retries=2`). Your code handles what is left: stop reasons and invalid replies.
+
+why_it_matters: |
+  A team reran a theme-coding job after fixing a typo in its report code. The rerun called the model again for all 12,000 answers. It paid twice, a few hundred labels changed, and the published wave totals no longer matched the dashboard. A cache keyed on model, prompt version and messages would have reused every reply and kept the labels fixed.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def run_coding(client, answers):
+          labels = []
+          for answer in answers:
+              response = client.messages.create(
+                  model="claude-opus-5-5",
+                  max_tokens=1024,
+                  system=SYSTEM,
+                  messages=[{"role": "user", "content": f"<answer>{answer}</answer>"}],
+              )
+              labels.append(response.content[-1].text)
+          return labels
+    annotations:
+      - find: "for answer in answers:"
+        note: "Every rerun pays for every answer again, and labels can change between runs."
+      - find: "labels.append(response.content[-1].text)"
+        note: "No stop_reason check: a reply cut off at max_tokens becomes a label. Nothing is logged."
+  strong:
+    code: |
+      import hashlib
+      import json
+      from collections.abc import Callable, MutableMapping
+      from typing import Any
+
+
+      def reply_text(response: Any) -> str:
+          """Text of a finished reply.
+
+          Args:
+              response: A Message from client.messages.create.
+
+          Returns:
+              The first text block.
+
+          Raises:
+              RuntimeError: If the reply did not finish, or has no text block.
+          """
+          if response.stop_reason != "end_turn":
+              raise RuntimeError(f"reply stopped early: {response.stop_reason}")
+          for block in response.content:
+              if block.type == "text":
+                  return block.text
+          raise RuntimeError("reply has no text block")
+
+
+      def cache_key(model: str, prompt_version: str, messages: list[dict[str, str]]) -> str:
+          """Hash of everything that shapes the reply."""
+          payload = {"model": model, "prompt_version": prompt_version, "messages": messages}
+          text = json.dumps(payload, sort_keys=True)
+          return hashlib.sha256(text.encode()).hexdigest()
+
+
+      def cached_reply(
+          messages: list[dict[str, str]],
+          model: str,
+          prompt_version: str,
+          call_model: Callable[[list[dict[str, str]]], str],
+          cache: MutableMapping[str, str],
+      ) -> tuple[str, bool]:
+          """Reply from the cache, or from one model call that is then cached.
+
+          Returns:
+              The reply text and True when it came from the cache.
+          """
+          key = cache_key(model, prompt_version, messages)
+          if key in cache:
+              return cache[key], True
+          reply = call_model(messages)
+          cache[key] = reply
+          return reply, False
+    annotations:
+      - find: 'if response.stop_reason != "end_turn":'
+        note: "A reply cut off at max_tokens, or a refusal, is a failure, not an answer."
+      - find: 'if block.type == "text":'
+        note: "Pick the text block by type. Other block types can come first."
+      - find: 'payload = {"model": model, "prompt_version": prompt_version, "messages": messages}'
+        note: "Model, prompt version and messages all shape the reply, so all go in the key."
+      - find: "text = json.dumps(payload, sort_keys=True)"
+        note: "Equal dicts give equal text, so equal keys."
+      - find: "return cache[key], True"
+        note: "A rerun reuses the stored reply: no cost and the same label."
+  takeaway: |
+    Inject the model, reject replies that did not finish, cache on model plus prompt version plus messages, and log every call.
+
+exercises:
+  - id: B20-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You cache model replies so reruns reuse them. What goes into the cache key?
+    options:
+      - {id: a, text: "The respondent's answer text"}
+      - {id: b, text: "The model ID, the prompt version and the full messages"}
+      - {id: c, text: "The answer ID"}
+      - {id: d, text: "The answer ID and today's date"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Each of the three shapes the reply, so a change to any of them must miss the cache."}
+      - {id: r2, text: "Longer keys make the cache faster."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "A new prompt version or model would still hit the old reply."
+      - answer: c
+        feedback: "The ID says nothing about the prompt or the model. A new prompt version would reuse old replies."
+      - answer: d
+        feedback: "The date makes every rerun miss, so nothing is reused, and it still ignores the prompt and model."
+      - answer: b|r2
+        feedback: "Right key, wrong reason. It is about missing the cache whenever the reply could change."
+    hints:
+      - "What changes the reply?"
+      - "Which of these would a model upgrade change?"
+      - "Model, prompt version, messages."
+    explanation: |
+      The key must change whenever the reply could change: a new model, a new prompt version or different messages.
+
+  - id: B20-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      import hashlib
+      import json
+
+
+      def cache_key(model, version, messages):
+          text = json.dumps({"model": model, "prompt_version": version, "messages": messages}, sort_keys=True)
+          return hashlib.sha256(text.encode()).hexdigest()
+
+
+      msgs = [{"role": "user", "content": "<answer>Too dear</answer>"}]
+      a = cache_key("claude-opus-5-5", "v3", msgs)
+      b = cache_key("claude-opus-5-5", "v3", [{"content": "<answer>Too dear</answer>", "role": "user"}])
+      c = cache_key("claude-sonnet-5-5", "v3", msgs)
+      print(a == b, a == c, len(a))
+    answer: |
+      True False 64
+    wrong_answers:
+      - answer: "False False 64"
+        feedback: "sort_keys=True writes keys in sorted order, so the two message dicts give the same text."
+      - answer: "True True 64"
+        feedback: "The model ID is part of the hashed text, so a different model gives a different key."
+      - answer: "True False 32"
+        feedback: "hexdigest() returns two hex characters per byte. SHA-256 has 32 bytes, so 64 characters."
+    hints:
+      - "Does key order survive sort_keys=True?"
+      - "Is the model ID inside the hashed text?"
+      - "SHA-256 as hex."
+    explanation: |
+      Sorted keys make `a` and `b` equal. The different model makes `c` differ. A SHA-256 hex digest has 64 characters.
+
+  - id: B20-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Build a cache key that is the same for equal payloads, whatever the key order.
+    template: |
+      text = json.dumps(payload, [[g1]]=True)
+      key = hashlib.[[g2]](text.encode()).hexdigest()
+    gaps:
+      g1: {accepted: [sort_keys]}
+      g2: {accepted: [sha256]}
+    wrong_answers:
+      - answer: {g1: indent, g2: sha256}
+        feedback: "indent changes layout, not key order. Use sort_keys=True."
+    hints:
+      - "Which json.dumps argument orders the keys?"
+      - "Which hash gives a 64-character hex digest?"
+      - "`sort_keys` and `sha256`."
+    explanation: |
+      `sort_keys=True` makes the text stable, and `hashlib.sha256(...).hexdigest()` turns it into a fixed-length key.
+
+  - id: B20-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `reply_text(response) -> str` for a response from `client.messages.create`.
+
+      - If `response.stop_reason` is not `"end_turn"`, raise `RuntimeError` with a message that contains the stop reason.
+      - Otherwise return the `.text` of the first block in `response.content` whose `.type` is `"text"`.
+      - If there is no text block, raise `RuntimeError`.
+    starter: |
+      def reply_text(response):
+          return response.content[0].text
+    checker:
+      kind: python
+      setup: |
+        from types import SimpleNamespace as _NS
+
+
+        def _response(stop_reason, *blocks):
+            return _NS(stop_reason=stop_reason, content=list(blocks))
+
+
+        _THINK = _NS(type="thinking", thinking="")
+        _TEXT = _NS(type="text", text='{"theme": "Price", "confidence": 0.9}')
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: reply_text
+          typed: true
+          docstring: true
+          message: "Give reply_text type hints and a docstring."
+      tests:
+        - id: finds_text
+          code: |
+            assert reply_text(_response("end_turn", _THINK, _TEXT)) == _TEXT.text
+            assert reply_text(_response("end_turn", _TEXT)) == _TEXT.text
+          message: "Return the first block whose type is text, even when another block comes first."
+        - id: stop_reason
+          code: |
+            for reason in ["max_tokens", "refusal"]:
+                try:
+                    reply_text(_response(reason, _TEXT))
+                except RuntimeError as err:
+                    assert reason in str(err), str(err)
+                else:
+                    raise AssertionError(f"no RuntimeError for stop_reason={reason}")
+          message: "Raise RuntimeError naming the stop reason when it is not end_turn."
+        - id: no_text
+          code: |
+            try:
+                reply_text(_response("end_turn", _THINK))
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("no RuntimeError when there is no text block")
+          message: "Raise RuntimeError when no block has type text."
+    solution: |
+      from typing import Any
+
+
+      def reply_text(response: Any) -> str:
+          """Text of a finished reply.
+
+          Args:
+              response: A Message from client.messages.create.
+
+          Returns:
+              The first text block.
+
+          Raises:
+              RuntimeError: If the reply did not finish, or has no text block.
+          """
+          if response.stop_reason != "end_turn":
+              raise RuntimeError(f"reply stopped early: {response.stop_reason}")
+          for block in response.content:
+              if block.type == "text":
+                  return block.text
+          raise RuntimeError("reply has no text block")
+    seeded_bugs:
+      - |
+        from typing import Any
+
+
+        def reply_text(response: Any) -> str:
+            """Ignores the stop reason."""
+            for block in response.content:
+                if block.type == "text":
+                    return block.text
+            raise RuntimeError("reply has no text block")
+      - |
+        from typing import Any
+
+
+        def reply_text(response: Any) -> str:
+            """Assumes the first block is text."""
+            if response.stop_reason != "end_turn":
+                raise RuntimeError(f"reply stopped early: {response.stop_reason}")
+            return response.content[0].text
+    wrong_answers:
+      - answer: |
+          from typing import Any
+
+
+          def reply_text(response: Any) -> str:
+              """Ignores the stop reason."""
+              for block in response.content:
+                  if block.type == "text":
+                      return block.text
+              raise RuntimeError("reply has no text block")
+        triggers: stop_reason
+    hints:
+      - "Check `response.stop_reason` first."
+      - "Loop over `response.content` and test `block.type`."
+      - "Raise after the loop when nothing matched."
+    explanation: |
+      A reply that stopped early is not an answer, and the text block is found by its type, not its position.
+
+  - id: B20-L3-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `cached_reply(messages, model, prompt_version, call_model, cache) -> tuple[str, bool]`. `cache_key(model, prompt_version, messages)` is defined for you, as in the worked example.
+
+      - On a cache hit, return `(cached_reply_text, True)` without calling the model.
+      - On a miss, call `call_model(messages)` once, store the reply under the key, and return `(reply, False)`.
+    starter: |
+      def cached_reply(messages, model, prompt_version, call_model, cache):
+          return call_model(messages), False
+    checker:
+      kind: python
+      setup: |
+        import hashlib
+        import json
+
+
+        def cache_key(model, prompt_version, messages):
+            payload = {"model": model, "prompt_version": prompt_version, "messages": messages}
+            return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+        class _Fake:
+            def __init__(self):
+                self.calls = 0
+
+            def __call__(self, messages):
+                self.calls += 1
+                return f"reply {self.calls}"
+
+
+        _MSGS = [{"role": "user", "content": "<answer>Too dear</answer>"}]
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: cached_reply
+          typed: true
+          docstring: true
+          message: "Give cached_reply type hints and a docstring."
+      tests:
+        - id: miss_then_hit
+          code: |
+            fake, cache = _Fake(), {}
+            assert cached_reply(_MSGS, "claude-opus-5-5", "v3", fake, cache) == ("reply 1", False)
+            assert cached_reply(_MSGS, "claude-opus-5-5", "v3", fake, cache) == ("reply 1", True)
+            assert fake.calls == 1, fake.calls
+          message: "Call the model on a miss, then serve the stored reply with True and no second call."
+        - id: model_in_key
+          code: |
+            fake, cache = _Fake(), {}
+            cached_reply(_MSGS, "claude-opus-5-5", "v3", fake, cache)
+            reply, hit = cached_reply(_MSGS, "claude-sonnet-5-5", "v3", fake, cache)
+            assert (reply, hit) == ("reply 2", False), (reply, hit)
+            reply, hit = cached_reply(_MSGS, "claude-opus-5-5", "v4", fake, cache)
+            assert (reply, hit) == ("reply 3", False), (reply, hit)
+          message: "Build the key with cache_key(model, prompt_version, messages), so a new model or prompt version misses."
+        - id: stored_under_key
+          code: |
+            fake, cache = _Fake(), {}
+            cached_reply(_MSGS, "claude-opus-5-5", "v3", fake, cache)
+            assert cache == {cache_key("claude-opus-5-5", "v3", _MSGS): "reply 1"}, cache
+          message: "Store the reply under cache_key(model, prompt_version, messages)."
+    solution: |
+      from collections.abc import Callable, MutableMapping
+
+
+      def cached_reply(
+          messages: list[dict[str, str]],
+          model: str,
+          prompt_version: str,
+          call_model: Callable[[list[dict[str, str]]], str],
+          cache: MutableMapping[str, str],
+      ) -> tuple[str, bool]:
+          """Reply from the cache, or from one model call that is then cached.
+
+          Args:
+              messages: The prompt messages.
+              model: Model ID.
+              prompt_version: Version of the prompt file.
+              call_model: Takes messages and returns the reply text.
+              cache: Stored replies by key.
+
+          Returns:
+              The reply text and True when it came from the cache.
+          """
+          key = cache_key(model, prompt_version, messages)
+          if key in cache:
+              return cache[key], True
+          reply = call_model(messages)
+          cache[key] = reply
+          return reply, False
+    seeded_bugs:
+      - |
+        from collections.abc import Callable, MutableMapping
+
+
+        def cached_reply(
+            messages: list[dict[str, str]],
+            model: str,
+            prompt_version: str,
+            call_model: Callable[[list[dict[str, str]]], str],
+            cache: MutableMapping[str, str],
+        ) -> tuple[str, bool]:
+            """Keys on the messages only."""
+            key = json.dumps(messages, sort_keys=True)
+            if key in cache:
+                return cache[key], True
+            reply = call_model(messages)
+            cache[key] = reply
+            return reply, False
+      - |
+        from collections.abc import Callable, MutableMapping
+
+
+        def cached_reply(
+            messages: list[dict[str, str]],
+            model: str,
+            prompt_version: str,
+            call_model: Callable[[list[dict[str, str]]], str],
+            cache: MutableMapping[str, str],
+        ) -> tuple[str, bool]:
+            """Calls the model even on a hit."""
+            key = cache_key(model, prompt_version, messages)
+            reply = call_model(messages)
+            hit = key in cache
+            cache.setdefault(key, reply)
+            return cache[key], hit
+    wrong_answers:
+      - answer: |
+          from collections.abc import Callable, MutableMapping
+
+
+          def cached_reply(
+              messages: list[dict[str, str]],
+              model: str,
+              prompt_version: str,
+              call_model: Callable[[list[dict[str, str]]], str],
+              cache: MutableMapping[str, str],
+          ) -> tuple[str, bool]:
+              """Keys on the messages only."""
+              key = json.dumps(messages, sort_keys=True)
+              if key in cache:
+                  return cache[key], True
+              reply = call_model(messages)
+              cache[key] = reply
+              return reply, False
+        triggers: model_in_key
+    hints:
+      - "Build the key with `cache_key(model, prompt_version, messages)`."
+      - "Check `key in cache` before calling the model."
+      - "On a miss, store the reply under the key, then return it with False."
+    explanation: |
+      The model runs only on a miss. The key covers model, prompt version and messages, so any change that could alter the reply misses the cache.
+
+  - id: B20-L3-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      After the switch to a new model, a full rerun finished in seconds, cost nothing and produced identical labels. Tap the line that explains it, then fix it.
+    code: |
+      import hashlib
+      import json
+
+
+      def cache_key(model, prompt_version, messages):
+          payload = {"prompt_version": prompt_version, "messages": messages}
+          text = json.dumps(payload, sort_keys=True)
+          return hashlib.sha256(text.encode()).hexdigest()
+    bug_lines: [6]
+    fix_checker:
+      kind: python
+      tests:
+        - id: model_changes_key
+          code: |
+            msgs = [{"role": "user", "content": "x"}]
+            assert cache_key("claude-opus-5-5", "v3", msgs) != cache_key("claude-sonnet-5-5", "v3", msgs)
+          message: "Put the model ID in the payload, so a new model gives a new key."
+        - id: still_stable
+          code: |
+            a = cache_key("m", "v3", [{"role": "user", "content": "x"}])
+            b = cache_key("m", "v3", [{"content": "x", "role": "user"}])
+            assert a == b and len(a) == 64, (a, b)
+          message: "Keep sort_keys=True and the SHA-256 hex digest."
+    fix_solution: |
+      import hashlib
+      import json
+
+
+      def cache_key(model, prompt_version, messages):
+          payload = {"model": model, "prompt_version": prompt_version, "messages": messages}
+          text = json.dumps(payload, sort_keys=True)
+          return hashlib.sha256(text.encode()).hexdigest()
+    wrong_answers:
+      - lines: [7]
+        feedback: "sort_keys=True keeps equal payloads equal. The problem is what the payload leaves out."
+      - lines: [8]
+        feedback: "The hash is fine. It hashes the wrong set of inputs."
+    hints:
+      - "Which input to the function never reaches the hash?"
+      - "What changed between the two runs?"
+      - "Add the model to the payload."
+    explanation: |
+      The function takes `model` but never hashes it, so the new model hit every old reply. Add `"model": model` to the payload.
+
+recap:
+  - front: "stop_reason values to reject"
+    back: "Anything but end_turn: max_tokens means the reply was cut off, refusal means the model declined."
+  - front: "Cache key for model replies"
+    back: "sha256 of json.dumps({model, prompt_version, messages}, sort_keys=True), as hexdigest()."
+  - front: "What the anthropic 2.4.0 SDK retries"
+    back: "Connection errors and status 408, 409, 429 and 500 or above, twice by default (max_retries=2)."
+  - front: "One run-log record per model call"
+    back: "run_id, UTC timestamp, model, prompt version, cache hit, stop reason, input and output tokens."
+
+claims:
+  - claim: "anthropic 2.4.0: StopReason is one of end_turn, max_tokens, stop_sequence, tool_use, pause_turn, refusal, model_context_window_exceeded; Usage has input_tokens and output_tokens; the client retries connection errors and 408, 409, 429 and >= 500, with DEFAULT_MAX_RETRIES = 2 and a 600 s default timeout."
+    status: verified
+    source: "anthropic 2.4.0 source (types, _base_client._should_retry, _constants); no live API call."
+  - claim: "The E2 code prints True False 64."
+    status: verified
+    source: "Run on Python 3.11 and 3.13."

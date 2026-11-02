@@ -2,7 +2,7 @@
 
 A personal, offline-capable course with four tracks: Databricks pipeline engineering, Python for data science, Microsoft Fabric, and finding errors in code. It runs as a static site on GitHub Pages and installs on an iPhone home screen.
 
-Status: Phase 6 complete. All four tracks and three capstones are written: Track A (Databricks pipeline engineering) 30 lessons, Track B (Python for data science) 54, Track C (Microsoft Fabric) 30, checked against Microsoft Learn, Track D (Finding errors in code) 24, and the Capstones track with 3 projects.
+Status: Phase 6 complete. All four tracks and three capstones are written: Track A (Databricks pipeline engineering) 33 lessons, Track B (Python for data science) 74, including prompting, RAG and LLM evaluation for roadmap months 13 to 15, Track C (Microsoft Fabric) 33, checked against Microsoft Learn, Track D (Finding errors in code) 26, and the Capstones track with 3 projects.
 
 ## Install on your iPhone
 
@@ -41,6 +41,7 @@ The `deploy` job in `.github/workflows/ci.yml` publishes `site/` after every gat
 | `scripts/` | Build scripts: content bundle, handbook (PDF and Word), practicals |
 | `practice/` | Local pytest harness with a SparkSession and Delta Lake |
 | `labs/testing/` | The B19 testing lab: a small package to test, and a reference suite with 100% branch coverage |
+| `labs/rag/` | The B21 RAG lab: methodology notes, 12 gold questions, a pipeline with seven functions to write, and a reference solution |
 | `tests/` | Quality gates for every exercise, store unit tests, browser smoke test |
 | `reference/` | Your pipeline code and roadmap |
 
@@ -79,6 +80,10 @@ See `practice/README.md`. Short version: install Java 17 or 21, create a separat
 ## Testing lab
 
 Module B19 ends with a laptop lab in `labs/testing/`. Use the `dev` environment, `cd labs/testing`, then `pytest`. Write your tests in `labs/testing/tests/`, measure them with `pytest --cov=survey_stats --cov-branch --cov-report=term-missing`, and compare with `reference_tests/`. See `labs/testing/README.md`.
+
+## RAG lab
+
+Module B21 ends with a laptop lab in `labs/rag/`: a retrieval-augmented generation pipeline over survey methodology notes. `cd labs/rag`, `pip install -e .`, then `pytest`. Fill in the seven functions in `src/survey_rag/steps.py` until the tests pass, then score retrieval with `python -m survey_rag eval`. A live model call is optional (`pip install -e ".[llm]"` and an Anthropic API key). See `labs/rag/README.md`.
 
 ## Documents
 
