@@ -1,0 +1,363 @@
+id: B23-L1
+title: Tensors, shape, dtype and shared memory
+
+concept: |
+  A **tensor** is PyTorch's array. It works like a NumPy array, and it also records gradients (lesson B23-L2) and runs on a GPU (lesson B16-L1). Examples use PyTorch 2.15. PyTorch does not run in this app's browser runtime, so the code exercises use NumPy, which follows the same shape and memory rules.
+
+  Every tensor has a **shape** and a **dtype**:
+
+  ```python
+  x = torch.zeros(4, 3)
+  x.shape                              # torch.Size([4, 3])
+  x.sum(dim=0).shape                   # torch.Size([3])
+  x.sum(dim=1, keepdim=True).shape     # torch.Size([4, 1])
+  x.unsqueeze(0).shape                 # torch.Size([1, 4, 3])
+  x.reshape(-1).shape                  # torch.Size([12])
+  ```
+
+  **dtype.** PyTorch's default float is `float32`. NumPy's is `float64`, and `torch.tensor(df.to_numpy())` keeps `float64`. Layer weights are `float32`, so the first forward pass fails with "mat1 and mat2 must have the same dtype, but got Double and Float". Convert once, at the edge: `torch.as_tensor(X, dtype=torch.float32)`. Integers become `int64`.
+
+  **Shared memory.** `torch.from_numpy(a)` and slices such as `x[:64]` share memory with their source, as NumPy slices do. Change one and the other changes. `torch.tensor(a)` copies. An in-place operation, such as `batch -= batch.mean(dim=0)`, on a slice therefore changes the full dataset. Write `batch = batch - batch.mean(dim=0)` to get a new tensor.
+
+  **Broadcasting.** Shapes line up from the right, and a dimension of 1 stretches to match. `(3, 1) - (3,)` gives `(3, 3)`, not `(3,)`. This is the most common silent bug in training code: predictions of shape `(n, 1)` against targets of shape `(n,)` produce an `n` by `n` table of differences, and the mean of that table looks like a plausible loss. Flatten predictions with `reshape(-1)` or `squeeze(1)` before comparing, and assert shapes where data enters a function.
+
+why_it_matters: |
+  A model of spend per respondent stopped improving after a few epochs, at a loss that never went below the variance of the target. Predictions had shape (n, 1) and targets shape (n,). Every prediction was being compared with every target, so the best the model could do was predict the mean. One `squeeze(1)` fixed it, and the loss fell by two thirds.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import torch
+
+      X = torch.tensor(df[FEATURES].to_numpy())
+      y = torch.tensor(df["spend"].to_numpy())
+      error = model(X) - y
+    annotations:
+      - find: "X = torch.tensor(df[FEATURES].to_numpy())"
+        note: "float64 data meets float32 weights: the forward pass fails."
+      - find: "error = model(X) - y"
+        note: "(n, 1) minus (n,) broadcasts to (n, n). No error, wrong numbers."
+  strong:
+    code: |
+      import numpy as np
+      import torch
+
+
+      def to_tensors(X: np.ndarray, y: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
+          """Features and target as float32 tensors with checked shapes.
+
+          Args:
+              X: Feature matrix, one row per respondent.
+              y: Target, one value per respondent.
+
+          Returns:
+              X as (n, k) and y as (n,), both float32.
+
+          Raises:
+              ValueError: If X is not 2-D or the row counts differ.
+          """
+          if X.ndim != 2 or len(X) != len(y):
+              raise ValueError(f"expected X (n, k) and y (n,), got {X.shape} and {y.shape}")
+          return torch.as_tensor(X, dtype=torch.float32), torch.as_tensor(y, dtype=torch.float32).reshape(-1)
+
+
+      def residuals(model: torch.nn.Module, X: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+          """Prediction minus target, one value per row."""
+          preds = model(X).squeeze(1)
+          assert preds.shape == y.shape, (preds.shape, y.shape)
+          return preds - y
+    annotations:
+      - find: 'raise ValueError(f"expected X (n, k) and y (n,), got {X.shape} and {y.shape}")'
+        note: "Check shapes where data enters."
+      - find: "return torch.as_tensor(X, dtype=torch.float32), torch.as_tensor(y, dtype=torch.float32).reshape(-1)"
+        note: "Convert to float32 once, at the edge, and make the target 1-D."
+      - find: "preds = model(X).squeeze(1)"
+        note: "(n, 1) becomes (n,), the same shape as the target."
+      - find: "assert preds.shape == y.shape, (preds.shape, y.shape)"
+        note: "A wrong shape fails here, not as a strange loss three epochs later."
+  takeaway: |
+    Convert to float32 at the edge, know which operations share memory, and make predictions and targets the same shape before you compare them.
+
+exercises:
+  - id: B23-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      The first forward pass fails with "mat1 and mat2 must have the same dtype, but got Double and Float". The features came from `torch.tensor(df[FEATURES].to_numpy())`. What do you change?
+    options:
+      - {id: a, text: "Build the tensor with `torch.as_tensor(X, dtype=torch.float32)`"}
+      - {id: b, text: "Convert the model to float64 with `model.double()`"}
+      - {id: c, text: "Round the features to whole numbers"}
+      - {id: d, text: "Move the model to the GPU"}
+    answer: a
+    reasons:
+      - {id: r1, text: "NumPy data is float64 and layer weights are float32. Converting the data once, at the edge, keeps the model in its default dtype."}
+      - {id: r2, text: "float32 tensors always give more accurate results."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That works, but doubles memory and slows every step. Convert the data instead."
+      - answer: c
+        feedback: "Rounding gives integers, int64, which still differ from float32 weights, and loses information."
+      - answer: d
+        feedback: "The device is not the problem. The dtypes differ: Double against Float."
+      - answer: a|r2
+        feedback: "Right fix, wrong reason. float32 is less precise than float64. It is the dtype layers use by default."
+    hints:
+      - "Which side is Double?"
+      - "What is NumPy's default float?"
+      - "Convert the data to float32."
+    explanation: |
+      `to_numpy()` gives float64, and `torch.tensor` keeps it. Layers hold float32 weights, so convert the data once with `torch.as_tensor(..., dtype=torch.float32)`.
+
+  - id: B23-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.15)
+    code: |
+      import torch
+
+      x = torch.zeros(4, 3)
+      print(x.sum(dim=0).shape, x.sum(dim=1, keepdim=True).shape, x.unsqueeze(0).shape)
+    answer: |
+      torch.Size([3]) torch.Size([4, 1]) torch.Size([1, 4, 3])
+    wrong_answers:
+      - answer: "torch.Size([4]) torch.Size([4, 1]) torch.Size([1, 4, 3])"
+        feedback: "dim=0 sums down the rows, removing the first dimension. Three columns remain."
+      - answer: "torch.Size([3]) torch.Size([4]) torch.Size([1, 4, 3])"
+        feedback: "keepdim=True keeps the summed dimension with size 1: (4, 1)."
+    hints:
+      - "Summing over a dimension removes it."
+      - "keepdim keeps it, with size 1."
+      - "unsqueeze(0) adds a dimension at the front."
+    explanation: |
+      `sum(dim=0)` removes the row dimension, `keepdim=True` keeps the column dimension as size 1, and `unsqueeze(0)` adds a new first dimension.
+
+  - id: B23-L1-E3
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? NumPy broadcasts like PyTorch.
+    code: |
+      import numpy as np
+
+      preds = np.array([[1.0], [2.0], [3.0]])
+      y = np.array([1.0, 2.0, 3.0])
+      diff = preds - y
+      print(diff.shape, round(float((diff ** 2).mean()), 4))
+    answer: |
+      (3, 3) 1.3333
+    wrong_answers:
+      - answer: "(3,) 0.0"
+        feedback: "(3, 1) minus (3,) broadcasts to (3, 3): every prediction against every target."
+      - answer: "(3, 1) 0.0"
+        feedback: "Shapes line up from the right. The trailing 1 stretches to 3, and the missing dimension stretches too."
+    hints:
+      - "Line the shapes up from the right: (3, 1) and (3,)."
+      - "Both stretch to (3, 3)."
+      - "Squares: 0, 1, 4 / 1, 0, 1 / 4, 1, 0."
+    explanation: |
+      The predictions are perfect, yet the mean squared difference is 12 / 9 = 1.3333, because broadcasting compared every prediction with every target.
+
+  - id: B23-L1-E4
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Build float32 features, and a 1-D target from a column that arrives with shape (n, 1).
+    template: |
+      X_t = torch.as_tensor(X, dtype=torch.[[g1]])
+      y_t = torch.as_tensor(y, dtype=torch.float32).[[g2]](-1)
+    gaps:
+      g1: {accepted: [float32, float]}
+      g2: {accepted: [reshape, view]}
+    wrong_answers:
+      - answer: {g1: float64, g2: reshape}
+        feedback: "Layer weights are float32. float64 data gives the Double and Float error."
+    hints:
+      - "Which dtype do layer weights use?"
+      - "Which method takes -1 to flatten?"
+      - "`float32` and `reshape`."
+    explanation: |
+      `dtype=torch.float32` matches the weights, and `reshape(-1)` turns (n, 1) into (n,).
+
+  - id: B23-L1-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `mean_squared_error(preds, y) -> float` with NumPy. `preds` arrives as shape `(n,)` or `(n, 1)`, and `y` as `(n,)`.
+
+      - Flatten `preds` with `reshape(-1)` before comparing.
+      - Raise `ValueError` when the flattened sizes differ, or when there are no rows.
+      - Return the mean of the squared differences as a Python `float`.
+    starter: |
+      import numpy as np
+
+
+      def mean_squared_error(preds, y):
+          return float(((preds - y) ** 2).mean())
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: mean_squared_error
+          typed: true
+          docstring: true
+          message: "Give mean_squared_error type hints and a docstring."
+      tests:
+        - id: column_preds
+          code: |
+            out = mean_squared_error(np.array([[1.0], [2.0], [3.0]]), np.array([1.0, 2.0, 3.0]))
+            assert out == 0.0, out
+          message: "Flatten (n, 1) predictions first, so perfect predictions give 0.0."
+        - id: value
+          code: |
+            out = mean_squared_error(np.array([1.0, 2.0]), np.array([2.0, 4.0]))
+            assert abs(out - 2.5) < 1e-12 and type(out) is float, out
+          message: "Return the mean of squared differences as a float."
+        - id: guards
+          code: |
+            for preds, y in [(np.ones(3), np.ones(4)), (np.ones((2, 2)), np.ones(3)), (np.array([]), np.array([]))]:
+                try:
+                    mean_squared_error(preds, y)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for shapes {preds.shape} and {y.shape}")
+          message: "Raise ValueError when sizes differ or there are no rows."
+    solution: |
+      import numpy as np
+
+
+      def mean_squared_error(preds: np.ndarray, y: np.ndarray) -> float:
+          """Mean squared error with predictions flattened to the target's shape.
+
+          Args:
+              preds: Predictions, shape (n,) or (n, 1).
+              y: Targets, shape (n,).
+
+          Returns:
+              The mean of the squared differences.
+
+          Raises:
+              ValueError: If the sizes differ or there are no rows.
+          """
+          flat = preds.reshape(-1)
+          if flat.shape != y.shape or len(y) == 0:
+              raise ValueError(f"need matching non-empty shapes, got {preds.shape} and {y.shape}")
+          return float(((flat - y) ** 2).mean())
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def mean_squared_error(preds: np.ndarray, y: np.ndarray) -> float:
+            """Broadcasts (n, 1) against (n,)."""
+            if len(preds) != len(y) or len(y) == 0:
+                raise ValueError("bad shapes")
+            return float(((preds - y) ** 2).mean())
+      - |
+        import numpy as np
+
+
+        def mean_squared_error(preds: np.ndarray, y: np.ndarray) -> float:
+            """No size check."""
+            return float(((preds.reshape(-1) - y) ** 2).mean())
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def mean_squared_error(preds: np.ndarray, y: np.ndarray) -> float:
+              """Broadcasts (n, 1) against (n,)."""
+              if len(preds) != len(y) or len(y) == 0:
+                  raise ValueError("bad shapes")
+              return float(((preds - y) ** 2).mean())
+        triggers: column_preds
+    hints:
+      - "`flat = preds.reshape(-1)`."
+      - "Compare `flat.shape` with `y.shape`, and check `len(y) == 0`."
+      - "Wrap the mean in `float(...)`."
+    explanation: |
+      Flattening first stops the (n, n) broadcast. The guards turn a shape mistake into a clear error instead of a plausible number.
+
+  - id: B23-L1-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [numpy]
+    prompt: |
+      After one pass through `centre_batches`, the training data itself has changed. Tap the line responsible, then fix it. NumPy slices share memory, as PyTorch slices do.
+    code: |
+      import numpy as np
+
+
+      def centre_batches(X, batch_size):
+          batches = []
+          for start in range(0, len(X), batch_size):
+              batch = X[start:start + batch_size]
+              batch -= batch.mean(axis=0)
+              batches.append(batch)
+          return batches
+    bug_lines: [8]
+    fix_checker:
+      kind: python
+      setup: |
+        import numpy as np
+      tests:
+        - id: source_unchanged
+          code: |
+            X = np.arange(12.0).reshape(6, 2)
+            before = X.copy()
+            out = centre_batches(X, 4)
+            assert np.array_equal(X, before), X
+            assert np.allclose(out[0].mean(axis=0), 0.0) and np.allclose(out[1].mean(axis=0), 0.0), out
+          message: "Build a new array, batch = batch - batch.mean(axis=0), so X keeps its values."
+    fix_solution: |
+      import numpy as np
+
+
+      def centre_batches(X, batch_size):
+          batches = []
+          for start in range(0, len(X), batch_size):
+              batch = X[start:start + batch_size]
+              batch = batch - batch.mean(axis=0)
+              batches.append(batch)
+          return batches
+    wrong_answers:
+      - lines: [7]
+        feedback: "Slicing is fine on its own. It shares memory, so what happens next matters."
+      - lines: [9]
+        feedback: "Appending stores the batch. The data changed one line earlier."
+    hints:
+      - "Does a slice copy the data?"
+      - "Which operator changes an array in place?"
+      - "Replace -= with a new array."
+    explanation: |
+      `X[start:start + batch_size]` is a view of X, so `-=` writes the centred values back into X. `batch = batch - ...` builds a new array and leaves X alone.
+
+recap:
+  - front: "PyTorch and NumPy default floats"
+    back: "PyTorch float32, NumPy float64. Convert with torch.as_tensor(X, dtype=torch.float32) at the edge."
+  - front: "What shares memory"
+    back: "torch.from_numpy, view and slices share memory. torch.tensor copies. In-place ops on a shared tensor change the source."
+  - front: "(n, 1) against (n,)"
+    back: "Broadcasts to (n, n) without an error. Flatten with squeeze(1) or reshape(-1) and assert shapes."
+  - front: "Shape after sum(dim=1, keepdim=True) on (4, 3)"
+    back: "(4, 1). Without keepdim: (4,)."
+
+claims:
+  - claim: "PyTorch 2.15: torch.tensor on a float64 array keeps float64; nn.Linear on it raises 'mat1 and mat2 must have the same dtype, but got Double and Float'; from_numpy, view and slices share memory, torch.tensor copies; (3, 1) - (3,) broadcasts to (3, 3); MSELoss on (3, 1) against (3,) gives 1.3333 with a broadcasting warning."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), Python 3.12, November 2026."
+  - claim: "The E2 and E3 outputs; NumPy slices are views, so -= on a slice changes the source."
+    status: verified
+    source: "Run on PyTorch 2.15.0 and NumPy 2.4.6 and 2.5.4."

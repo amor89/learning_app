@@ -32,6 +32,7 @@ modules:
   - {id: B13, title: Interpretability and fairness, tags: [prereq], summary: "Permutation importance, SHAP and subgroup performance."}
   - {id: B14, title: Experiment tracking with MLflow, tags: [prereq, M16-18], summary: "Tracking, registry and the model lifecycle."}
   - {id: B15, title: Embeddings and clustering, tags: [M7-9], summary: "SentenceTransformers, HDBSCAN and cluster validation."}
+  - {id: B23, title: PyTorch foundations, tags: [M1-3], summary: "Tensors, autograd, gradient descent, nn.Module, loss functions and data loading, built up from NumPy."}
   - {id: B16, title: PyTorch hygiene, tags: [M1-3], summary: "Device handling, training loops and reproducibility."}
   - {id: B17, title: Testing and performance, tags: [prereq], summary: "Unit tests, Hypothesis, profiling and memory use."}
   - {id: B19, title: Testing in depth, tags: [prereq], summary: "pytest from the inside: fixtures, parametrize, testing pandas, statistics and ML, mocks, coverage and CI."}

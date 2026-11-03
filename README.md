@@ -2,7 +2,7 @@
 
 A personal, offline-capable course with four tracks: Databricks pipeline engineering, Python for data science, Microsoft Fabric, and finding errors in code. It runs as a static site on GitHub Pages and installs on an iPhone home screen.
 
-Status: Phase 6 complete. All four tracks and three capstones are written: Track A (Databricks pipeline engineering) 33 lessons, Track B (Python for data science) 74, including prompting, RAG and LLM evaluation for roadmap months 13 to 15, Track C (Microsoft Fabric) 33, checked against Microsoft Learn, Track D (Finding errors in code) 26, and the Capstones track with 3 projects.
+Status: Phase 6 complete. All four tracks and three capstones are written: Track A (Databricks pipeline engineering) 33 lessons, Track B (Python for data science) 80, including PyTorch foundations for roadmap months 1 to 3 and prompting, RAG and LLM evaluation for months 13 to 15, Track C (Microsoft Fabric) 33, checked against Microsoft Learn, Track D (Finding errors in code) 26, and the Capstones track with 3 projects.
 
 ## Install on your iPhone
 
@@ -42,6 +42,7 @@ The `deploy` job in `.github/workflows/ci.yml` publishes `site/` after every gat
 | `practice/` | Local pytest harness with a SparkSession and Delta Lake |
 | `labs/testing/` | The B19 testing lab: a small package to test, and a reference suite with 100% branch coverage |
 | `labs/rag/` | The B21 RAG lab: methodology notes, 12 gold questions, a pipeline with seven functions to write, and a reference solution |
+| `labs/torch/` | The B23 PyTorch lab: synthetic survey data, preprocessing and training steps to write, a logistic regression baseline, and a reference solution |
 | `tests/` | Quality gates for every exercise, store unit tests, browser smoke test |
 | `reference/` | Your pipeline code and roadmap |
 
@@ -71,7 +72,7 @@ Run the app locally: `python -m http.server -d site 8000`, then open http://loca
 
 Browser exercises run on the package versions that Pyodide 314.0.7 ships, which are older than the `dev` pins. The CI `parity` job reruns `pytest` on those versions (see `.github/workflows/ci.yml` for the exact pins). To run it locally, create another virtual environment on Python 3.13 and install the same pins.
 
-Some Track B lessons teach libraries that neither Pyodide nor the `dev` group includes: MLflow, shap (in `dev`, not in Pyodide), PyTorch and sentence-transformers. Their code exercises check structure only. Install them yourself to run the examples.
+Some Track B lessons teach libraries that neither Pyodide nor the `dev` group includes: MLflow, shap (in `dev`, not in Pyodide), PyTorch and sentence-transformers. Their code exercises check structure only, or run the same idea in NumPy, as module B23 does for PyTorch. Install them yourself to run the examples.
 
 ## Laptop practice with Spark
 
@@ -84,6 +85,10 @@ Module B19 ends with a laptop lab in `labs/testing/`. Use the `dev` environment,
 ## RAG lab
 
 Module B21 ends with a laptop lab in `labs/rag/`: a retrieval-augmented generation pipeline over survey methodology notes. `cd labs/rag`, `pip install -e .`, then `pytest`. Fill in the seven functions in `src/survey_rag/steps.py` until the tests pass, then score retrieval with `python -m survey_rag eval`. A live model call is optional (`pip install -e ".[llm]"` and an Anthropic API key). See `labs/rag/README.md`.
+
+## PyTorch lab
+
+Module B23 ends with a laptop lab in `labs/torch/`: a small network on synthetic survey data, compared with logistic regression. `cd labs/torch`, `pip install -e .` (this installs PyTorch), then `pytest`. Fill in `src/survey_torch/prep.py` and `src/survey_torch/nn_steps.py` until the tests pass, then run `python -m survey_torch train`. The `dev` group has no PyTorch, so CI runs the lab's NumPy tests and skips the PyTorch ones. See `labs/torch/README.md`.
 
 ## Documents
 

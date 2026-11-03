@@ -61,17 +61,26 @@ select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF"]
 # `functions as F` is the house standard for PySpark (see CLAUDE.md).
 ignore = ["N812"]
 
+[tool.ruff.lint.per-file-ignores]
+# X for a feature matrix follows the scikit-learn convention the course teaches.
+"labs/torch/**" = ["N803", "N806"]
+
 [tool.mypy]
 strict = true
 python_version = "3.11"
-files = ["learnkit", "checkers", "scripts", "practice", "labs/testing/src", "labs/rag/src", "labs/rag/solution"]
+files = ["learnkit", "checkers", "scripts", "practice", "labs/testing/src", "labs/rag/src", "labs/rag/solution", "labs/torch/src", "labs/torch/solution"]
 exclude = ["practice/exercises/", "practice/capstone/before_pipeline.py", "practice/capstone/pr_review"]
 # Pygments and nbformat ship without full type hints.
 untyped_calls_exclude = ["pygments", "nbformat"]
 
 [[tool.mypy.overrides]]
-module = ["docx.*", "weasyprint.*", "nbformat.*", "pyspark.*", "delta.*", "pandas.*", "sklearn.*", "anthropic.*"]
+module = ["docx.*", "weasyprint.*", "nbformat.*", "pyspark.*", "delta.*", "pandas.*", "sklearn.*", "anthropic.*", "torch.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Without PyTorch installed, torch classes are Any. The lab subclasses Dataset.
+module = ["survey_torch.*", "nn_steps"]
+disallow_subclassing_any = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests/content"]

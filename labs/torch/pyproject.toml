@@ -1,0 +1,19 @@
+# The B23 PyTorch lab. From this folder: `pip install -e .`, then `pytest`.
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "survey-torch"
+version = "0.1.0"
+description = "A small PyTorch network on synthetic survey data, with a baseline"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2,<3", "scikit-learn>=1.9,<1.10", "torch>=2.14,<3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--strict-markers"

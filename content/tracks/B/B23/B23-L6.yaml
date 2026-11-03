@@ -1,0 +1,533 @@
+id: B23-L6
+title: Dataset, DataLoader and preprocessing fitted on training rows
+
+concept: |
+  Data reaches a model in batches. PyTorch 2.15 splits that job in two:
+
+  ```python
+  class SurveyRows(Dataset):
+      def __init__(self, X: np.ndarray, y: np.ndarray) -> None:
+          self.X = torch.as_tensor(X, dtype=torch.float32)
+          self.y = torch.as_tensor(y, dtype=torch.float32)
+
+      def __len__(self) -> int:
+          return len(self.y)
+
+      def __getitem__(self, i: int) -> tuple[torch.Tensor, torch.Tensor]:
+          return self.X[i], self.y[i]
+
+
+  train_loader = DataLoader(train_rows, batch_size=64, shuffle=True)
+  val_loader = DataLoader(val_rows, batch_size=256)
+  ```
+
+  - A `Dataset` reports how many rows it holds (`__len__`) and returns one row (`__getitem__`). Convert to tensors once, in `__init__`, not on every row.
+  - A `DataLoader` stacks rows into batches. With 10 rows and `batch_size=4` the batches hold 4, 4 and 2 rows. `drop_last=True` drops the short one.
+  - Shuffle training batches, so each epoch meets the rows in a new order. Leave validation unshuffled: order cannot change its metric, and a fixed order makes runs easier to compare. Seed the shuffle (lesson B16-L3).
+
+  **Preprocess before the tensors, fitted on training rows only** (lesson B10-L2):
+
+  - Standardise each feature with the training mean and standard deviation. Replace a standard deviation of 0 with 1, or a constant column divides by zero.
+  - Apply those training statistics, unchanged, to validation and test rows. Statistics computed on every row leak held-out data into training.
+  - Impute missing values first. One `NaN` in a batch makes the loss `nan`, and then every weight.
+  - One-hot encode categories with the categories seen in training (lesson B11-L2).
+
+  In NumPy, a shuffled split into batches is `order = rng.permutation(n)`, then `order[i:i + batch_size]` for `i` in `range(0, n, batch_size)`. That is what a shuffling `DataLoader` does with indices.
+
+why_it_matters: |
+  A model's validation accuracy was 0.86 in the notebook and 0.79 on the next wave's data. The features had been standardised on all 6,000 rows before the train and validation split, and income in the validation rows was higher than in training. Refitting the scaler on the 4,800 training rows only gave a validation accuracy of 0.80, an honest preview of the next wave.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      X = (X - X.mean(axis=0)) / X.std(axis=0)
+      X_train, X_val = X[:4800], X[4800:]
+      val_loader = DataLoader(SurveyRows(X_val, y_val), batch_size=256, shuffle=True)
+    annotations:
+      - find: "X = (X - X.mean(axis=0)) / X.std(axis=0)"
+        note: "Statistics from every row, including validation: leakage. A constant column divides by zero."
+      - find: "X_train, X_val = X[:4800], X[4800:]"
+        note: "An unshuffled split takes the last rows, which may be the latest wave."
+      - find: "val_loader = DataLoader(SurveyRows(X_val, y_val), batch_size=256, shuffle=True)"
+        note: "Shuffling validation buys nothing."
+  strong:
+    code: |
+      import numpy as np
+
+
+      def standardise(X_train: np.ndarray, X_other: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+          """Scale features with statistics from the training rows only.
+
+          Args:
+              X_train: Training features, shape (n, k), no missing values.
+              X_other: Validation or test features, shape (m, k).
+
+          Returns:
+              Both arrays, scaled with the training mean and standard deviation.
+
+          Raises:
+              ValueError: If either array holds NaN or has no rows.
+          """
+          if len(X_train) == 0 or np.isnan(X_train).any() or np.isnan(X_other).any():
+              raise ValueError("impute missing values first, and pass at least one training row")
+          mean = X_train.mean(axis=0)
+          std = X_train.std(axis=0)
+          std = np.where(std == 0, 1.0, std)
+          return (X_train - mean) / std, (X_other - mean) / std
+
+
+      def batch_indices(n: int, batch_size: int, rng: np.random.Generator) -> list[np.ndarray]:
+          """Shuffled row indices split into batches, as a shuffling DataLoader does."""
+          order = rng.permutation(n)
+          return [order[i : i + batch_size] for i in range(0, n, batch_size)]
+    annotations:
+      - find: 'raise ValueError("impute missing values first, and pass at least one training row")'
+        note: "A NaN would turn the loss into nan. Stop it here."
+      - find: "mean = X_train.mean(axis=0)"
+        note: "Training rows only."
+      - find: "std = np.where(std == 0, 1.0, std)"
+        note: "A constant column stays constant instead of dividing by zero."
+      - find: "return (X_train - mean) / std, (X_other - mean) / std"
+        note: "The same training statistics for both arrays."
+      - find: "order = rng.permutation(n)"
+        note: "A seeded generator makes the batch order repeatable."
+  takeaway: |
+    A Dataset returns rows, a DataLoader batches them, training shuffles and validation does not, and every preprocessing statistic comes from training rows only.
+
+exercises:
+  - id: B23-L6-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Why does the training `DataLoader` use `shuffle=True` while the validation `DataLoader` does not?
+    options:
+      - {id: a, text: "Training benefits from a new row order each epoch. Validation loss does not depend on order, so shuffling it adds nothing"}
+      - {id: b, text: "Shuffling validation would leak the targets"}
+      - {id: c, text: "Validation must be shuffled too, or its loss is biased"}
+      - {id: d, text: "DataLoader cannot shuffle more than one loader"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Varied batches give each epoch different gradient steps. A validation metric averages over all rows, whatever their order."}
+      - {id: r2, text: "Shuffled loaders run faster."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Order does not reveal targets. Shuffling validation is pointless, not harmful."
+      - answer: c
+        feedback: "A mean over all validation rows is the same in any order."
+      - answer: d
+        feedback: "Each DataLoader has its own shuffle setting."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Shuffling does not speed anything up. It varies the gradient steps."
+    hints:
+      - "Does the order of rows change a mean?"
+      - "What does a new order give the gradient steps?"
+      - "Shuffle where it changes training."
+    explanation: |
+      Shuffling varies the batches, and so the steps, during training. A validation loss averages over every row, so its order does not matter.
+
+  - id: B23-L6-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.15)
+    primer: |
+      `TensorDataset(X, y)` is a ready-made `Dataset` over tensors with the same number of rows. Row `i` is `(X[i], y[i])`, and its length is the row count.
+    code: |
+      import torch
+      from torch.utils.data import DataLoader, TensorDataset
+
+      rows = TensorDataset(torch.arange(10.0).reshape(10, 1), torch.arange(10.0))
+      print([len(xb) for xb, _ in DataLoader(rows, batch_size=4)])
+      print([len(xb) for xb, _ in DataLoader(rows, batch_size=4, drop_last=True)])
+    answer: |
+      [4, 4, 2]
+      [4, 4]
+    wrong_answers:
+      - answer: |
+          [4, 4]
+          [4, 4]
+        feedback: "Without drop_last, the last two rows form a short final batch."
+      - answer: |
+          [4, 4, 2]
+          [4, 4, 2]
+        feedback: "drop_last=True drops the final batch when it is shorter than batch_size."
+    hints:
+      - "10 rows in batches of 4."
+      - "What happens to the 2 rows left over?"
+      - "drop_last removes the short batch."
+    explanation: |
+      Ten rows give batches of 4, 4 and 2. `drop_last=True` drops the batch of 2.
+
+  - id: B23-L6-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the two methods every `Dataset` needs.
+    template: |
+      class SurveyRows(Dataset):
+          def __init__(self, X, y):
+              self.X = torch.as_tensor(X, dtype=torch.float32)
+              self.y = torch.as_tensor(y, dtype=torch.float32)
+
+          def [[g1]](self):
+              return len(self.y)
+
+          def [[g2]](self, i):
+              return self.X[i], self.y[i]
+    gaps:
+      g1: {accepted: [__len__]}
+      g2: {accepted: [__getitem__]}
+    wrong_answers:
+      - answer: {g1: __len__, g2: __iter__}
+        feedback: "DataLoader asks for rows by index. That is __getitem__."
+    hints:
+      - "One method answers len(dataset)."
+      - "The other answers dataset[i]."
+      - "`__len__` and `__getitem__`."
+    explanation: |
+      `__len__` gives the row count and `__getitem__` returns row `i`. The DataLoader uses both to build batches.
+
+  - id: B23-L6-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `standardise(X_train, X_other) -> tuple[np.ndarray, np.ndarray]`.
+
+      - Compute the mean and standard deviation of each column of `X_train` only (`axis=0`). Replace a standard deviation of 0 with 1.
+      - Return both arrays scaled as `(X - mean) / std` with those training statistics.
+      - Raise `ValueError` when `X_train` has no rows, or when either array holds `NaN`.
+    primer: |
+      `np.isnan(a)` marks each missing value, and `.any()` is `True` when at least one is marked:
+
+      ```python
+      np.isnan(np.array([1.0, np.nan])).any()    # True
+      ```
+
+      `np.where(condition, a, b)` takes `a` where the condition holds and `b` elsewhere.
+    starter: |
+      import numpy as np
+
+
+      def standardise(X_train, X_other):
+          both = np.vstack([X_train, X_other])
+          mean, std = both.mean(axis=0), both.std(axis=0)
+          return (X_train - mean) / std, (X_other - mean) / std
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: standardise
+          typed: true
+          docstring: true
+          message: "Give standardise type hints and a docstring."
+      tests:
+        - id: train_stats
+          code: |
+            tr, ot = standardise(np.array([[1.0, 10.0], [3.0, 30.0]]), np.array([[5.0, 50.0]]))
+            assert np.allclose(tr, [[-1.0, -1.0], [1.0, 1.0]]), tr
+            assert np.allclose(ot, [[3.0, 3.0]]), ot
+          message: "Use the training mean and standard deviation for both arrays."
+        - id: constant_column
+          code: |
+            tr, ot = standardise(np.array([[1.0, 5.0], [3.0, 5.0]]), np.array([[5.0, 7.0]]))
+            assert np.allclose(tr[:, 1], 0.0) and np.allclose(ot, [[3.0, 2.0]]), (tr, ot)
+          message: "Replace a standard deviation of 0 with 1."
+        - id: guards
+          code: |
+            for a, b in [(np.empty((0, 2)), np.ones((1, 2))), (np.array([[np.nan, 1.0]]), np.ones((1, 2))), (np.ones((2, 2)), np.array([[1.0, np.nan]]))]:
+                try:
+                    standardise(a, b)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {a} and {b}")
+          message: "Raise ValueError for no training rows or any NaN."
+    solution: |
+      import numpy as np
+
+
+      def standardise(X_train: np.ndarray, X_other: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+          """Scale features with statistics from the training rows only.
+
+          Args:
+              X_train: Training features, shape (n, k).
+              X_other: Validation or test features, shape (m, k).
+
+          Returns:
+              Both arrays, scaled with the training mean and standard deviation.
+
+          Raises:
+              ValueError: If X_train has no rows, or either array holds NaN.
+          """
+          if len(X_train) == 0 or np.isnan(X_train).any() or np.isnan(X_other).any():
+              raise ValueError("impute missing values first, and pass at least one training row")
+          mean = X_train.mean(axis=0)
+          std = X_train.std(axis=0)
+          std = np.where(std == 0, 1.0, std)
+          return (X_train - mean) / std, (X_other - mean) / std
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def standardise(X_train: np.ndarray, X_other: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+            """Fits on all rows."""
+            if len(X_train) == 0 or np.isnan(X_train).any() or np.isnan(X_other).any():
+                raise ValueError("bad input")
+            both = np.vstack([X_train, X_other])
+            mean = both.mean(axis=0)
+            std = np.where(both.std(axis=0) == 0, 1.0, both.std(axis=0))
+            return (X_train - mean) / std, (X_other - mean) / std
+      - |
+        import numpy as np
+
+
+        def standardise(X_train: np.ndarray, X_other: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+            """Divides by a zero standard deviation."""
+            if len(X_train) == 0 or np.isnan(X_train).any() or np.isnan(X_other).any():
+                raise ValueError("bad input")
+            mean, std = X_train.mean(axis=0), X_train.std(axis=0)
+            with np.errstate(all="ignore"):
+                return (X_train - mean) / std, (X_other - mean) / std
+      - |
+        import numpy as np
+
+
+        def standardise(X_train: np.ndarray, X_other: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+            """No NaN check."""
+            mean = X_train.mean(axis=0)
+            std = np.where(X_train.std(axis=0) == 0, 1.0, X_train.std(axis=0))
+            return (X_train - mean) / std, (X_other - mean) / std
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def standardise(X_train: np.ndarray, X_other: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+              """Fits on all rows."""
+              if len(X_train) == 0 or np.isnan(X_train).any() or np.isnan(X_other).any():
+                  raise ValueError("bad input")
+              both = np.vstack([X_train, X_other])
+              mean = both.mean(axis=0)
+              std = np.where(both.std(axis=0) == 0, 1.0, both.std(axis=0))
+              return (X_train - mean) / std, (X_other - mean) / std
+        triggers: train_stats
+    hints:
+      - "Check for no rows and NaN first."
+      - "`mean = X_train.mean(axis=0)`, `std = X_train.std(axis=0)`, then `np.where(std == 0, 1.0, std)`."
+      - "Scale both arrays with the same mean and std."
+    explanation: |
+      Training statistics only, applied to both arrays, keep validation rows out of the preprocessing. The zero guard keeps a constant column finite.
+
+  - id: B23-L6-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `batch_indices(n, batch_size, rng) -> list[np.ndarray]`, the row order a shuffling `DataLoader` uses.
+
+      - Take one `rng.permutation(n)` and split it in order into batches of `batch_size`. The last batch may be shorter.
+      - Raise `ValueError` when `n` or `batch_size` is below 1.
+    primer: |
+      `rng.permutation(n)` returns the numbers 0 to n - 1 in a random order, drawn from the generator `rng` (lesson B6-L1):
+
+      ```python
+      rng = np.random.default_rng(0)
+      rng.permutation(5)    # the numbers 0 to 4, shuffled
+      ```
+    starter: |
+      import numpy as np
+
+
+      def batch_indices(n, batch_size, rng):
+          return [np.arange(n)]
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: batch_indices
+          typed: true
+          docstring: true
+          message: "Give batch_indices type hints and a docstring."
+        - id: uses_rng
+          kind: requires_pattern
+          pattern: "rng\\.permutation\\("
+          message: "Shuffle with rng.permutation(n), so a seed fixes the order."
+      tests:
+        - id: batches
+          code: |
+            out = batch_indices(10, 4, np.random.default_rng(0))
+            assert [len(b) for b in out] == [4, 4, 2], [len(b) for b in out]
+            assert sorted(np.concatenate(out).tolist()) == list(range(10))
+          message: "Split one permutation into batches of batch_size, with a shorter last batch."
+        - id: seeded
+          code: |
+            out = batch_indices(10, 4, np.random.default_rng(0))
+            expected = np.random.default_rng(0).permutation(10)
+            assert np.array_equal(np.concatenate(out), expected), out
+          message: "Use one rng.permutation(n), split in order."
+        - id: guards
+          code: |
+            for n, size in [(0, 4), (10, 0), (-1, 2)]:
+                try:
+                    batch_indices(n, size, np.random.default_rng(0))
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for n={n}, batch_size={size}")
+          message: "Raise ValueError when n or batch_size is below 1."
+    solution: |
+      import numpy as np
+
+
+      def batch_indices(n: int, batch_size: int, rng: np.random.Generator) -> list[np.ndarray]:
+          """Shuffled row indices split into batches, as a shuffling DataLoader does.
+
+          Args:
+              n: Number of rows.
+              batch_size: Rows per batch. The last batch may be shorter.
+              rng: Seeded generator.
+
+          Returns:
+              Index arrays that cover every row once.
+
+          Raises:
+              ValueError: If n or batch_size is below 1.
+          """
+          if n < 1 or batch_size < 1:
+              raise ValueError(f"need n >= 1 and batch_size >= 1, got {n} and {batch_size}")
+          order = rng.permutation(n)
+          return [order[i : i + batch_size] for i in range(0, n, batch_size)]
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def batch_indices(n: int, batch_size: int, rng: np.random.Generator) -> list[np.ndarray]:
+            """Drops the short last batch."""
+            if n < 1 or batch_size < 1:
+                raise ValueError("bad arguments")
+            order = rng.permutation(n)
+            return [order[i : i + batch_size] for i in range(0, n - batch_size + 1, batch_size)]
+      - |
+        import numpy as np
+
+
+        def batch_indices(n: int, batch_size: int, rng: np.random.Generator) -> list[np.ndarray]:
+            """Draws each batch independently, so rows repeat."""
+            if n < 1 or batch_size < 1:
+                raise ValueError("bad arguments")
+            return [rng.permutation(n)[:batch_size] for _ in range(0, n, batch_size)]
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def batch_indices(n: int, batch_size: int, rng: np.random.Generator) -> list[np.ndarray]:
+              """Drops the short last batch."""
+              if n < 1 or batch_size < 1:
+                  raise ValueError("bad arguments")
+              order = rng.permutation(n)
+              return [order[i : i + batch_size] for i in range(0, n - batch_size + 1, batch_size)]
+        triggers: batches
+    hints:
+      - "Check both arguments first."
+      - "`order = rng.permutation(n)`, once."
+      - "`[order[i : i + batch_size] for i in range(0, n, batch_size)]`."
+    explanation: |
+      One permutation, split in order, covers every row exactly once per epoch, and the seed fixes the order.
+
+  - id: B23-L6-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [numpy]
+    prompt: |
+      Validation accuracy is higher in development than on the next wave's data. Tap the line that lets validation rows shape the training data, then fix it.
+    code: |
+      import numpy as np
+
+
+      def prepare(X, y, rng, n_train):
+          X = (X - X.mean(axis=0)) / X.std(axis=0)
+          order = rng.permutation(len(X))
+          train, val = order[:n_train], order[n_train:]
+          return X[train], y[train], X[val], y[val]
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      setup: |
+        import numpy as np
+      tests:
+        - id: train_only_stats
+          code: |
+            data_rng = np.random.default_rng(1)
+            X = data_rng.normal(size=(50, 3)) * [1.0, 5.0, 10.0]
+            y = np.arange(50)
+            X_tr, y_tr, X_va, y_va = prepare(X, y, np.random.default_rng(0), 40)
+            assert np.allclose(X_tr.mean(axis=0), 0.0, atol=1e-12), X_tr.mean(axis=0)
+            assert np.allclose(X_tr.std(axis=0), 1.0), X_tr.std(axis=0)
+            order = np.random.default_rng(0).permutation(50)
+            assert np.array_equal(y_tr, y[order[:40]]) and np.array_equal(y_va, y[order[40:]])
+          message: "Split first, then scale with the training rows' mean and standard deviation."
+    fix_solution: |
+      import numpy as np
+
+
+      def prepare(X, y, rng, n_train):
+          order = rng.permutation(len(X))
+          train, val = order[:n_train], order[n_train:]
+          mean, std = X[train].mean(axis=0), X[train].std(axis=0)
+          std = np.where(std == 0, 1.0, std)
+          return (X[train] - mean) / std, y[train], (X[val] - mean) / std, y[val]
+    wrong_answers:
+      - lines: [6]
+        feedback: "A seeded permutation is a good way to split. The problem happens before the split."
+      - lines: [8]
+        feedback: "Returning the split rows is right. They were scaled with the wrong statistics."
+    hints:
+      - "Which rows does X.mean(axis=0) use?"
+      - "Has the split happened yet?"
+      - "Split first, then fit the scaling on training rows."
+    explanation: |
+      The mean and standard deviation come from every row, including validation, before the split. Split first, compute the statistics on the training rows, and apply them to both sets.
+
+recap:
+  - front: "The two methods of a Dataset"
+    back: "__len__ returns the row count. __getitem__(i) returns row i as tensors, converted once in __init__."
+  - front: "DataLoader batches for 10 rows, batch_size=4"
+    back: "4, 4 and 2. drop_last=True gives 4 and 4."
+  - front: "Which loaders shuffle"
+    back: "Training: shuffle=True with a seeded generator. Validation and test: no shuffle."
+  - front: "Preprocessing rule"
+    back: "Fit means, standard deviations and categories on training rows only. Guard std 0, impute NaN first."
+
+claims:
+  - claim: "PyTorch 2.15: a DataLoader over 10 rows with batch_size=4 gives batches of 4, 4 and 2, and 4 and 4 with drop_last=True; torch.as_tensor(X, dtype=torch.float32) converts float64 arrays."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), Python 3.12, November 2026."
+
+practical:
+  platform: laptop
+  title: Train a PyTorch model on survey data
+  intro: |
+    Work in `labs/torch/` in this repository. It holds a seeded generator of survey data, a training script and a logistic regression baseline. You write the steps from module B23 and from lessons B16-L2 and B16-L3: preprocessing, the dataset, the model, one training epoch, evaluation and early stopping. You need PyTorch 2.15 for the laptop: it is not in the app or the `dev` group. When the model beats the baseline, push the lab to your own GitHub repository with a README: it is the roadmap's PyTorch evidence for month 3.
+  steps:
+    - "Run `cd labs/torch`, create a virtual environment, then `pip install -e .` and `pip install pytest`. If the PyTorch wheel is large for your machine, install the CPU build first: `pip install torch --index-url https://download.pytorch.org/whl/cpu`. Run `pytest`: most tests fail with NotImplementedError. Read `README.md` and every file in `src/survey_torch/`."
+    - "In `src/survey_torch/prep.py`, write `split_indices` and `Standardiser` (lessons B23-L6 and B10-L2). Run `pytest tests/test_prep.py -k \"split or standard\"`."
+    - "Write `EarlyStopping` in the same file (lesson B16-L2). It must keep a deep copy of the best state."
+    - "In `src/survey_torch/nn_steps.py`, write `SurveyRows` and `make_model` (lessons B23-L1, B23-L4 and B23-L6), then `train_one_epoch` and `evaluate` (lessons B23-L3, B23-L5 and B16-L2). Run `pytest`: every test passes."
+    - "Run `python -m survey_torch train`. It prints the baseline's and your model's validation loss and accuracy. Change `--hidden`, `--lr` and `--patience`, and keep notes on what each change did."
+    - "Run the same command twice with the same `--seed` and check the numbers match (lesson B16-L3)."
+    - "Write your README: the data, the model, the baseline comparison, a loss curve, and one thing that did not work. Push the folder to a new GitHub repository."
