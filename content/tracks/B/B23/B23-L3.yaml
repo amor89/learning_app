@@ -1,0 +1,436 @@
+id: B23-L3
+title: Gradient descent, learning rates and optimisers
+
+concept: |
+  Gradient descent moves every weight a small step against its gradient: `w = w - lr * grad`. The **learning rate** `lr` sets the step size, and it decides whether training works at all.
+
+  On `f(p) = p ** 2` the gradient is `2 * p`, so one step multiplies `p` by `1 - 2 * lr`. Starting at 4, after five steps:
+
+  - `lr = 0.1` gives 1.3107, closing in on the minimum at 0.
+  - `lr = 0.9` gives -1.3107: it jumps across the minimum on every step.
+  - `lr = 1.1` gives -9.9533: each jump overshoots further, and training diverges.
+
+  In a real model, a loss that grows, or turns into `nan`, within a few steps usually means the rate is too high. A loss that barely falls suggests it is too low.
+
+  **Scale the features** (lesson B23-L6). One rate serves every weight. A feature in thousands gets large gradients and needs small steps, and a 0 to 1 feature needs large ones. Standardised features let one rate suit both.
+
+  **Mini-batches.** Stochastic gradient descent computes each step's gradient on a batch of rows, not the whole dataset: noisier, far cheaper, and the standard choice.
+
+  **Optimisers** hold the update rule (PyTorch 2.15):
+
+  ```python
+  optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+  optimizer.zero_grad()    # reset .grad on every parameter
+  loss.backward()          # fill .grad (lesson B23-L2)
+  optimizer.step()         # apply the update
+  ```
+
+  `torch.optim.SGD(params, lr=0.1, momentum=0.9)` adds **momentum**, a running direction that smooths noisy batch gradients. **AdamW** also scales each weight's step by its recent gradient size, so it is less sensitive to the rate. Its `weight_decay`, which pulls weights towards zero as regularisation, defaults to 0.01. SGD's defaults to 0. Start with AdamW at 1e-3, then tune the rate on validation loss.
+
+why_it_matters: |
+  A first neural model of survey spend produced `nan` loss after three batches. The team suspected the data and spent a day hunting for missing values. The features held income in pounds next to 0 to 1 flags, and the learning rate was 0.1. Standardising the features and starting AdamW at 1e-3 gave a falling loss on the first run.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import numpy as np
+
+      w = np.zeros(X.shape[1])
+      for _ in range(1000):
+          w = w - 0.5 * 2 / len(y) * X.T @ (X @ w - y)
+    annotations:
+      - find: "for _ in range(1000):"
+        note: "No record of the loss, so divergence goes unseen until the weights are huge."
+      - find: "w = w - 0.5 * 2 / len(y) * X.T @ (X @ w - y)"
+        note: "A hardcoded rate with unscaled features. Whether it converges depends on the data."
+  strong:
+    code: |
+      import numpy as np
+
+
+      def gradient_descent(
+          X: np.ndarray, y: np.ndarray, lr: float, steps: int
+      ) -> tuple[np.ndarray, list[float]]:
+          """Fit a linear model by full-batch gradient descent on mean squared error.
+
+          Args:
+              X: Standardised features, shape (n, k).
+              y: Targets, shape (n,).
+              lr: Learning rate, from config.
+              steps: Number of updates.
+
+          Returns:
+              The weights and the loss before each update.
+
+          Raises:
+              ValueError: If lr is not positive or steps is below 1.
+          """
+          if lr <= 0 or steps < 1:
+              raise ValueError(f"need lr > 0 and steps >= 1, got {lr} and {steps}")
+          w = np.zeros(X.shape[1])
+          losses: list[float] = []
+          for _ in range(steps):
+              losses.append(float(((X @ w - y) ** 2).mean()))
+              w = w - lr * 2 / len(y) * X.T @ (X @ w - y)
+          return w, losses
+    annotations:
+      - find: "X: Standardised features, shape (n, k)."
+        note: "Scaling comes first, so one rate suits every weight."
+      - find: 'raise ValueError(f"need lr > 0 and steps >= 1, got {lr} and {steps}")'
+        note: "A zero or negative rate never trains. Fail fast."
+      - find: "losses.append(float(((X @ w - y) ** 2).mean()))"
+        note: "Record the loss every step. A rising curve is the first sign of a bad rate."
+      - find: "w = w - lr * 2 / len(y) * X.T @ (X @ w - y)"
+        note: "Step against the gradient: minus, not plus."
+  takeaway: |
+    Step against the gradient, scale features so one rate fits all weights, watch the loss curve, and let an optimiser such as AdamW hold the update rule.
+
+exercises:
+  - id: B23-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Training loss rises for three batches, then prints `nan`. The features are unscaled and the learning rate is 0.1. What do you try first?
+    options:
+      - {id: a, text: "Standardise the features and lower the learning rate"}
+      - {id: b, text: "Train for more epochs"}
+      - {id: c, text: "Add more layers"}
+      - {id: d, text: "Increase the learning rate to escape the bad region"}
+    answer: a
+    reasons:
+      - {id: r1, text: "A loss that grows each step is overshooting: steps too large for the gradients that unscaled features produce."}
+      - {id: r2, text: "Smaller numbers take less memory."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "More steps of a diverging update only make the weights larger."
+      - answer: c
+        feedback: "The update rule is failing, not the model's capacity."
+      - answer: d
+        feedback: "A larger step overshoots further. That is how the loss reached nan."
+      - answer: a|r2
+        feedback: "Right fix, wrong reason. It is about step size against gradient size."
+    hints:
+      - "What does a loss that grows each step mean?"
+      - "Which features produce large gradients?"
+      - "Smaller steps, scaled features."
+    explanation: |
+      Rising loss then `nan` is divergence. Scaled features and a smaller rate keep each step from overshooting.
+
+  - id: B23-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? Gradient descent on `p ** 2`, whose gradient is `2 * p`.
+    code: |
+      for lr in [0.1, 0.9, 1.1]:
+          p = 4.0
+          for _ in range(5):
+              p = p - lr * 2 * p
+          print(lr, round(p, 4))
+    answer: |
+      0.1 1.3107
+      0.9 -1.3107
+      1.1 -9.9533
+    wrong_answers:
+      - answer: |
+          0.1 1.3107
+          0.9 0.0
+          1.1 0.0
+        feedback: "Larger rates do not land on the minimum. Each step multiplies p by 1 - 2 * lr: -0.8 and -1.2."
+      - answer: |
+          0.1 1.3107
+          0.9 1.3107
+          1.1 9.9533
+        feedback: "1 - 2 * lr is negative for both, and five steps is odd, so the sign flips."
+    hints:
+      - "One step multiplies p by 1 - 2 * lr."
+      - "The factors are 0.8, -0.8 and -1.2."
+      - "4 * factor ** 5."
+    explanation: |
+      Factors 0.8, -0.8 and -1.2, applied five times to 4. A factor beyond -1 grows each step: divergence.
+
+  - id: B23-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Build an AdamW optimiser over the model's weights, and complete one update.
+    template: |
+      optimizer = torch.optim.[[g1]](model.parameters(), lr=1e-3)
+
+      optimizer.zero_grad()
+      loss = loss_fn(model(x), y)
+      loss.backward()
+      optimizer.[[g2]]()
+    gaps:
+      g1: {accepted: [AdamW]}
+      g2: {accepted: [step]}
+    wrong_answers:
+      - answer: {g1: AdamW, g2: zero_grad}
+        feedback: "zero_grad clears the gradients backward() computed. step applies the update."
+    hints:
+      - "The optimiser with decoupled weight decay."
+      - "Which method applies the update?"
+      - "`AdamW` and `step`."
+    explanation: |
+      `torch.optim.AdamW(model.parameters(), lr=1e-3)` builds the optimiser, and `optimizer.step()` applies the update after `backward()`.
+
+  - id: B23-L3-E4
+    type: predict_output
+    difficulty: 3
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.15)
+    code: |
+      import torch
+
+      p = torch.tensor([4.0], requires_grad=True)
+      optimizer = torch.optim.SGD([p], lr=0.1)
+      for _ in range(3):
+          optimizer.zero_grad()
+          (p ** 2).sum().backward()
+          optimizer.step()
+      print(round(p.item(), 3))
+    answer: |
+      2.048
+    wrong_answers:
+      - answer: "3.2"
+        feedback: "That is after one step. The loop runs three: 4 * 0.8 ** 3."
+      - answer: "1.6"
+        feedback: "Each step multiplies p by 0.8, not subtracts 0.8."
+    hints:
+      - "The gradient of p ** 2 is 2p."
+      - "SGD subtracts lr * grad: p becomes 0.8p."
+      - "4 * 0.8 ** 3."
+    explanation: |
+      Each step is `p - 0.1 * 2p = 0.8p`. Three steps from 4 give 2.048.
+
+  - id: B23-L3-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `gradient_descent(X, y, lr, steps) -> tuple[np.ndarray, list[float]]` for a linear model with mean squared error.
+
+      - Raise `ValueError` unless `lr > 0` and `steps >= 1`.
+      - Start from zero weights. On each step, append the current loss `((X @ w - y) ** 2).mean()` as a float, then update `w = w - lr * 2 / n * X.T @ (X @ w - y)`.
+      - Return the final weights and the list of losses.
+    starter: |
+      import numpy as np
+
+
+      def gradient_descent(X, y, lr, steps):
+          return np.zeros(X.shape[1]), []
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+
+        _X = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+        _y = _X @ np.array([2.0, -1.0])
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: gradient_descent
+          typed: true
+          docstring: true
+          message: "Give gradient_descent type hints and a docstring."
+      tests:
+        - id: converges
+          code: |
+            w, losses = gradient_descent(_X, _y, 0.1, 500)
+            assert np.allclose(w, [2.0, -1.0], atol=1e-6), w
+          message: "Step against the gradient, w - lr * grad, from zero weights."
+        - id: losses
+          code: |
+            w, losses = gradient_descent(_X, _y, 0.1, 50)
+            assert len(losses) == 50, len(losses)
+            assert abs(losses[0] - 2.0) < 1e-12, losses[0]
+            assert all(a >= b for a, b in zip(losses, losses[1:])), "loss rose"
+            assert all(type(v) is float for v in losses)
+          message: "Record the loss before each update, as a float: the first is the loss at zero weights."
+        - id: guards
+          code: |
+            for lr, steps in [(0.0, 10), (-0.1, 10), (0.1, 0)]:
+                try:
+                    gradient_descent(_X, _y, lr, steps)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for lr={lr}, steps={steps}")
+          message: "Raise ValueError unless lr > 0 and steps >= 1."
+    solution: |
+      import numpy as np
+
+
+      def gradient_descent(
+          X: np.ndarray, y: np.ndarray, lr: float, steps: int
+      ) -> tuple[np.ndarray, list[float]]:
+          """Fit a linear model by full-batch gradient descent on mean squared error.
+
+          Args:
+              X: Standardised features, shape (n, k).
+              y: Targets, shape (n,).
+              lr: Learning rate.
+              steps: Number of updates.
+
+          Returns:
+              The weights and the loss before each update.
+
+          Raises:
+              ValueError: If lr is not positive or steps is below 1.
+          """
+          if lr <= 0 or steps < 1:
+              raise ValueError(f"need lr > 0 and steps >= 1, got {lr} and {steps}")
+          w = np.zeros(X.shape[1])
+          losses: list[float] = []
+          for _ in range(steps):
+              losses.append(float(((X @ w - y) ** 2).mean()))
+              w = w - lr * 2 / len(y) * X.T @ (X @ w - y)
+          return w, losses
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def gradient_descent(
+            X: np.ndarray, y: np.ndarray, lr: float, steps: int
+        ) -> tuple[np.ndarray, list[float]]:
+            """Steps up the gradient."""
+            if lr <= 0 or steps < 1:
+                raise ValueError("bad arguments")
+            w = np.zeros(X.shape[1])
+            losses: list[float] = []
+            for _ in range(steps):
+                losses.append(float(((X @ w - y) ** 2).mean()))
+                w = w + lr * 2 / len(y) * X.T @ (X @ w - y)
+            return w, losses
+      - |
+        import numpy as np
+
+
+        def gradient_descent(
+            X: np.ndarray, y: np.ndarray, lr: float, steps: int
+        ) -> tuple[np.ndarray, list[float]]:
+            """Records the loss after the update."""
+            if lr <= 0 or steps < 1:
+                raise ValueError("bad arguments")
+            w = np.zeros(X.shape[1])
+            losses: list[float] = []
+            for _ in range(steps):
+                w = w - lr * 2 / len(y) * X.T @ (X @ w - y)
+                losses.append(float(((X @ w - y) ** 2).mean()))
+            return w, losses
+      - |
+        import numpy as np
+
+
+        def gradient_descent(
+            X: np.ndarray, y: np.ndarray, lr: float, steps: int
+        ) -> tuple[np.ndarray, list[float]]:
+            """No argument checks."""
+            w = np.zeros(X.shape[1])
+            losses: list[float] = []
+            for _ in range(steps):
+                losses.append(float(((X @ w - y) ** 2).mean()))
+                w = w - lr * 2 / len(y) * X.T @ (X @ w - y)
+            return w, losses
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def gradient_descent(
+              X: np.ndarray, y: np.ndarray, lr: float, steps: int
+          ) -> tuple[np.ndarray, list[float]]:
+              """Records the loss after the update."""
+              if lr <= 0 or steps < 1:
+                  raise ValueError("bad arguments")
+              w = np.zeros(X.shape[1])
+              losses: list[float] = []
+              for _ in range(steps):
+                  w = w - lr * 2 / len(y) * X.T @ (X @ w - y)
+                  losses.append(float(((X @ w - y) ** 2).mean()))
+              return w, losses
+        triggers: losses
+    hints:
+      - "Check the arguments, then start with `w = np.zeros(X.shape[1])`."
+      - "In the loop: append the loss first, then update."
+      - "The update subtracts: `w - lr * 2 / len(y) * X.T @ (X @ w - y)`."
+    explanation: |
+      Recording the loss before each update makes the first value the starting loss, so the curve shows the whole run. The minus sign steps downhill.
+
+  - id: B23-L3-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [numpy]
+    prompt: |
+      The loss rises on every step, even with a learning rate of 0.001. Tap the line responsible, then fix it.
+    code: |
+      import numpy as np
+
+
+      def gradient_descent(X, y, lr, steps):
+          w = np.zeros(X.shape[1])
+          losses = []
+          for _ in range(steps):
+              losses.append(float(((X @ w - y) ** 2).mean()))
+              grad = 2 / len(y) * X.T @ (X @ w - y)
+              w = w + lr * grad
+          return w, losses
+    bug_lines: [10]
+    fix_checker:
+      kind: python
+      setup: |
+        import numpy as np
+      tests:
+        - id: descends
+          code: |
+            X = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+            y = X @ np.array([2.0, -1.0])
+            w, losses = gradient_descent(X, y, 0.001, 20)
+            assert losses[-1] < losses[0], losses
+          message: "Step against the gradient: w = w - lr * grad."
+    fix_solution: |
+      import numpy as np
+
+
+      def gradient_descent(X, y, lr, steps):
+          w = np.zeros(X.shape[1])
+          losses = []
+          for _ in range(steps):
+              losses.append(float(((X @ w - y) ** 2).mean()))
+              grad = 2 / len(y) * X.T @ (X @ w - y)
+              w = w - lr * grad
+          return w, losses
+    wrong_answers:
+      - lines: [9]
+        feedback: "The gradient formula is right. What happens to it on the next line?"
+      - lines: [8]
+        feedback: "Recording the loss is right. That is how you saw it rise."
+    hints:
+      - "The gradient points uphill."
+      - "Which way should the weights move?"
+      - "Subtract the step."
+    explanation: |
+      The gradient points in the direction the loss increases. Adding it climbs the loss surface, whatever the rate. Subtract it.
+
+recap:
+  - front: "The gradient descent update"
+    back: "w = w - lr * grad. Against the gradient, scaled by the learning rate."
+  - front: "Signs of a bad learning rate"
+    back: "Too high: loss grows or turns into nan. Too low: loss barely falls."
+  - front: "One optimiser step in PyTorch"
+    back: "optimizer.zero_grad(), loss.backward(), optimizer.step()."
+  - front: "AdamW and SGD defaults in PyTorch 2.15"
+    back: "AdamW weight_decay 0.01, SGD weight_decay 0. A good start: AdamW with lr 1e-3."
+
+claims:
+  - claim: "Gradient descent on p^2 from 4 for five steps: 1.3107 at lr 0.1, -1.3107 at 0.9, -9.9533 at 1.1; torch.optim.SGD with lr 0.1 gives 2.048 after three steps; AdamW default weight_decay is 0.01 and SGD's is 0."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU) and Python 3.11 and 3.12, November 2026."

@@ -1,0 +1,474 @@
+id: B23-L4
+title: Models as nn.Module, layers, activations and parameters
+
+concept: |
+  A model is a class that subclasses `nn.Module` (PyTorch 2.15):
+
+  ```python
+  class Recommender(nn.Module):
+      def __init__(self, n_features: int, hidden: int) -> None:
+          super().__init__()
+          self.net = nn.Sequential(
+              nn.Linear(n_features, hidden),
+              nn.ReLU(),
+              nn.Linear(hidden, 1),
+          )
+
+      def forward(self, x: torch.Tensor) -> torch.Tensor:
+          return self.net(x)
+  ```
+
+  - Call `super().__init__()` first. Without it, assigning a layer raises "cannot assign module before Module.__init__() call".
+  - Build layers in `__init__`, use them in `forward`, and call the model as `model(x)`, not `model.forward(x)`, so PyTorch's hooks run.
+  - `nn.Linear(in_features, out_features)` computes `x @ W.T + b`. Its weight has shape `(out, in)`: `nn.Linear(3, 2)` holds a (2, 3) weight and 2 biases, 8 parameters in all. Count a model's parameters with `sum(p.numel() for p in model.parameters())`. The model above, with 10 features and 16 hidden units, has 193.
+  - **Activations make depth useful.** Two `nn.Linear` layers in a row equal one linear layer, because a product of matrices is a matrix. `nn.ReLU()`, which replaces negatives with 0, between them lets the model fit curves and interactions.
+  - **Register every layer.** `parameters()` finds layers stored as attributes, or inside `nn.Sequential` or `nn.ModuleList`. Layers kept in a plain Python list are invisible to it. The optimiser never updates them, and `model.to(device)` leaves them behind.
+
+  `model.train()` and `model.eval()` set the `training` flag that dropout reads (lesson B16-L2).
+
+  In NumPy, the same forward pass is `np.maximum(X @ W1.T + b1, 0) @ W2.T + b2`. On random weights it matched `nn.Sequential` to within 1e-6. Writing it once by hand shows there is nothing hidden in a layer.
+
+why_it_matters: |
+  A model with layer sizes [20, 64, 32, 1] built its hidden layers from a config list, `self.hidden = [nn.Linear(a, b) for a, b in pairs]`, and kept the output layer as its own attribute. Training ran for an hour and the loss barely moved. `sum(p.numel() for p in model.parameters())` printed 33: only the output layer was registered, and the optimiser had never seen the hidden layers. `nn.ModuleList` registered all 3,457 parameters, and the loss fell from the first epoch.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      class Recommender(nn.Module):
+          def __init__(self, sizes):
+              super().__init__()
+              self.layers = [nn.Linear(a, b) for a, b in zip(sizes, sizes[1:])]
+
+          def forward(self, x):
+              for layer in self.layers:
+                  x = layer(x)
+              return x
+    annotations:
+      - find: "self.layers = [nn.Linear(a, b) for a, b in zip(sizes, sizes[1:])]"
+        note: "A plain list: parameters() never sees these layers, so they never train."
+      - find: "x = layer(x)"
+        note: "No activation between layers, so the stack is one linear map."
+  strong:
+    code: |
+      import torch
+      from torch import nn
+
+
+      class Recommender(nn.Module):
+          """Feed-forward network for a binary survey outcome. Returns logits."""
+
+          def __init__(self, sizes: list[int]) -> None:
+              """Build Linear layers between consecutive sizes.
+
+              Args:
+                  sizes: Layer widths from input to output, such as [10, 16, 1].
+
+              Raises:
+                  ValueError: If fewer than two sizes are given.
+              """
+              super().__init__()
+              if len(sizes) < 2:
+                  raise ValueError(f"need at least input and output sizes, got {sizes}")
+              self.layers = nn.ModuleList(nn.Linear(a, b) for a, b in zip(sizes, sizes[1:]))
+
+          def forward(self, x: torch.Tensor) -> torch.Tensor:
+              """Apply each layer, with ReLU between them."""
+              for layer in self.layers[:-1]:
+                  x = torch.relu(layer(x))
+              return self.layers[-1](x)
+
+
+      def n_parameters(model: nn.Module) -> int:
+          """Number of trainable values in a model."""
+          return sum(p.numel() for p in model.parameters())
+    annotations:
+      - find: "super().__init__()"
+        note: "First line of every module's __init__."
+      - find: "self.layers = nn.ModuleList(nn.Linear(a, b) for a, b in zip(sizes, sizes[1:]))"
+        note: "ModuleList registers every layer, so the optimiser and .to() see them."
+      - find: "x = torch.relu(layer(x))"
+        note: "ReLU between layers makes the stack non-linear."
+      - find: "return self.layers[-1](x)"
+        note: "No activation on the output: the loss takes raw scores (lesson B23-L5)."
+      - find: "return sum(p.numel() for p in model.parameters())"
+        note: "Log this with every run. A surprising count is the fastest check that layers are registered."
+  takeaway: |
+    Subclass nn.Module, call super().__init__() first, register layers in attributes, Sequential or ModuleList, and put activations between Linear layers.
+
+exercises:
+  - id: B23-L4-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A model is `nn.Sequential(nn.Linear(10, 64), nn.Linear(64, 1))`. Why does it fit no better than `nn.Linear(10, 1)`?
+    options:
+      - {id: a, text: "Two linear layers in a row equal one linear layer. It needs an activation such as nn.ReLU() between them"}
+      - {id: b, text: "64 hidden units is too few"}
+      - {id: c, text: "Sequential does not train its second layer"}
+      - {id: d, text: "The output needs 10 units, one per feature"}
+    answer: a
+    reasons:
+      - {id: r1, text: "x @ W1.T @ W2.T is x times one combined matrix, so depth adds nothing without a non-linear step."}
+      - {id: r2, text: "ReLU makes training faster on the GPU."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Any width collapses to one linear map without an activation."
+      - answer: c
+        feedback: "Sequential registers both layers. They both train, but together they are still linear."
+      - answer: d
+        feedback: "The output size matches the target: one value for one outcome."
+      - answer: a|r2
+        feedback: "Right fix, wrong reason. ReLU adds non-linearity, which lets depth help."
+    hints:
+      - "What is a product of two matrices?"
+      - "What does ReLU do to negative values?"
+      - "Linear after linear is linear."
+    explanation: |
+      Composed linear maps are one linear map. A non-linear activation between layers lets the model represent curves and interactions.
+
+  - id: B23-L4-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.15)
+    code: |
+      from torch import nn
+
+      model = nn.Sequential(nn.Linear(10, 16), nn.ReLU(), nn.Linear(16, 1))
+      print(sum(p.numel() for p in model.parameters()), nn.Linear(3, 2).weight.shape)
+    answer: |
+      193 torch.Size([2, 3])
+    wrong_answers:
+      - answer: "176 torch.Size([2, 3])"
+        feedback: "Biases count too: 10 * 16 + 16 and 16 * 1 + 1."
+      - answer: "193 torch.Size([3, 2])"
+        feedback: "Linear stores its weight as (out, in), so Linear(3, 2) holds a (2, 3) weight."
+    hints:
+      - "Each Linear(a, b) holds a * b weights and b biases."
+      - "ReLU has no parameters."
+      - "Weight shape is (out_features, in_features)."
+    explanation: |
+      176 + 17 = 193 parameters. The weight is (out, in) because the layer computes `x @ W.T + b`.
+
+  - id: B23-L4-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete a module whose layers come from a list, so every layer is registered.
+    template: |
+      class Stack(nn.Module):
+          def __init__(self, sizes: list[int]) -> None:
+              super().[[g1]]()
+              self.layers = nn.[[g2]](nn.Linear(a, b) for a, b in zip(sizes, sizes[1:]))
+    gaps:
+      g1: {accepted: [__init__]}
+      g2: {accepted: [ModuleList]}
+    wrong_answers:
+      - answer: {g1: __init__, g2: list}
+        feedback: "nn.list does not exist, and a plain list hides the layers from parameters(). Use nn.ModuleList."
+    hints:
+      - "The parent class sets up registration first."
+      - "A list type that nn.Module tracks."
+      - "`__init__` and `ModuleList`."
+    explanation: |
+      `super().__init__()` prepares registration, and `nn.ModuleList` registers each layer it holds.
+
+  - id: B23-L4-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `mlp_forward(X, W1, b1, W2, b2) -> np.ndarray`, the forward pass of `nn.Sequential(nn.Linear, nn.ReLU, nn.Linear)` in NumPy, with weights in PyTorch's `(out, in)` layout.
+
+      - Return `np.maximum(X @ W1.T + b1, 0) @ W2.T + b2`.
+      - Raise `ValueError` when the columns of `X` differ from the columns of `W1`, when the columns of `W2` differ from the rows of `W1`, or when a bias length differs from its weight's rows.
+    primer: |
+      `np.maximum(a, 0)` compares element by element and keeps the larger value, so it replaces negatives with 0:
+
+      ```python
+      np.maximum(np.array([-2.0, 0.5, 3.0]), 0)    # array([0. , 0.5, 3. ])
+      ```
+    starter: |
+      import numpy as np
+
+
+      def mlp_forward(X, W1, b1, W2, b2):
+          return X @ W1 @ W2
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+
+        _X = np.array([[1.0, -1.0, 2.0], [0.0, 1.0, 0.0]])
+        _W1 = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 1.0], [-1.0, 0.0, 0.0]])
+        _b1 = np.array([0.0, 0.0, -1.0, 0.5])
+        _W2 = np.array([[1.0, 2.0, 3.0, 4.0]])
+        _b2 = np.array([0.5])
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: mlp_forward
+          typed: true
+          docstring: true
+          message: "Give mlp_forward type hints and a docstring."
+      tests:
+        - id: forward
+          code: |
+            out = mlp_forward(_X, _W1, _b1, _W2, _b2)
+            assert out.shape == (2, 1), out.shape
+            assert np.allclose(out[:, 0], [4.5, 4.5]), out
+          message: "Compute np.maximum(X @ W1.T + b1, 0) @ W2.T + b2, with weights in (out, in) layout."
+        - id: relu_matters
+          code: |
+            out = mlp_forward(np.array([[-3.0, 0.0, 0.0]]), _W1, _b1, _W2, _b2)
+            assert np.allclose(out, [[14.5]]), out
+          message: "Apply ReLU to the hidden layer only, before the second Linear."
+        - id: guards
+          code: |
+            bad = [
+                (np.ones((2, 2)), _W1, _b1, _W2, _b2),
+                (_X, _W1, _b1, np.ones((1, 3)), _b2),
+                (_X, _W1, np.ones(3), _W2, _b2),
+                (_X, _W1, _b1, _W2, np.ones(2)),
+            ]
+            for args in bad:
+                try:
+                    mlp_forward(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for shapes {[a.shape for a in args]}")
+          message: "Raise ValueError when any weight or bias shape does not fit."
+    solution: |
+      import numpy as np
+
+
+      def mlp_forward(
+          X: np.ndarray, W1: np.ndarray, b1: np.ndarray, W2: np.ndarray, b2: np.ndarray
+      ) -> np.ndarray:
+          """Forward pass of Linear, ReLU, Linear with PyTorch's (out, in) weights.
+
+          Args:
+              X: Inputs, shape (n, in).
+              W1: First weight, shape (hidden, in).
+              b1: First bias, shape (hidden,).
+              W2: Second weight, shape (out, hidden).
+              b2: Second bias, shape (out,).
+
+          Returns:
+              Outputs, shape (n, out).
+
+          Raises:
+              ValueError: If the shapes do not fit together.
+          """
+          if X.shape[1] != W1.shape[1] or W2.shape[1] != W1.shape[0]:
+              raise ValueError(f"weights do not fit: X {X.shape}, W1 {W1.shape}, W2 {W2.shape}")
+          if len(b1) != W1.shape[0] or len(b2) != W2.shape[0]:
+              raise ValueError(f"biases do not fit: b1 {b1.shape}, b2 {b2.shape}")
+          return np.maximum(X @ W1.T + b1, 0) @ W2.T + b2
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def mlp_forward(
+            X: np.ndarray, W1: np.ndarray, b1: np.ndarray, W2: np.ndarray, b2: np.ndarray
+        ) -> np.ndarray:
+            """No ReLU."""
+            if X.shape[1] != W1.shape[1] or W2.shape[1] != W1.shape[0]:
+                raise ValueError("weights do not fit")
+            if len(b1) != W1.shape[0] or len(b2) != W2.shape[0]:
+                raise ValueError("biases do not fit")
+            return (X @ W1.T + b1) @ W2.T + b2
+      - |
+        import numpy as np
+
+
+        def mlp_forward(
+            X: np.ndarray, W1: np.ndarray, b1: np.ndarray, W2: np.ndarray, b2: np.ndarray
+        ) -> np.ndarray:
+            """No shape checks."""
+            return np.maximum(X @ W1.T + b1, 0) @ W2.T + b2
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def mlp_forward(
+              X: np.ndarray, W1: np.ndarray, b1: np.ndarray, W2: np.ndarray, b2: np.ndarray
+          ) -> np.ndarray:
+              """No ReLU."""
+              if X.shape[1] != W1.shape[1] or W2.shape[1] != W1.shape[0]:
+                  raise ValueError("weights do not fit")
+              if len(b1) != W1.shape[0] or len(b2) != W2.shape[0]:
+                  raise ValueError("biases do not fit")
+              return (X @ W1.T + b1) @ W2.T + b2
+        triggers: forward
+    hints:
+      - "Weights are (out, in), so multiply by their transpose: `X @ W1.T`."
+      - "Check `X.shape[1] == W1.shape[1]` and `W2.shape[1] == W1.shape[0]`, and both bias lengths."
+      - "`np.maximum(X @ W1.T + b1, 0) @ W2.T + b2`."
+    explanation: |
+      Each Linear layer is `x @ W.T + b` with an (out, in) weight. ReLU sits between them. Checking shapes first turns a broadcasting accident into a clear error.
+
+  - id: B23-L4-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `count_linear_params(sizes: list[int]) -> int`: the number of parameters in a stack of `nn.Linear` layers between consecutive sizes, such as `[10, 16, 1]`.
+
+      - Each `nn.Linear(a, b)` holds `a * b` weights and `b` biases.
+      - Raise `ValueError` when there are fewer than two sizes, or when any size is below 1.
+    starter: |
+      def count_linear_params(sizes):
+          return 0
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: count_linear_params
+          typed: true
+          docstring: true
+          message: "Give count_linear_params type hints and a docstring."
+      tests:
+        - id: counts
+          code: |
+            assert count_linear_params([10, 16, 1]) == 193, count_linear_params([10, 16, 1])
+            assert count_linear_params([3, 2]) == 8, count_linear_params([3, 2])
+            assert count_linear_params([20, 64, 32, 1]) == 3457, count_linear_params([20, 64, 32, 1])
+          message: "Sum a * b + b over consecutive pairs of sizes."
+        - id: guards
+          code: |
+            for sizes in [[], [5], [3, 0], [-1, 2]]:
+                try:
+                    count_linear_params(sizes)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {sizes}")
+          message: "Raise ValueError for fewer than two sizes, or any size below 1."
+    solution: |
+      def count_linear_params(sizes: list[int]) -> int:
+          """Parameters in Linear layers between consecutive sizes.
+
+          Args:
+              sizes: Layer widths from input to output.
+
+          Returns:
+              Weights plus biases over all layers.
+
+          Raises:
+              ValueError: If fewer than two sizes are given, or any is below 1.
+          """
+          if len(sizes) < 2 or min(sizes) < 1:
+              raise ValueError(f"need at least two sizes of 1 or more, got {sizes}")
+          return sum(a * b + b for a, b in zip(sizes, sizes[1:]))
+    seeded_bugs:
+      - |
+        def count_linear_params(sizes: list[int]) -> int:
+            """Forgets the biases."""
+            if len(sizes) < 2 or min(sizes) < 1:
+                raise ValueError("bad sizes")
+            return sum(a * b for a, b in zip(sizes, sizes[1:]))
+      - |
+        def count_linear_params(sizes: list[int]) -> int:
+            """Counts input-side biases."""
+            if len(sizes) < 2 or min(sizes) < 1:
+                raise ValueError("bad sizes")
+            return sum(a * b + a for a, b in zip(sizes, sizes[1:]))
+      - |
+        def count_linear_params(sizes: list[int]) -> int:
+            """No guards."""
+            return sum(a * b + b for a, b in zip(sizes, sizes[1:]))
+    wrong_answers:
+      - answer: |
+          def count_linear_params(sizes: list[int]) -> int:
+              """Forgets the biases."""
+              if len(sizes) < 2 or min(sizes) < 1:
+                  raise ValueError("bad sizes")
+              return sum(a * b for a, b in zip(sizes, sizes[1:]))
+        triggers: counts
+    hints:
+      - "`zip(sizes, sizes[1:])` gives consecutive pairs."
+      - "Each pair adds `a * b + b`."
+      - "Check `len(sizes) < 2 or min(sizes) < 1` first."
+    explanation: |
+      Each layer has one weight per input-output pair and one bias per output. The count for [10, 16, 1] matches `sum(p.numel() for p in model.parameters())`: 193.
+
+  - id: B23-L4-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      `sum(p.numel() for p in model.parameters())` prints 0, and the optimiser raises "optimizer got an empty parameter list". Tap the line responsible, then fix it.
+    code: |
+      import torch
+      from torch import nn
+
+
+      class Stack(nn.Module):
+          def __init__(self, sizes):
+              super().__init__()
+              self.layers = [nn.Linear(a, b) for a, b in zip(sizes, sizes[1:])]
+
+          def forward(self, x):
+              for layer in self.layers[:-1]:
+                  x = torch.relu(layer(x))
+              return self.layers[-1](x)
+    bug_lines: [8]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: module_list
+          kind: requires_pattern
+          pattern: "self\\.layers\\s*=\\s*nn\\.ModuleList\\("
+          message: "Hold the layers in nn.ModuleList so parameters() finds them."
+        - id: no_plain_list
+          kind: forbids_pattern
+          pattern: "self\\.layers\\s*=\\s*\\["
+          message: "A plain list hides the layers from parameters()."
+    fix_solution: |
+      import torch
+      from torch import nn
+
+
+      class Stack(nn.Module):
+          def __init__(self, sizes):
+              super().__init__()
+              self.layers = nn.ModuleList(nn.Linear(a, b) for a, b in zip(sizes, sizes[1:]))
+
+          def forward(self, x):
+              for layer in self.layers[:-1]:
+                  x = torch.relu(layer(x))
+              return self.layers[-1](x)
+    wrong_answers:
+      - lines: [7]
+        feedback: "super().__init__() is right and in the right place. The layers are stored somewhere parameters() cannot see."
+      - lines: [12]
+        feedback: "The forward pass runs. The layers it uses were never registered."
+    hints:
+      - "Where does parameters() look for layers?"
+      - "Is a Python list a module?"
+      - "nn.ModuleList."
+    explanation: |
+      `parameters()` walks registered submodules. A plain list is not one, so the model reports no parameters. `nn.ModuleList` registers each layer.
+
+recap:
+  - front: "Skeleton of a PyTorch model"
+    back: "Subclass nn.Module, call super().__init__() first, build layers in __init__, use them in forward, call model(x)."
+  - front: "nn.Linear(in, out) weight shape and parameter count"
+    back: "Weight (out, in), bias (out,). Parameters: in * out + out."
+  - front: "Why put ReLU between Linear layers"
+    back: "Two linear layers equal one. A non-linear activation lets depth fit curves and interactions."
+  - front: "Layers in a plain Python list"
+    back: "Not registered: parameters() misses them and they never train. Use nn.ModuleList or nn.Sequential."
+
+claims:
+  - claim: "PyTorch 2.15: Linear(3, 2) weight is (2, 3) with 8 parameters; Sequential(Linear(10, 16), ReLU, Linear(16, 1)) has 193; layers in a plain list give 0 parameters and ModuleList gives 4 for two layers; a missing super().__init__() raises 'cannot assign module before Module.__init__() call'; two stacked Linear layers equal one combined linear map; the NumPy forward pass matched nn.Sequential within 1e-6."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), Python 3.12, November 2026."

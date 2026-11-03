@@ -1,0 +1,492 @@
+id: B23-L2
+title: Autograd, gradients from the chain rule
+
+concept: |
+  Training needs the gradient of the loss with respect to every weight. **Autograd** computes it. Create a tensor with `requires_grad=True` and PyTorch records every operation that uses it. `loss.backward()` walks that record backwards with the chain rule and stores each gradient in the tensor's `.grad`. Examples use PyTorch 2.15.
+
+  ```python
+  w = torch.tensor(3.0, requires_grad=True)
+  y = w ** 2 + 2 * w
+  y.backward()
+  w.grad.item()          # 8.0, since dy/dw = 2w + 2
+  ```
+
+  Rules that matter in a training step:
+
+  - `backward()` needs a scalar, such as a mean loss. On a vector it raises "grad can be implicitly created only for scalar outputs".
+  - Tensors you create with `requires_grad=True` are **leaves** (`w.is_leaf` is `True`). Results of operations are not, and only leaves get a `.grad`.
+  - `.grad` adds up across `backward()` calls. Reset it with `w.grad.zero_()`, or `optimizer.zero_grad()` (lesson B23-L3).
+  - Update weights in place inside `with torch.no_grad():`, as `w -= lr * w.grad`. Outside that block, the in-place update raises "a leaf Variable that requires grad is being used in an in-place operation". Writing `w = w - lr * w.grad` instead builds a new, non-leaf tensor whose `.grad` stays `None`, and the next step fails with a `TypeError`.
+  - `preds.detach()` returns a tensor without history, for logging or `.numpy()`.
+
+  **Check a gradient you derive.** For a linear model with mean squared error, the gradient is `2 / n * X.T @ (X @ w - y)`. On a three-row example, autograd and this formula both gave [-17.6667, -22.6667]. To test any gradient formula, use **central differences**: move one weight by a small `h` each way, and `(f(w + h) - f(w - h)) / (2 * h)` approximates its gradient. If the two disagree beyond about 1e-6, the formula is wrong.
+
+why_it_matters: |
+  A custom loss for a survey model trained, but slowly, and to worse results than plain mean squared error. A central-difference check on five weights showed every gradient was half its true size: a factor of 2 was missing from the hand-written derivative. The check took ten lines and found in minutes what a week of tuning learning rates had not.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      for step in range(100):
+          loss = ((X @ w - y) ** 2).mean()
+          loss.backward()
+          w = w - lr * w.grad
+    annotations:
+      - find: "w = w - lr * w.grad"
+        note: "Builds a new non-leaf tensor. Its .grad is None, so the second step raises TypeError. The gradient is also never reset."
+  strong:
+    code: |
+      import numpy as np
+      import torch
+
+
+      def train_linear(X: torch.Tensor, y: torch.Tensor, lr: float, steps: int) -> torch.Tensor:
+          """Fit y = X @ w by gradient descent with autograd.
+
+          Args:
+              X: Features, shape (n, k), float32.
+              y: Targets, shape (n,).
+              lr: Learning rate.
+              steps: Number of updates.
+
+          Returns:
+              The fitted weights, shape (k,).
+          """
+          w = torch.zeros(X.shape[1], requires_grad=True)
+          for _ in range(steps):
+              loss = ((X @ w - y) ** 2).mean()
+              loss.backward()
+              with torch.no_grad():
+                  w -= lr * w.grad
+              w.grad.zero_()
+          return w.detach()
+
+
+      def mse_gradient(X: np.ndarray, y: np.ndarray, w: np.ndarray) -> np.ndarray:
+          """The same gradient by hand: 2 / n * X.T @ (X @ w - y)."""
+          return 2 / len(y) * X.T @ (X @ w - y)
+    annotations:
+      - find: "w = torch.zeros(X.shape[1], requires_grad=True)"
+        note: "A leaf tensor: backward() fills its .grad."
+      - find: "loss = ((X @ w - y) ** 2).mean()"
+        note: "A scalar, so backward() needs no extra argument."
+      - find: "w -= lr * w.grad"
+        note: "In place, inside no_grad: w stays the same leaf tensor."
+      - find: "w.grad.zero_()"
+        note: "Gradients add up, so reset them after each update."
+      - find: "return 2 / len(y) * X.T @ (X @ w - y)"
+        note: "The formula autograd computes, written out. Use it to check your understanding."
+  takeaway: |
+    backward() fills .grad on leaf tensors. Update in place under no_grad, reset .grad, and check any hand-written gradient with central differences.
+
+exercises:
+  - id: B23-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      `w -= lr * w.grad` raises "a leaf Variable that requires grad is being used in an in-place operation". What is the fix?
+    options:
+      - {id: a, text: "Put the update inside `with torch.no_grad():`"}
+      - {id: b, text: "Write `w = w - lr * w.grad` instead"}
+      - {id: c, text: "Set `w.requires_grad = False` for the rest of training"}
+      - {id: d, text: "Call `loss.backward()` twice"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The update is not part of the model, so autograd must not record it. no_grad stops the recording and keeps w the same leaf tensor."}
+      - {id: r2, text: "no_grad makes the update run faster on the GPU."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That builds a new, non-leaf tensor. Its .grad stays None and the next step fails."
+      - answer: c
+        feedback: "Then autograd stops computing gradients for w, and training stops."
+      - answer: d
+        feedback: "The second call fails, because backward frees the graph, and gradients would add up anyway."
+      - answer: a|r2
+        feedback: "Right fix, wrong reason. It stops autograd recording the update."
+    hints:
+      - "Should autograd record the weight update itself?"
+      - "Which block turns recording off?"
+      - "torch.no_grad()."
+    explanation: |
+      Inside `torch.no_grad()`, autograd records nothing, so the in-place update is allowed and `w` stays the leaf the optimiser and `backward()` work with.
+
+  - id: B23-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.15)
+    code: |
+      import torch
+
+      w = torch.tensor(3.0, requires_grad=True)
+      y = w ** 2 + 2 * w
+      y.backward()
+      print(w.grad.item(), w.is_leaf, y.is_leaf)
+    answer: |
+      8.0 True False
+    wrong_answers:
+      - answer: "15.0 True False"
+        feedback: "15 is the value of y. The gradient is 2w + 2 = 8 at w = 3."
+      - answer: "8.0 True True"
+        feedback: "y comes from operations on w, so it is not a leaf."
+    hints:
+      - "Differentiate w ** 2 + 2 * w."
+      - "Evaluate at w = 3."
+      - "Which tensor did you create directly?"
+    explanation: |
+      dy/dw = 2w + 2 = 8 at w = 3. You created `w`, so it is a leaf. `y` is the result of operations.
+
+  - id: B23-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the central-difference estimate for weight `i`, and the safe in-place update.
+    template: |
+      estimate = (f(w_plus) - f(w_minus)) / ([[g1]])
+
+      with torch.[[g2]]():
+          w -= lr * w.grad
+    gaps:
+      g1: {accepted: ["2 * h", "2*h", "h * 2"]}
+      g2: {accepted: [no_grad]}
+    wrong_answers:
+      - answer: {g1: h, g2: no_grad}
+        feedback: "w_plus and w_minus are 2h apart, so divide by 2 * h."
+    hints:
+      - "How far apart are w + h and w - h?"
+      - "Which block stops autograd recording?"
+      - "`2 * h` and `no_grad`."
+    explanation: |
+      The two points are `2 * h` apart. The update goes inside `torch.no_grad()`.
+
+  - id: B23-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `mse_gradient(X, y, w) -> np.ndarray`, the gradient of `((X @ w - y) ** 2).mean()` with respect to `w`, with NumPy.
+
+      - Return `2 / n * X.T @ (X @ w - y)`, where `n` is the number of rows.
+      - Raise `ValueError` when there are no rows, when `len(y)` differs from the rows of `X`, or when `len(w)` differs from the columns of `X`.
+    starter: |
+      import numpy as np
+
+
+      def mse_gradient(X, y, w):
+          return X.T @ (X @ w - y)
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: mse_gradient
+          typed: true
+          docstring: true
+          message: "Give mse_gradient type hints and a docstring."
+      tests:
+        - id: value
+          code: |
+            X = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+            out = mse_gradient(X, np.array([1.0, 2.0, 3.0]), np.array([0.5, -0.5]))
+            assert np.allclose(out, [-17.666666667, -22.666666667]), out
+          message: "Return 2 / n * X.T @ (X @ w - y)."
+        - id: zero_at_fit
+          code: |
+            X = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+            w = np.array([2.0, -1.0])
+            assert np.allclose(mse_gradient(X, X @ w, w), 0.0)
+          message: "At a perfect fit the gradient is zero."
+        - id: guards
+          code: |
+            X = np.ones((3, 2))
+            for y, w, Xb in [(np.ones(2), np.ones(2), X), (np.ones(3), np.ones(3), X), (np.ones(0), np.ones(2), np.ones((0, 2)))]:
+                try:
+                    mse_gradient(Xb, y, w)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for X {Xb.shape}, y {y.shape}, w {w.shape}")
+          message: "Raise ValueError for no rows or mismatched shapes."
+    solution: |
+      import numpy as np
+
+
+      def mse_gradient(X: np.ndarray, y: np.ndarray, w: np.ndarray) -> np.ndarray:
+          """Gradient of the mean squared error of a linear model.
+
+          Args:
+              X: Features, shape (n, k).
+              y: Targets, shape (n,).
+              w: Weights, shape (k,).
+
+          Returns:
+              The gradient, shape (k,).
+
+          Raises:
+              ValueError: If there are no rows or the shapes do not match.
+          """
+          n, k = X.shape
+          if n == 0 or len(y) != n or len(w) != k:
+              raise ValueError(f"shapes do not match: X {X.shape}, y {y.shape}, w {w.shape}")
+          return 2 / n * X.T @ (X @ w - y)
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def mse_gradient(X: np.ndarray, y: np.ndarray, w: np.ndarray) -> np.ndarray:
+            """Missing the factor 2."""
+            n, k = X.shape
+            if n == 0 or len(y) != n or len(w) != k:
+                raise ValueError("shapes do not match")
+            return 1 / n * X.T @ (X @ w - y)
+      - |
+        import numpy as np
+
+
+        def mse_gradient(X: np.ndarray, y: np.ndarray, w: np.ndarray) -> np.ndarray:
+            """No guards."""
+            return 2 / len(y) * X.T @ (X @ w - y)
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def mse_gradient(X: np.ndarray, y: np.ndarray, w: np.ndarray) -> np.ndarray:
+              """Missing the factor 2."""
+              n, k = X.shape
+              if n == 0 or len(y) != n or len(w) != k:
+                  raise ValueError("shapes do not match")
+              return 1 / n * X.T @ (X @ w - y)
+        triggers: value
+    hints:
+      - "`n, k = X.shape`."
+      - "Check `n == 0`, `len(y) != n` and `len(w) != k`."
+      - "`2 / n * X.T @ (X @ w - y)`."
+    explanation: |
+      The derivative of the squared error brings down a factor of 2, and the mean divides by n. The guards stop a silent broadcast from returning a wrong-shaped gradient.
+
+  - id: B23-L2-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `numerical_gradient(f, w, h=1e-5) -> np.ndarray`, a central-difference estimate of the gradient of `f` at `w`.
+
+      - For each index `i`, copy `w` twice, add `h` to element `i` of one copy and subtract `h` from the other, and use `(f(plus) - f(minus)) / (2 * h)`.
+      - Leave `w` unchanged, and return float values even when `w` holds integers.
+    primer: |
+      `arr.astype(float)` returns a float copy of an array, and `np.zeros_like(arr)` returns zeros with its shape and dtype:
+
+      ```python
+      counts = np.array([3, 5])
+      counts.astype(float)          # array([3., 5.])
+      np.zeros_like(np.ones(2))     # array([0., 0.])
+      ```
+
+      To type a parameter that is a function, use `Callable` from `collections.abc`: `Callable[[str], int]` means "takes a str, returns an int", as `len` does.
+    starter: |
+      import numpy as np
+
+
+      def numerical_gradient(f, w, h=1e-5):
+          return np.zeros(len(w))
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+
+        _X = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+        _y = np.array([1.0, 2.0, 3.0])
+
+
+        def _loss(w):
+            return float(((_X @ w - _y) ** 2).mean())
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: numerical_gradient
+          typed: true
+          docstring: true
+          message: "Give numerical_gradient type hints and a docstring."
+      tests:
+        - id: matches_formula
+          code: |
+            w = np.array([0.5, -0.5])
+            out = numerical_gradient(_loss, w)
+            assert np.allclose(out, [-17.666666667, -22.666666667], atol=1e-5), out
+          message: "Use (f(plus) - f(minus)) / (2 * h) for each element."
+        - id: unchanged_and_float
+          code: |
+            w = np.array([1, -2])
+            out = numerical_gradient(lambda v: float(v[0] ** 2 + 3 * v[1]), w)
+            assert np.array_equal(w, [1, -2]) and w.dtype.kind == "i", w
+            assert np.allclose(out, [2.0, 3.0], atol=1e-5), out
+          message: "Work on float copies: leave w unchanged, and handle integer input."
+    solution: |
+      from collections.abc import Callable
+
+      import numpy as np
+
+
+      def numerical_gradient(
+          f: Callable[[np.ndarray], float], w: np.ndarray, h: float = 1e-5
+      ) -> np.ndarray:
+          """Central-difference estimate of the gradient of f at w.
+
+          Args:
+              f: Function from a weight vector to a number.
+              w: Point to differentiate at. Not changed.
+              h: Step size.
+
+          Returns:
+              One estimate per element of w.
+          """
+          base = w.astype(float)
+          grad = np.zeros_like(base)
+          for i in range(len(base)):
+              plus, minus = base.copy(), base.copy()
+              plus[i] += h
+              minus[i] -= h
+              grad[i] = (f(plus) - f(minus)) / (2 * h)
+          return grad
+    seeded_bugs:
+      - |
+        from collections.abc import Callable
+
+        import numpy as np
+
+
+        def numerical_gradient(
+            f: Callable[[np.ndarray], float], w: np.ndarray, h: float = 1e-5
+        ) -> np.ndarray:
+            """Forgets the factor 2."""
+            base = w.astype(float)
+            grad = np.zeros_like(base)
+            for i in range(len(base)):
+                plus, minus = base.copy(), base.copy()
+                plus[i] += h
+                minus[i] -= h
+                grad[i] = (f(plus) - f(minus)) / h
+            return grad
+      - |
+        from collections.abc import Callable
+
+        import numpy as np
+
+
+        def numerical_gradient(
+            f: Callable[[np.ndarray], float], w: np.ndarray, h: float = 1e-5
+        ) -> np.ndarray:
+            """Integer copies."""
+            grad = np.zeros(len(w))
+            for i in range(len(w)):
+                plus, minus = w.copy(), w.copy()
+                plus[i] += h
+                minus[i] -= h
+                grad[i] = (f(plus) - f(minus)) / (2 * h)
+            return grad
+    wrong_answers:
+      - answer: |
+          from collections.abc import Callable
+
+          import numpy as np
+
+
+          def numerical_gradient(
+              f: Callable[[np.ndarray], float], w: np.ndarray, h: float = 1e-5
+          ) -> np.ndarray:
+              """Forgets the factor 2."""
+              base = w.astype(float)
+              grad = np.zeros_like(base)
+              for i in range(len(base)):
+                  plus, minus = base.copy(), base.copy()
+                  plus[i] += h
+                  minus[i] -= h
+                  grad[i] = (f(plus) - f(minus)) / h
+              return grad
+        triggers: matches_formula
+    hints:
+      - "Start from `base = w.astype(float)`."
+      - "In the loop, copy `base` twice and move element `i` by `+h` and `-h`."
+      - "Divide the difference by `2 * h`."
+    explanation: |
+      Float copies keep `w` safe and let `+h` work on integer input, where adding 1e-5 to an int array would truncate to 0. The two points are 2h apart.
+
+  - id: B23-L2-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      This manual training loop raises `TypeError: unsupported operand type(s) for *: 'float' and 'NoneType'` on its second step. Tap the line responsible, then fix it.
+    code: |
+      import torch
+
+      w = torch.zeros(X.shape[1], requires_grad=True)
+      for step in range(100):
+          loss = ((X @ w - y) ** 2).mean()
+          loss.backward()
+          w = w - lr * w.grad
+    bug_lines: [7]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_grad
+          kind: requires_pattern
+          pattern: "with\\s+torch\\.no_grad\\(\\)"
+          message: "Do the update inside with torch.no_grad():."
+        - id: in_place
+          kind: requires_pattern
+          pattern: "w\\s*-=\\s*lr\\s*\\*\\s*w\\.grad"
+          message: "Update in place: w -= lr * w.grad."
+        - id: reset
+          kind: requires_pattern
+          pattern: "w\\.grad\\.zero_\\(\\)"
+          message: "Reset the gradient after each update: w.grad.zero_()."
+        - id: no_rebind
+          kind: forbids_pattern
+          pattern: "w\\s*=\\s*w\\s*-"
+          message: "Do not rebind w to a new tensor."
+    fix_solution: |
+      import torch
+
+      w = torch.zeros(X.shape[1], requires_grad=True)
+      for step in range(100):
+          loss = ((X @ w - y) ** 2).mean()
+          loss.backward()
+          with torch.no_grad():
+              w -= lr * w.grad
+          w.grad.zero_()
+    wrong_answers:
+      - lines: [6]
+        feedback: "backward() fills w.grad correctly on the first step. The next line replaces w."
+      - lines: [3]
+        feedback: "requires_grad=True makes w a leaf, which is right. Something turns it into a non-leaf later."
+    hints:
+      - "After the first update, is w still the tensor you created?"
+      - "Does a non-leaf tensor get a .grad?"
+      - "Update in place under no_grad, then reset the gradient."
+    explanation: |
+      `w = w - lr * w.grad` binds `w` to a new tensor built from operations, so it is no longer a leaf and its `.grad` stays `None`. Update in place inside `torch.no_grad()`, and reset `w.grad` after each step.
+
+recap:
+  - front: "What backward() does"
+    back: "Applies the chain rule from a scalar loss and stores gradients in .grad of leaf tensors (created with requires_grad=True)."
+  - front: "Safe manual update"
+    back: "with torch.no_grad(): w -= lr * w.grad, then w.grad.zero_()."
+  - front: "Gradient of mean squared error for a linear model"
+    back: "2 / n * X.T @ (X @ w - y)."
+  - front: "Central-difference check"
+    back: "(f(w + h) - f(w - h)) / (2 * h) per weight. Disagreement beyond about 1e-6 means the formula is wrong."
+
+claims:
+  - claim: "PyTorch 2.15: d(w^2 + 2w)/dw at 3 is 8.0; backward on a vector raises 'grad can be implicitly created only for scalar outputs'; an in-place update of a leaf outside no_grad raises 'a leaf Variable that requires grad is being used in an in-place operation'; w = w - lr * w.grad leaves a non-leaf whose .grad is None and the next step raises TypeError; autograd and 2/n X^T(Xw - y) both give [-17.6667, -22.6667]."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), Python 3.12, and NumPy, November 2026."

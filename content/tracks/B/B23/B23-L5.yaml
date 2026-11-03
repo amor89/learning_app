@@ -1,0 +1,480 @@
+id: B23-L5
+title: Loss functions, logits and target shapes
+
+concept: |
+  The loss turns predictions and targets into one number to minimise. Choose it from the target, and match the shapes and dtypes it expects exactly. Examples use PyTorch 2.15.
+
+  **Numeric target: `nn.MSELoss()`.** Predictions and targets need the same shape. A model ending in `nn.Linear(hidden, 1)` returns `(n, 1)`, and against targets of shape `(n,)` the loss broadcasts to `(n, n)` (lesson B23-L1). PyTorch warns, "Using a target size ... that is different to the input size", and returns the wrong value: 1.3333 for three perfect predictions instead of 0.0. Squeeze first: `loss_fn(model(x).squeeze(1), y)`.
+
+  **Binary target: `nn.BCEWithLogitsLoss()`.** The model outputs a **logit**, a raw score with no sigmoid applied. The loss applies the sigmoid itself, in a numerically stable form. In float32, `torch.log(torch.sigmoid(torch.tensor([-100.0])))` gives `-inf`, while the loss for that logit with target 1 is the correct 100.0. Two rules:
+
+  - Do not end the model with `nn.Sigmoid()`. The loss would apply a second sigmoid. For logits [2, -1, 0] and targets [1, 0, 1] it returned 0.5525 instead of 0.3778, and the gradients shrink.
+  - Targets are floats with the logits' shape. Integer targets raise "result type Float can't be cast to the desired output type Long".
+
+  Apply `torch.sigmoid(logits)` only when you need probabilities, at prediction time.
+
+  **Imbalanced binary target.** `nn.BCEWithLogitsLoss(pos_weight=torch.tensor([n_neg / n_pos]))` scales the loss on positive rows, so the rare class carries as much total weight as the common one.
+
+  **Several classes: `nn.CrossEntropyLoss()`** takes logits of shape `(n, classes)` and integer class indices of shape `(n,)` (lesson B16-L2).
+
+  The stable binary loss, written out for logits `z` and targets `y`, is the mean of `max(z, 0) - z * y + log(1 + exp(-|z|))`. It never takes the logarithm of a number that has rounded to zero.
+
+why_it_matters: |
+  A churn model's validation loss was stuck near 0.69, the loss of predicting 0.5 for everyone, while the training loss crept down. The model ended in `nn.Sigmoid()` and trained with `BCEWithLogitsLoss`. Outputs were squeezed between 0.5 and 0.73 by the second sigmoid, and gradients were a fraction of their size. Removing the sigmoid layer took validation loss from 0.69 to 0.41 in the same number of epochs.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      model = nn.Sequential(nn.Linear(k, 16), nn.ReLU(), nn.Linear(16, 1), nn.Sigmoid())
+      loss_fn = nn.BCEWithLogitsLoss()
+      loss = loss_fn(model(x), torch.as_tensor(y))
+    annotations:
+      - find: "model = nn.Sequential(nn.Linear(k, 16), nn.ReLU(), nn.Linear(16, 1), nn.Sigmoid())"
+        note: "Sigmoid in the model and again in the loss: wrong values, weak gradients."
+      - find: "loss = loss_fn(model(x), torch.as_tensor(y))"
+        note: "(n, 1) outputs against (n,) targets, and integer y raises a dtype error."
+  strong:
+    code: |
+      import numpy as np
+      import torch
+      from torch import nn
+
+
+      def binary_loss(y_train: np.ndarray) -> nn.BCEWithLogitsLoss:
+          """Binary loss on logits, weighted for class imbalance.
+
+          Args:
+              y_train: Training targets of 0 and 1.
+
+          Returns:
+              BCEWithLogitsLoss with pos_weight = negatives / positives.
+
+          Raises:
+              ValueError: If the training data has no positive rows.
+          """
+          n_pos = int(y_train.sum())
+          if n_pos == 0:
+              raise ValueError("no positive rows in the training data")
+          return nn.BCEWithLogitsLoss(pos_weight=torch.tensor([(len(y_train) - n_pos) / n_pos]))
+
+
+      def batch_loss(model: nn.Module, loss_fn: nn.Module, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+          """Loss on one batch: logits squeezed to (n,), targets as float."""
+          logits = model(x).squeeze(1)
+          return loss_fn(logits, y.float())
+
+
+      def predict_proba(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
+          """Probabilities, for reporting. Sigmoid is applied here, not in the model."""
+          with torch.no_grad():
+              return torch.sigmoid(model(x).squeeze(1))
+    annotations:
+      - find: "return nn.BCEWithLogitsLoss(pos_weight=torch.tensor([(len(y_train) - n_pos) / n_pos]))"
+        note: "Weight from training rows only, so the rare class counts as much as the common one."
+      - find: "logits = model(x).squeeze(1)"
+        note: "(n, 1) becomes (n,): the target's shape."
+      - find: "return loss_fn(logits, y.float())"
+        note: "Float targets, raw logits: what the loss expects."
+      - find: "return torch.sigmoid(model(x).squeeze(1))"
+        note: "Sigmoid only where probabilities are needed."
+  takeaway: |
+    Regression: MSELoss on matching shapes. Binary: logits into BCEWithLogitsLoss with float targets and no sigmoid in the model. Squeeze (n, 1) outputs first.
+
+exercises:
+  - id: B23-L5-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You predict whether a respondent would recommend the brand (0 or 1). Which output layer and loss do you use?
+    options:
+      - {id: a, text: "`nn.Linear(hidden, 1)` with no activation, and `nn.BCEWithLogitsLoss()` on float targets"}
+      - {id: b, text: "`nn.Linear(hidden, 1)` then `nn.Sigmoid()`, and `nn.BCEWithLogitsLoss()`"}
+      - {id: c, text: "`nn.Linear(hidden, 1)` and `nn.MSELoss()` on the 0 and 1 targets"}
+      - {id: d, text: "`nn.Linear(hidden, 1)` and `nn.CrossEntropyLoss()` on float targets"}
+    answer: a
+    reasons:
+      - {id: r1, text: "BCEWithLogitsLoss applies the sigmoid itself, stably, so the model outputs raw logits."}
+      - {id: r2, text: "A model without a final activation trains faster on the GPU."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That applies the sigmoid twice: once in the model and once in the loss."
+      - answer: c
+        feedback: "MSE on probabilities gives weak gradients for confident wrong answers. Binary targets want a binary loss."
+      - answer: d
+        feedback: "CrossEntropyLoss expects one logit per class and integer class indices."
+      - answer: a|r2
+        feedback: "Right choice, wrong reason. It is about the loss applying the sigmoid itself."
+    hints:
+      - "Which loss name contains Logits?"
+      - "Where does the sigmoid happen?"
+      - "Raw logits in, float targets."
+    explanation: |
+      The model outputs one logit. `BCEWithLogitsLoss` applies the sigmoid inside the loss, stably, against float targets.
+
+  - id: B23-L5-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? Ignore the warning PyTorch writes to stderr. (PyTorch 2.15)
+    code: |
+      import torch
+      from torch import nn
+
+      pred = torch.tensor([[1.0], [2.0], [3.0]])
+      target = torch.tensor([1.0, 2.0, 3.0])
+      loss_fn = nn.MSELoss()
+      print(round(loss_fn(pred, target).item(), 4), loss_fn(pred.squeeze(1), target).item())
+    answer: |
+      1.3333 0.0
+    wrong_answers:
+      - answer: "0.0 0.0"
+        feedback: "Without squeeze, (3, 1) against (3,) broadcasts to (3, 3). Every prediction is compared with every target."
+      - answer: "1.3333 1.3333"
+        feedback: "squeeze(1) gives (3,), the target's shape, so the perfect predictions score 0.0."
+    hints:
+      - "What shape do (3, 1) and (3,) broadcast to?"
+      - "Mean of 0, 1, 4, 1, 0, 1, 4, 1, 0."
+      - "After squeeze(1), the shapes match."
+    explanation: |
+      The first call compares a 3 by 3 table and averages 12 / 9. Squeezing gives matching shapes and the correct 0.0.
+
+  - id: B23-L5-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Weight the rare positive class, and give the loss logits in the target's shape.
+    template: |
+      loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([[[g1]]]))
+      loss = loss_fn(model(x).[[g2]](1), y.float())
+    gaps:
+      g1: {accepted: ["n_neg / n_pos"]}
+      g2: {accepted: [squeeze]}
+    wrong_answers:
+      - answer: {g1: "n_pos / n_neg", g2: squeeze}
+        feedback: "That shrinks the weight of the rare class. pos_weight is negatives over positives."
+    hints:
+      - "pos_weight scales the positive rows. Which ratio makes them count more?"
+      - "Which method removes a dimension of size 1?"
+      - "`n_neg / n_pos` and `squeeze`."
+    explanation: |
+      `pos_weight = n_neg / n_pos` balances the classes, and `squeeze(1)` turns (n, 1) logits into (n,).
+
+  - id: B23-L5-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `bce_with_logits(logits, targets) -> float` with NumPy, in the stable form.
+
+      - Return the mean of `max(z, 0) - z * y + log1p(exp(-abs(z)))` over all rows.
+      - Raise `ValueError` when the shapes differ or there are no rows.
+    primer: |
+      `np.abs`, `np.exp` and `np.log1p` work element by element. `np.log1p(x)` computes `log(1 + x)`, and stays accurate when `x` is tiny:
+
+      ```python
+      np.abs(np.array([-2.0, 3.0]))        # array([2., 3.])
+      np.log1p(np.array([0.0, 1e-20]))     # array([0.e+00, 1.e-20])
+      ```
+
+      `np.maximum(a, 0)` keeps the larger of each value and 0.
+    starter: |
+      import numpy as np
+
+
+      def bce_with_logits(logits, targets):
+          p = 1 / (1 + np.exp(-logits))
+          return float(-np.mean(targets * np.log(p) + (1 - targets) * np.log(1 - p)))
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: bce_with_logits
+          typed: true
+          docstring: true
+          message: "Give bce_with_logits type hints and a docstring."
+      tests:
+        - id: value
+          code: |
+            out = bce_with_logits(np.array([2.0, -1.0, 0.0]), np.array([1.0, 0.0, 1.0]))
+            assert abs(out - 0.37782) < 1e-4 and type(out) is float, out
+          message: "Average max(z, 0) - z * y + log1p(exp(-abs(z)))."
+        - id: stable
+          code: |
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                big = bce_with_logits(np.array([-1000.0, 1000.0]), np.array([1.0, 0.0]))
+            assert abs(big - 1000.0) < 1e-9, big
+          message: "Stay finite for large logits: no log of 0, no overflow in exp."
+        - id: guards
+          code: |
+            for z, y in [(np.ones(3), np.ones(2)), (np.ones((3, 1)), np.ones(3)), (np.array([]), np.array([]))]:
+                try:
+                    bce_with_logits(z, y)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for shapes {z.shape} and {y.shape}")
+          message: "Raise ValueError when shapes differ or there are no rows."
+    solution: |
+      import numpy as np
+
+
+      def bce_with_logits(logits: np.ndarray, targets: np.ndarray) -> float:
+          """Binary cross-entropy on logits, in the numerically stable form.
+
+          Args:
+              logits: Raw scores, shape (n,).
+              targets: 0 or 1, shape (n,).
+
+          Returns:
+              The mean loss.
+
+          Raises:
+              ValueError: If the shapes differ or there are no rows.
+          """
+          if logits.shape != targets.shape or logits.size == 0:
+              raise ValueError(f"need matching non-empty shapes, got {logits.shape} and {targets.shape}")
+          z, y = logits, targets
+          return float(np.mean(np.maximum(z, 0) - z * y + np.log1p(np.exp(-np.abs(z)))))
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def bce_with_logits(logits: np.ndarray, targets: np.ndarray) -> float:
+            """Naive form: overflows and takes log of 0."""
+            if logits.shape != targets.shape or logits.size == 0:
+                raise ValueError("bad shapes")
+            p = 1 / (1 + np.exp(-logits))
+            return float(-np.mean(targets * np.log(p) + (1 - targets) * np.log(1 - p)))
+      - |
+        import numpy as np
+
+
+        def bce_with_logits(logits: np.ndarray, targets: np.ndarray) -> float:
+            """Sign error on the z * y term."""
+            if logits.shape != targets.shape or logits.size == 0:
+                raise ValueError("bad shapes")
+            z, y = logits, targets
+            return float(np.mean(np.maximum(z, 0) + z * y + np.log1p(np.exp(-np.abs(z)))))
+      - |
+        import numpy as np
+
+
+        def bce_with_logits(logits: np.ndarray, targets: np.ndarray) -> float:
+            """No shape check."""
+            z, y = logits, targets
+            return float(np.mean(np.maximum(z, 0) - z * y + np.log1p(np.exp(-np.abs(z)))))
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def bce_with_logits(logits: np.ndarray, targets: np.ndarray) -> float:
+              """Naive form: overflows and takes log of 0."""
+              if logits.shape != targets.shape or logits.size == 0:
+                  raise ValueError("bad shapes")
+              p = 1 / (1 + np.exp(-logits))
+              return float(-np.mean(targets * np.log(p) + (1 - targets) * np.log(1 - p)))
+        triggers: stable
+    hints:
+      - "Check `logits.shape != targets.shape or logits.size == 0` first."
+      - "Use `np.maximum(z, 0)`, `z * y` and `np.log1p(np.exp(-np.abs(z)))`."
+      - "Wrap the mean in `float(...)`."
+    explanation: |
+      `exp(-abs(z))` is at most 1, so it never overflows, and `log1p` stays accurate when that value is tiny. The result equals the textbook formula wherever both are finite.
+
+  - id: B23-L5-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `positive_weight(y_train) -> float`: the `pos_weight` for `BCEWithLogitsLoss`, negatives divided by positives.
+
+      - Raise `ValueError` when there are no rows, no positives, or any value other than 0 and 1.
+    starter: |
+      import numpy as np
+
+
+      def positive_weight(y_train):
+          return 1.0
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: positive_weight
+          typed: true
+          docstring: true
+          message: "Give positive_weight type hints and a docstring."
+      tests:
+        - id: ratio
+          code: |
+            out = positive_weight(np.array([0, 0, 0, 1, 0, 0, 1, 0]))
+            assert out == 3.0 and type(out) is float, out
+            assert positive_weight(np.array([1.0, 0.0])) == 1.0
+          message: "Return negatives / positives as a float."
+        - id: guards
+          code: |
+            for y in [np.array([]), np.zeros(5), np.array([0, 1, 2])]:
+                try:
+                    positive_weight(y)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {y}")
+          message: "Raise ValueError for no rows, no positives, or values other than 0 and 1."
+    solution: |
+      import numpy as np
+
+
+      def positive_weight(y_train: np.ndarray) -> float:
+          """pos_weight for BCEWithLogitsLoss: negatives / positives.
+
+          Args:
+              y_train: Training targets of 0 and 1.
+
+          Returns:
+              The ratio of negative to positive rows.
+
+          Raises:
+              ValueError: If there are no rows, no positives, or values other than 0 and 1.
+          """
+          if y_train.size == 0 or not np.isin(y_train, [0, 1]).all():
+              raise ValueError("targets must be a non-empty array of 0 and 1")
+          n_pos = int(y_train.sum())
+          if n_pos == 0:
+              raise ValueError("no positive rows in the training data")
+          return (len(y_train) - n_pos) / n_pos
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def positive_weight(y_train: np.ndarray) -> float:
+            """Positives over negatives."""
+            if y_train.size == 0 or not np.isin(y_train, [0, 1]).all():
+                raise ValueError("bad targets")
+            n_pos = int(y_train.sum())
+            if n_pos == 0:
+                raise ValueError("no positives")
+            return n_pos / (len(y_train) - n_pos)
+      - |
+        import numpy as np
+
+
+        def positive_weight(y_train: np.ndarray) -> float:
+            """Accepts any values."""
+            n_pos = int(y_train.sum())
+            if n_pos == 0:
+                raise ValueError("no positives")
+            return (len(y_train) - n_pos) / n_pos
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def positive_weight(y_train: np.ndarray) -> float:
+              """Positives over negatives."""
+              if y_train.size == 0 or not np.isin(y_train, [0, 1]).all():
+                  raise ValueError("bad targets")
+              n_pos = int(y_train.sum())
+              if n_pos == 0:
+                  raise ValueError("no positives")
+              return n_pos / (len(y_train) - n_pos)
+        triggers: ratio
+    primer: |
+      `np.isin(a, values)` tests each element for membership, and `.all()` is `True` only when every test passes:
+
+      ```python
+      np.isin(np.array([1, 5]), [1, 2]).all()    # False
+      ```
+    hints:
+      - "Validate with `np.isin(y_train, [0, 1]).all()` and `y_train.size`."
+      - "`n_pos = int(y_train.sum())`."
+      - "Return `(len(y_train) - n_pos) / n_pos`."
+    explanation: |
+      With 6 negatives and 2 positives, each positive row counts 3 times, so the two classes carry equal total weight. The checks stop a 2 in the targets from inflating the count.
+
+  - id: B23-L5-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      Validation loss sits near 0.69 for every epoch, and predicted probabilities never fall below 0.5. Tap the line responsible, then fix it.
+    code: |
+      from torch import nn
+
+
+      class Recommender(nn.Module):
+          def __init__(self, n_features):
+              super().__init__()
+              self.net = nn.Sequential(nn.Linear(n_features, 16), nn.ReLU(), nn.Linear(16, 1), nn.Sigmoid())
+
+          def forward(self, x):
+              return self.net(x).squeeze(1)
+
+
+      loss_fn = nn.BCEWithLogitsLoss()
+    bug_lines: [7]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: no_sigmoid
+          kind: forbids_pattern
+          pattern: "nn\\.Sigmoid\\(\\)"
+          message: "Remove nn.Sigmoid(): BCEWithLogitsLoss applies the sigmoid itself."
+        - id: keeps_loss
+          kind: requires_pattern
+          pattern: "nn\\.BCEWithLogitsLoss\\(\\)"
+          message: "Keep BCEWithLogitsLoss, the stable loss for logits."
+    fix_solution: |
+      from torch import nn
+
+
+      class Recommender(nn.Module):
+          def __init__(self, n_features):
+              super().__init__()
+              self.net = nn.Sequential(nn.Linear(n_features, 16), nn.ReLU(), nn.Linear(16, 1))
+
+          def forward(self, x):
+              return self.net(x).squeeze(1)
+
+
+      loss_fn = nn.BCEWithLogitsLoss()
+    wrong_answers:
+      - lines: [13]
+        feedback: "BCEWithLogitsLoss is the right loss. It expects logits, and the model does not give it logits."
+      - lines: [10]
+        feedback: "squeeze(1) matches the target's shape. That is right."
+    hints:
+      - "What does the loss do to its input first?"
+      - "What does the model's last layer do?"
+      - "One sigmoid too many."
+    explanation: |
+      The model applies a sigmoid, and the loss applies another. Outputs of sigmoid lie in (0, 1), so the second sigmoid maps them into (0.5, 0.73), and probabilities never drop below 0.5. Remove `nn.Sigmoid()` and apply `torch.sigmoid` only when reporting probabilities.
+
+recap:
+  - front: "Loss for a numeric target"
+    back: "nn.MSELoss() on predictions and targets of the same shape. Squeeze (n, 1) outputs first."
+  - front: "Loss for a 0 or 1 target"
+    back: "nn.BCEWithLogitsLoss() on raw logits and float targets. No nn.Sigmoid() in the model."
+  - front: "pos_weight for an imbalanced binary target"
+    back: "torch.tensor([n_neg / n_pos]), computed on training rows."
+  - front: "Stable binary loss formula"
+    back: "mean(max(z, 0) - z * y + log1p(exp(-|z|)))."
+
+claims:
+  - claim: "PyTorch 2.15: MSELoss on (3, 1) against (3,) returns 1.3333 with a size warning, 0.0 after squeeze(1); BCEWithLogitsLoss on logits [2, -1, 0] and targets [1, 0, 1] is 0.3778 and 0.5525 on their sigmoids; long targets raise 'result type Float can't be cast to the desired output type Long'; in float32 log(sigmoid(-100)) is -inf and the loss for that logit with target 1 is 100.0; Sequential with ReLU outputs and a final sigmoid feeding BCEWithLogitsLoss stays in (0.5, 0.73)."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), Python 3.12, and NumPy, November 2026."

@@ -49,7 +49,7 @@ Checked on 25 September 2026. Status key:
 | Hypothesis | 6.168.1 | dev environment only; not in Pyodide | Verified (local run) |
 | MLflow | 3.16.1 | scratch environment, Python 3.12 | Verified (local run). Not in the dev group: too large for CI, and not in Pyodide |
 | shap | 0.51.0 | dev environment | Verified (local run) |
-| PyTorch | 2.14.0, CPU | scratch environment, Python 3.12, PyPI wheel | Verified (local run). Not in the dev group or Pyodide |
+| PyTorch | 2.15.0 (B23 and `labs/torch`), 2.14.0 (B16) | scratch environment, Python 3.12, PyPI wheel run on CPU | Verified (local run). Not in the dev group or Pyodide. download.pytorch.org was blocked in the November 2026 build, so the PyPI wheel was used |
 | sentence-transformers | Not installed | none | Unverified. Its API in B15-L1 comes from the library documentation |
 | uv | 0.8.17 | build machine | Verified (local run) |
 | scikit-learn TfidfVectorizer | 1.9.1 (dev), 1.8.0 (parity) | `labs/rag` index | Verified (local run). Lab retrieval on 12 gold questions: recall at 3 1.000, MRR 0.903 at chunk size 80 |
@@ -189,6 +189,12 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 | Reciprocal rank fusion: score is the sum of 1 / (k + rank); k = 60 fixed in a pilot and not critical (Cormack, Clarke and Buettcher, SIGIR 2009). | Search only | Search results quoting the paper. plg.uwaterloo.ca blocked by the build network |
 | LLM judges show position, verbosity and self-enhancement bias (Zheng et al., NeurIPS 2023, arXiv 2306.05685). | Search only | Search results. arxiv.org blocked by the build network |
 | Modules B20 to B22 worked numbers: SHA-256 hex digest length 64; token F1 of "Weights are not capped at 5" against "Weights are capped at 5" is 0.909; Wilson 45/50 is 0.786 to 0.957. | Verified | Local, Python 3.11 and 3.13, statsmodels 0.14 |
+
+| PyTorch 2.15 tensors: `torch.tensor` keeps float64 from NumPy, and `nn.Linear` then raises "mat1 and mat2 must have the same dtype, but got Double and Float"; `from_numpy`, `view` and slices share memory, `torch.tensor` copies; `(3, 1) - (3,)` broadcasts to `(3, 3)`. | Verified | Local, torch 2.15.0, NumPy 2.5.4 |
+| PyTorch 2.15 autograd: d(w^2 + 2w)/dw at 3 is 8.0; non-scalar `backward` error; in-place update of a leaf outside `no_grad` error; `w = w - lr * w.grad` leaves a non-leaf with `.grad` None, then `TypeError`; autograd equals 2/n X^T(Xw - y). | Verified | Local, torch 2.15.0 |
+| PyTorch 2.15 optimisers and modules: SGD lr 0.1 on p^2 from 4 gives 2.048 after three steps; AdamW `weight_decay` default 0.01, SGD 0; `Linear(3, 2)` weight (2, 3); Sequential(10, 16, 1) has 193 parameters; a plain list registers 0 parameters; missing `super().__init__()` error; empty parameter list error. | Verified | Local, torch 2.15.0 |
+| PyTorch 2.15 losses and data: MSELoss on (3, 1) against (3,) is 1.3333 with a size warning; BCEWithLogitsLoss 0.3778 on logits [2, -1, 0], 0.5525 after an extra sigmoid; long targets error; float32 log(sigmoid(-100)) is -inf, the loss 100.0; DataLoader batches 4, 4, 2 and 4, 4 with `drop_last`. | Verified | Local, torch 2.15.0 |
+| `labs/torch` reference run (seed 0, 6,000 rows): network validation loss 0.2719, accuracy 0.8800, 45 epochs; logistic regression 0.3008 and 0.8725; same seed gives identical history. | Verified | Local, torch 2.15.0, scikit-learn 1.9.1 |
 
 ## Track D facts (checked September 2026)
 
