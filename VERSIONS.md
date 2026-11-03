@@ -49,7 +49,7 @@ Checked on 25 September 2026. Status key:
 | Hypothesis | 6.168.1 | dev environment only; not in Pyodide | Verified (local run) |
 | MLflow | 3.16.1 | scratch environment, Python 3.12 | Verified (local run). Not in the dev group: too large for CI, and not in Pyodide |
 | shap | 0.51.0 | dev environment | Verified (local run) |
-| PyTorch | 2.15.0 (B23 and `labs/torch`), 2.14.0 (B16) | scratch environment, Python 3.12, PyPI wheel run on CPU | Verified (local run). Not in the dev group or Pyodide. download.pytorch.org was blocked in the November 2026 build, so the PyPI wheel was used |
+| PyTorch | 2.15.0 (B23 to B25 and their labs), 2.14.0 (B16) | scratch environment, Python 3.12, PyPI wheel run on CPU | Verified (local run). Not in the dev group or Pyodide. download.pytorch.org was blocked in the November 2026 build, so the PyPI wheel was used |
 | torchvision | 0.29.2 | scratch environment, Python 3.12, PyPI wheel run on CPU | Verified (local run) for module B24. Pretrained weights not downloaded: download.pytorch.org was blocked |
 | sentence-transformers | Not installed | none | Unverified. Its API in B15-L1 comes from the library documentation |
 | uv | 0.8.17 | build machine | Verified (local run) |
@@ -203,6 +203,13 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 | torchvision 0.29 ResNet-18 with `weights=None`: 11,689,512 parameters, `fc` Linear(512, 1000); freezing plus a new 3-class head leaves 1,539 trainable; `ResNet18_Weights.DEFAULT` is IMAGENET1K_V1 with resize 256, crop 224 and ImageNet mean and std; frozen batch norm updates running statistics in train mode only; an optimiser built before the new head never updates it. | Verified | Local, torchvision 0.29.2, weights=None |
 | Loading the pretrained ResNet-18 weights from download.pytorch.org. | Unverified | Host blocked in the build session. B24-L5 marks this claim unverified |
 | `labs/cnn` reference run (seed 0, 360 validation digits): dense 0.0985 loss and 0.9778 accuracy, CNN 0.0374 and 0.9917; with one-pixel shift augmentation, dense 0.1906 and 0.9389, CNN 0.0495 and 0.9917. | Verified | Local, torch 2.15.0, scikit-learn 1.9.1 |
+
+| PyTorch 2.15 embeddings and recurrence: `nn.Embedding(10, 4, padding_idx=0)` keeps row 0 at zero with no gradient, lookup equals one-hot times the table, float IDs and ID 10 raise; `nn.RNN(4, 8, batch_first=True)` gives (2, 5, 8) and (1, 2, 8) with 112 parameters, `nn.LSTM` 448; without `batch_first` the same input runs and returns (2, 5, 8); a NumPy tanh loop matches `nn.RNN` within 1e-6. | Verified | Local, torch 2.15.0 |
+| PyTorch 2.15 attention: `scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, enable_gqa=False)` matches NumPy softmax(QK^T / sqrt(d))V within 1e-5; naive softmax of [1000, 1001, 1002] is nan, stable [0.09, 0.2447, 0.6652]; dot-product standard deviation 1.98, 7.98 and 22.46 at d = 4, 64 and 512. | Verified | Local, torch 2.15.0, signature from the docstring |
+| PyTorch 2.15 masks: boolean lower-triangle `attn_mask` equals `is_causal=True`, True means take part; `nn.MultiheadAttention` `key_padding_mask` True means ignore, weight 0.0; a fully masked row gives zeros from `scaled_dot_product_attention` on CPU and nan in NumPy. | Verified | Local, torch 2.15.0 |
+| PyTorch 2.15 multi-head attention and blocks: `nn.MultiheadAttention(8, h)` has 288 parameters for h = 2 and 4, 1,050,624 for d = 512; indivisible heads raise "embed_dim must be divisible by num_heads"; without positions a permuted input permutes the output; `nn.LayerNorm(4)` on [1, 2, 3, 4] gives [-1.3416, -0.4472, 0.4472, 1.3416]; `TransformerEncoderLayer` defaults dim_feedforward 2048, dropout 0.1, relu, batch_first False, norm_first False, layer_norm_eps 1e-5, 68,752 parameters at d_model 16. | Verified | Local, torch 2.15.0 |
+| Sinusoidal positions PE(pos, 2i) = sin(pos / 10000^(2i/d)), PE(pos, 2i+1) = cos(...) come from Vaswani and others, Attention Is All You Need (2017). | Search only | Search results citing arXiv 1706.03762. arxiv.org blocked by the build network. Values for d = 4 computed locally |
+| `labs/transformer` reference run (seed 0, 4,000 training and 1,000 validation sequences, 25,826 parameters): validation accuracy 0.9990 with positions, 0.5390 without; final training loss 0.000 and 0.641. | Verified | Local, torch 2.15.0, NumPy 2.5.4 |
 
 ## Track D facts (checked September 2026)
 

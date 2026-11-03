@@ -1,0 +1,480 @@
+id: B25-L4
+title: Masks for padding and for the future
+
+concept: |
+  Two kinds of position must stay out of attention.
+
+  **Padding.** Padded positions (lesson B25-L1) carry no text. Set their scores to minus infinity before softmax, so their weights become exactly 0 and every query ignores them.
+
+  **The future.** A model that predicts the next token must not read it. A **causal mask** lets position `i` attend to positions 0 to `i` only: keep the lower triangle, `np.tril(np.ones((L, L), dtype=bool))`. Row 0 then puts all its weight on itself.
+
+  ```python
+  scores = np.where(allowed, scores, -np.inf)    # allowed: True where attention may look
+  ```
+
+  **Two opposite conventions in PyTorch 2.15:**
+
+  - `F.scaled_dot_product_attention(q, k, v, attn_mask=allowed)` takes a boolean mask where `True` means *take part*. `is_causal=True` builds the causal mask for you, and gave the same outputs as the lower-triangle mask.
+  - `nn.MultiheadAttention(...)(q, k, v, key_padding_mask=is_pad)` takes a mask where `True` means *ignore this key*. In a check, padded keys received weight 0.0.
+
+  Passing one function's mask to the other inverts it, with no error. Name each mask by its meaning, `allowed` or `is_pad`, and flip it with `~` where needed.
+
+  **Test it.** A causal model's output at position `t` must not change when a later token changes. In a check, editing the last position's value left every earlier output unchanged. Padding passes the same test: adding pads must not change the outputs at real positions.
+
+  **Every query needs an allowed key.** In NumPy, a row with every key masked gives `nan`. `scaled_dot_product_attention` on a CPU returned zeros for such rows, a quieter failure. Pad on the right and keep each position allowed to see itself.
+
+why_it_matters: |
+  A model that drafted the next word of a survey answer reached a near-perfect validation loss within an hour, then produced nonsense when used. Its attention had no causal mask, so during training every position could read the word it was asked to predict. The test "change a later token, check earlier outputs stay the same" would have failed on the first run.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      pad = ids == 0
+      out = F.scaled_dot_product_attention(q, k, v, attn_mask=pad)
+    annotations:
+      - find: "out = F.scaled_dot_product_attention(q, k, v, attn_mask=pad)"
+        note: "attn_mask True means take part, so this attends only to padding and ignores the text."
+  strong:
+    code: |
+      import numpy as np
+
+
+      def causal_padding_mask(ids: np.ndarray, pad_id: int = 0) -> np.ndarray:
+          """Allowed attention for one right-padded sequence: past or present, never padding.
+
+          Args:
+              ids: Token IDs, shape (length,), padding only at the end.
+              pad_id: The padding ID.
+
+          Returns:
+              Boolean (length, length): True where query i may attend to key j.
+
+          Raises:
+              ValueError: If ids is not 1-D or starts with padding.
+          """
+          if ids.ndim != 1 or len(ids) == 0 or ids[0] == pad_id:
+              raise ValueError("need a non-empty 1-D sequence that starts with a real token")
+          causal = np.tril(np.ones((len(ids), len(ids)), dtype=bool))
+          return causal & (ids != pad_id)[None, :]
+
+
+      def masked_attention(Q: np.ndarray, K: np.ndarray, V: np.ndarray, allowed: np.ndarray) -> np.ndarray:
+          """Attention where allowed is False gets zero weight."""
+          scores = np.where(allowed, Q @ K.T / np.sqrt(Q.shape[-1]), -np.inf)
+          scores = scores - scores.max(axis=-1, keepdims=True)
+          weights = np.exp(scores)
+          return (weights / weights.sum(axis=-1, keepdims=True)) @ V
+    annotations:
+      - find: "if ids.ndim != 1 or len(ids) == 0 or ids[0] == pad_id:"
+        note: "With a real first token, every query has at least one allowed key."
+      - find: "causal = np.tril(np.ones((len(ids), len(ids)), dtype=bool))"
+        note: "Lower triangle: each position sees itself and the past."
+      - find: "return causal & (ids != pad_id)[None, :]"
+        note: "Combine with the padding mask, applied to keys (columns)."
+      - find: "scores = np.where(allowed, Q @ K.T / np.sqrt(Q.shape[-1]), -np.inf)"
+        note: "Masked scores become minus infinity, so their weights are exactly 0."
+  takeaway: |
+    Mask padding and the future by setting their scores to minus infinity. Know which convention each PyTorch function uses, and test that later tokens and padding cannot change earlier outputs.
+
+exercises:
+  - id: B25-L4-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A model is trained to predict each next word of an answer. Which mask does its attention need?
+    options:
+      - {id: a, text: "A causal mask, so position i sees positions 0 to i only, plus masking of padding"}
+      - {id: b, text: "Only a padding mask"}
+      - {id: c, text: "No mask: attention learns to ignore the future"}
+      - {id: d, text: "A mask that hides the current word"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Without the causal mask, each position can read the word it must predict, and the model learns to copy it."}
+      - {id: r2, text: "Masks make training faster."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Padding is not the only leak. Each position can still read later words."
+      - answer: c
+        feedback: "Copying the next word is the easiest way to minimise the loss. Nothing stops it."
+      - answer: d
+        feedback: "The current word is input. The next word is the target, and it lies in the future."
+      - answer: a|r2
+        feedback: "Right mask, wrong reason. It stops the model reading its own answers."
+    hints:
+      - "What is the target for position i?"
+      - "Where in the sequence is that target?"
+      - "Hide the future."
+    explanation: |
+      The next word sits at position i + 1. A causal mask keeps every position from attending to it.
+
+  - id: B25-L4-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      Three positions with equal scores and a causal mask. What does this print?
+    code: |
+      import numpy as np
+
+      scores = np.zeros((3, 3))
+      allowed = np.tril(np.ones((3, 3), dtype=bool))
+      masked = np.where(allowed, scores, -np.inf)
+      e = np.exp(masked - masked.max(axis=-1, keepdims=True))
+      print((e / e.sum(axis=-1, keepdims=True)).round(4).tolist())
+    answer: |
+      [[1.0, 0.0, 0.0], [0.5, 0.5, 0.0], [0.3333, 0.3333, 0.3333]]
+    wrong_answers:
+      - answer: "[[0.3333, 0.3333, 0.3333], [0.3333, 0.3333, 0.3333], [0.3333, 0.3333, 0.3333]]"
+        feedback: "The mask sets future scores to minus infinity, so their weights are 0."
+      - answer: "[[0.3333, 0.3333, 0.3333], [0.0, 0.5, 0.5], [0.0, 0.0, 1.0]]"
+        feedback: "tril keeps the lower triangle: row i allows columns 0 to i."
+    hints:
+      - "Which entries does tril keep?"
+      - "Row 0 allows one key, row 1 two, row 2 three."
+      - "Equal scores share the weight evenly."
+    explanation: |
+      Each row spreads its weight evenly over the keys it may see: one, then two, then three.
+
+  - id: B25-L4-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Build a causal mask and apply it to the scores.
+    template: |
+      allowed = np.[[g1]](np.ones((L, L), dtype=bool))
+      scores = np.where(allowed, scores, -np.[[g2]])
+    gaps:
+      g1: {accepted: [tril]}
+      g2: {accepted: [inf]}
+    wrong_answers:
+      - answer: {g1: triu, g2: inf}
+        feedback: "triu keeps the upper triangle, which lets each position see the future and not the past."
+    hints:
+      - "Lower or upper triangle?"
+      - "What score makes exp return exactly 0?"
+      - "`tril` and `inf`."
+    explanation: |
+      `np.tril` keeps positions 0 to i in row i, and minus infinity turns masked scores into weights of 0.
+
+  - id: B25-L4-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `masked_attention(Q, K, V, allowed) -> np.ndarray`.
+
+      - Scores are `Q @ K.T / sqrt(d)`. Where `allowed` is `False`, set the score to `-np.inf`.
+      - Apply a stable softmax across keys and return `weights @ V`.
+      - Raise `ValueError` when `allowed` is not `(n_queries, n_keys)`, or when a row has no allowed key.
+    starter: |
+      import numpy as np
+
+
+      def masked_attention(Q, K, V, allowed):
+          scores = Q @ K.T / np.sqrt(Q.shape[-1])
+          e = np.exp(scores - scores.max(axis=-1, keepdims=True))
+          return (e / e.sum(axis=-1, keepdims=True)) @ V
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+
+        _rng = np.random.default_rng(0)
+        _Q, _K, _V = _rng.normal(size=(4, 8)), _rng.normal(size=(4, 8)), _rng.normal(size=(4, 3))
+        _CAUSAL = np.tril(np.ones((4, 4), dtype=bool))
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: masked_attention
+          typed: true
+          docstring: true
+          message: "Give masked_attention type hints and a docstring."
+      tests:
+        - id: causal_no_leak
+          code: |
+            out = masked_attention(_Q, _K, _V, _CAUSAL)
+            V2 = _V.copy()
+            V2[3] += 100.0
+            out2 = masked_attention(_Q, _K, V2, _CAUSAL)
+            assert np.allclose(out[:3], out2[:3]), "changing the last value changed earlier outputs"
+            assert np.allclose(out[0], _V[0]), out[0]
+          message: "Masked keys must get weight 0: earlier outputs cannot depend on later values."
+        - id: all_allowed
+          code: |
+            full = np.ones((4, 4), dtype=bool)
+            s = _Q @ _K.T / np.sqrt(8)
+            w = np.exp(s - s.max(axis=1, keepdims=True))
+            w = w / w.sum(axis=1, keepdims=True)
+            assert np.allclose(masked_attention(_Q, _K, _V, full), w @ _V)
+          message: "With every key allowed, return plain scaled dot-product attention."
+        - id: guards
+          code: |
+            bad = [np.ones((3, 4), dtype=bool), np.vstack([np.zeros((1, 4), dtype=bool), np.ones((3, 4), dtype=bool)])]
+            for allowed in bad:
+                try:
+                    masked_attention(_Q, _K, _V, allowed)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for mask\n{allowed}")
+          message: "Raise ValueError for a mask of the wrong shape or a row with no allowed key."
+    solution: |
+      import numpy as np
+
+
+      def masked_attention(Q: np.ndarray, K: np.ndarray, V: np.ndarray, allowed: np.ndarray) -> np.ndarray:
+          """Scaled dot-product attention where allowed is False gets zero weight.
+
+          Args:
+              Q: Queries, shape (n_queries, d).
+              K: Keys, shape (n_keys, d).
+              V: Values, shape (n_keys, d_v).
+              allowed: Boolean, shape (n_queries, n_keys). True where attention may look.
+
+          Returns:
+              Outputs, shape (n_queries, d_v).
+
+          Raises:
+              ValueError: If the mask has the wrong shape or a row allows no key.
+          """
+          if allowed.shape != (len(Q), len(K)):
+              raise ValueError(f"mask {allowed.shape} does not match ({len(Q)}, {len(K)})")
+          if not allowed.any(axis=1).all():
+              raise ValueError("every query needs at least one allowed key")
+          scores = np.where(allowed, Q @ K.T / np.sqrt(Q.shape[-1]), -np.inf)
+          scores = scores - scores.max(axis=-1, keepdims=True)
+          weights = np.exp(scores)
+          return (weights / weights.sum(axis=-1, keepdims=True)) @ V
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def masked_attention(Q: np.ndarray, K: np.ndarray, V: np.ndarray, allowed: np.ndarray) -> np.ndarray:
+            """Masks with 0 instead of minus infinity."""
+            if allowed.shape != (len(Q), len(K)):
+                raise ValueError("bad mask shape")
+            if not allowed.any(axis=1).all():
+                raise ValueError("empty row")
+            scores = np.where(allowed, Q @ K.T / np.sqrt(Q.shape[-1]), 0.0)
+            scores = scores - scores.max(axis=-1, keepdims=True)
+            weights = np.exp(scores)
+            return (weights / weights.sum(axis=-1, keepdims=True)) @ V
+      - |
+        import numpy as np
+
+
+        def masked_attention(Q: np.ndarray, K: np.ndarray, V: np.ndarray, allowed: np.ndarray) -> np.ndarray:
+            """Treats True as masked: the inverted convention."""
+            if allowed.shape != (len(Q), len(K)):
+                raise ValueError("bad mask shape")
+            scores = np.where(~allowed, Q @ K.T / np.sqrt(Q.shape[-1]), -np.inf)
+            with np.errstate(invalid="ignore"):
+                scores = scores - scores.max(axis=-1, keepdims=True)
+                weights = np.exp(scores)
+                return (weights / weights.sum(axis=-1, keepdims=True)) @ V
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def masked_attention(Q: np.ndarray, K: np.ndarray, V: np.ndarray, allowed: np.ndarray) -> np.ndarray:
+              """Masks with 0 instead of minus infinity."""
+              if allowed.shape != (len(Q), len(K)):
+                  raise ValueError("bad mask shape")
+              if not allowed.any(axis=1).all():
+                  raise ValueError("empty row")
+              scores = np.where(allowed, Q @ K.T / np.sqrt(Q.shape[-1]), 0.0)
+              scores = scores - scores.max(axis=-1, keepdims=True)
+              weights = np.exp(scores)
+              return (weights / weights.sum(axis=-1, keepdims=True)) @ V
+        triggers: causal_no_leak
+    primer: |
+      `arr.any(axis=1)` is `True` for each row with at least one `True`, and `.all()` then checks every row:
+
+      ```python
+      m = np.array([[True, False], [False, False]])
+      m.any(axis=1)          # array([ True, False])
+      m.any(axis=1).all()    # False
+      ```
+    hints:
+      - "Check the mask's shape and `allowed.any(axis=1).all()`."
+      - "`np.where(allowed, scores, -np.inf)` before the softmax."
+      - "Subtract the row maximum, exponentiate, normalise, multiply by V."
+    explanation: |
+      A score of 0 is an ordinary score, not a mask: it still gets weight. Minus infinity gives exp of 0 exactly, so masked keys contribute nothing, and the guards rule out rows that would become nan.
+
+  - id: B25-L4-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `causal_padding_mask(ids, pad_id=0) -> np.ndarray` for one right-padded sequence of token IDs.
+
+      - Return a boolean `(L, L)` array: `True` where query `i` may attend to key `j`, that is `j <= i` and `ids[j]` is not padding.
+      - Raise `ValueError` when `ids` is not 1-D, is empty, or starts with `pad_id`.
+    starter: |
+      import numpy as np
+
+
+      def causal_padding_mask(ids, pad_id=0):
+          return np.ones((len(ids), len(ids)), dtype=bool)
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: causal_padding_mask
+          typed: true
+          docstring: true
+          message: "Give causal_padding_mask type hints and a docstring."
+      tests:
+        - id: mask
+          code: |
+            m = causal_padding_mask(np.array([5, 7, 0, 0]))
+            expected = np.array([[1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 0, 0], [1, 1, 0, 0]], dtype=bool)
+            assert m.dtype == bool and np.array_equal(m, expected), m.astype(int)
+          message: "Allow j <= i, and never a padding key."
+        - id: no_padding
+          code: |
+            m = causal_padding_mask(np.array([3, 4, 9]), pad_id=0)
+            assert np.array_equal(m, np.tril(np.ones((3, 3), dtype=bool)))
+            m2 = causal_padding_mask(np.array([3, 4, 9]), pad_id=9)
+            assert not m2[:, 2].any(), m2.astype(int)
+          message: "Without padding it is the lower triangle. Respect the pad_id argument."
+        - id: guards
+          code: |
+            for ids in [np.array([0, 3]), np.array([]), np.array([[1, 2]])]:
+                try:
+                    causal_padding_mask(ids)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {ids}")
+          message: "Raise ValueError for a sequence that is not 1-D, is empty, or starts with padding."
+    solution: |
+      import numpy as np
+
+
+      def causal_padding_mask(ids: np.ndarray, pad_id: int = 0) -> np.ndarray:
+          """Allowed attention for one right-padded sequence: past or present, never padding.
+
+          Args:
+              ids: Token IDs, shape (length,), padding only at the end.
+              pad_id: The padding ID.
+
+          Returns:
+              Boolean (length, length): True where query i may attend to key j.
+
+          Raises:
+              ValueError: If ids is not 1-D, is empty, or starts with padding.
+          """
+          if ids.ndim != 1 or len(ids) == 0 or ids[0] == pad_id:
+              raise ValueError("need a non-empty 1-D sequence that starts with a real token")
+          causal = np.tril(np.ones((len(ids), len(ids)), dtype=bool))
+          return causal & (ids != pad_id)[None, :]
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def causal_padding_mask(ids: np.ndarray, pad_id: int = 0) -> np.ndarray:
+            """Masks padding queries (rows) instead of padding keys (columns)."""
+            if ids.ndim != 1 or len(ids) == 0 or ids[0] == pad_id:
+                raise ValueError("bad sequence")
+            causal = np.tril(np.ones((len(ids), len(ids)), dtype=bool))
+            return causal & (ids != pad_id)[:, None]
+      - |
+        import numpy as np
+
+
+        def causal_padding_mask(ids: np.ndarray, pad_id: int = 0) -> np.ndarray:
+            """Upper triangle: sees the future."""
+            if ids.ndim != 1 or len(ids) == 0 or ids[0] == pad_id:
+                raise ValueError("bad sequence")
+            causal = np.triu(np.ones((len(ids), len(ids)), dtype=bool))
+            return causal & (ids != pad_id)[None, :]
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def causal_padding_mask(ids: np.ndarray, pad_id: int = 0) -> np.ndarray:
+              """Masks padding queries (rows) instead of padding keys (columns)."""
+              if ids.ndim != 1 or len(ids) == 0 or ids[0] == pad_id:
+                  raise ValueError("bad sequence")
+              causal = np.tril(np.ones((len(ids), len(ids)), dtype=bool))
+              return causal & (ids != pad_id)[:, None]
+        triggers: mask
+    hints:
+      - "Validate first: 1-D, non-empty, first token not padding."
+      - "`np.tril(np.ones((L, L), dtype=bool))` for the causal part."
+      - "AND it with `(ids != pad_id)[None, :]`, which spreads across the columns."
+    explanation: |
+      Columns are keys, so the padding test is shaped `(1, L)` and spreads down every row. Padding rows still see the real tokens before them, so no row is empty.
+
+  - id: B25-L4-E6
+    type: spot_bug
+    difficulty: 4
+    prompt: |
+      Predictions ignore the words of each answer and depend only on how much padding it has. Tap the line responsible, then fix it.
+    language: python
+    code: |
+      from torch import nn
+
+      attn = nn.MultiheadAttention(embed_dim=64, num_heads=4, batch_first=True)
+
+
+      def encode(x, ids):
+          real = ids != 0
+          out, _ = attn(x, x, x, key_padding_mask=real)
+          return out
+    bug_lines: [8]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: ignore_padding
+          kind: requires_pattern
+          pattern: "key_padding_mask\\s*=\\s*(~\\s*real|ids\\s*==\\s*0)"
+          message: "key_padding_mask marks keys to ignore: pass the padding positions, ~real or ids == 0."
+    fix_solution: |
+      from torch import nn
+
+      attn = nn.MultiheadAttention(embed_dim=64, num_heads=4, batch_first=True)
+
+
+      def encode(x, ids):
+          real = ids != 0
+          out, _ = attn(x, x, x, key_padding_mask=~real)
+          return out
+    wrong_answers:
+      - lines: [7]
+        feedback: "real correctly marks the text positions. The question is what key_padding_mask expects."
+      - lines: [3]
+        feedback: "batch_first=True is right for (batch, length, features) inputs."
+    hints:
+      - "In nn.MultiheadAttention, what does True in key_padding_mask mean?"
+      - "Which positions does real mark True?"
+      - "Pass ~real."
+    explanation: |
+      `key_padding_mask` ignores keys marked `True`. Passing `real` ignores every word and attends only to padding. Pass `~real`, or `ids == 0`.
+
+recap:
+  - front: "Masking in attention"
+    back: "Set masked scores to minus infinity before softmax, so their weights are exactly 0."
+  - front: "Causal mask"
+    back: "np.tril(np.ones((L, L), dtype=bool)): position i sees 0 to i. F.scaled_dot_product_attention(..., is_causal=True) builds it."
+  - front: "PyTorch 2.15 mask conventions"
+    back: "scaled_dot_product_attention attn_mask: True = take part. MultiheadAttention key_padding_mask: True = ignore."
+  - front: "Mask tests"
+    back: "Changing a later token, or adding padding, must not change earlier outputs or outputs at real positions."
+
+claims:
+  - claim: "PyTorch 2.15: scaled_dot_product_attention with a boolean lower-triangle attn_mask equals is_causal=True; True means take part; editing the last position leaves earlier causal outputs unchanged; nn.MultiheadAttention gives padded keys weight 0.0 when key_padding_mask is True there; a fully masked row returned zeros from scaled_dot_product_attention on CPU, and nan in a NumPy softmax."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU) and NumPy, November 2026."

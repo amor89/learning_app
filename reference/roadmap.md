@@ -19,5 +19,5 @@ Running throughout:
 
 Tagging rule for the learning app:
 - Track A and Track C modules support months 16-18 (production and MLOps) and current work.
-- Track B modules B1 to B14 are prerequisites for all months. B15 maps to months 7-9. B23 (PyTorch foundations, with the PyTorch lab) and B16 map to months 1-3. B24 (convolutional networks, with the CNN lab) maps to months 4-6. B20 to B22 (prompting, RAG and LLM evaluation, with the RAG lab) map to months 13-15.
+- Track B modules B1 to B14 are prerequisites for all months. B15 maps to months 7-9. B23 (PyTorch foundations, with the PyTorch lab) and B16 map to months 1-3. B24 (convolutional networks, with the CNN lab) maps to months 4-6. B25 (attention and transformers from scratch, with the transformer lab) maps to months 7-9. B20 to B22 (prompting, RAG and LLM evaluation, with the RAG lab) map to months 13-15.
 - Track D applies to every month.

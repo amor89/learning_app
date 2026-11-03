@@ -35,6 +35,7 @@ modules:
   - {id: B23, title: PyTorch foundations, tags: [M1-3], summary: "Tensors, autograd, gradient descent, nn.Module, loss functions and data loading, built up from NumPy."}
   - {id: B16, title: PyTorch hygiene, tags: [M1-3], summary: "Device handling, training loops and reproducibility."}
   - {id: B24, title: Convolutional networks, tags: [M4-6], summary: "Convolution from scratch, shapes, pooling, image tensors and augmentation, transfer learning and image-classifier evaluation."}
+  - {id: B25, title: Attention and transformers from scratch, tags: [M7-9], summary: "Tokens and embeddings, sequence models, attention, masks, multi-head attention, positions and the transformer block."}
   - {id: B17, title: Testing and performance, tags: [prereq], summary: "Unit tests, Hypothesis, profiling and memory use."}
   - {id: B19, title: Testing in depth, tags: [prereq], summary: "pytest from the inside: fixtures, parametrize, testing pandas, statistics and ML, mocks, coverage and CI."}
   - {id: B18, title: Documentation and communication, tags: [prereq, all-months], summary: "Docstrings, READMEs, model cards and decision logs."}

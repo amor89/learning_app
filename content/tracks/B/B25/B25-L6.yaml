@@ -1,0 +1,446 @@
+id: B25-L6
+title: The transformer block, residuals, layer norm and feed-forward
+
+concept: |
+  A transformer stacks identical **blocks**. Each block has two sub-layers, and each sub-layer sits inside a residual connection with a layer norm. The pre-norm form (PyTorch 2.15):
+
+  ```python
+  x = x + attention(norm_1(x))        # tokens exchange information
+  x = x + feed_forward(norm_2(x))     # each token is transformed on its own
+  ```
+
+  - **Residual connections**, the `x + ...`, let each sub-layer add a correction to its input, and let gradients pass straight through deep stacks.
+  - **Layer norm** rescales each token's vector to mean 0 and standard deviation 1 across its features, then applies a learned scale and shift. `nn.LayerNorm(4)` turns `[1, 2, 3, 4]` into `[-1.3416, -0.4472, 0.4472, 1.3416]`. It works per token, not across the batch, so it behaves the same in training and at prediction time.
+  - **Feed-forward**: `nn.Linear(d, 4 * d)`, an activation, then `nn.Linear(4 * d, d)`, applied to each position separately.
+
+  `nn.TransformerEncoderLayer(d_model, nhead)` builds one block. Check three defaults in PyTorch 2.15:
+
+  - `batch_first=False`: a `(batch, length, d)` input is read as `(length, batch, d)`, and the output has the same shape, so nothing fails (lesson B25-L2).
+  - `norm_first=False`: the original post-norm order. Pass `norm_first=True` for the pre-norm form above.
+  - `dim_feedforward=2048`: with `d_model=16` the default layer holds 68,752 parameters, nearly all in a feed-forward layer 128 times wider than its input. With `dim_feedforward=64` it holds 3,280.
+
+  To classify a sequence, pool the final token vectors, for example the mean over real positions only, then apply a linear head. Including padding in the mean makes a short answer's prediction depend on how much padding it has.
+
+why_it_matters: |
+  A team's first transformer for open-ended answers trained slowly on a laptop and overfitted a few thousand answers. Each of its four layers had kept the default feed-forward width of 2,048 for a model width of 32, so almost all its weights sat in layers far wider than the data needed. Setting `dim_feedforward` to four times the model width cut the parameters by more than ten times, and validation loss improved.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      layer = nn.TransformerEncoderLayer(d_model=32, nhead=4)
+      encoder = nn.TransformerEncoder(layer, num_layers=4)
+      pooled = encoder(x).mean(dim=1)
+    annotations:
+      - find: "layer = nn.TransformerEncoderLayer(d_model=32, nhead=4)"
+        note: "batch_first=False and dim_feedforward=2048: the batch is read as the sequence, and the layer is mostly feed-forward."
+      - find: "pooled = encoder(x).mean(dim=1)"
+        note: "No padding mask, and the mean includes padding positions."
+  strong:
+    code: |
+      import torch
+      from torch import nn
+
+
+      class Block(nn.Module):
+          """Pre-norm transformer block: attention, then feed-forward, each with a residual."""
+
+          def __init__(self, d: int, heads: int) -> None:
+              super().__init__()
+              self.norm_1 = nn.LayerNorm(d)
+              self.attn = nn.MultiheadAttention(d, heads, batch_first=True)
+              self.norm_2 = nn.LayerNorm(d)
+              self.ff = nn.Sequential(nn.Linear(d, 4 * d), nn.ReLU(), nn.Linear(4 * d, d))
+
+          def forward(self, x: torch.Tensor, is_pad: torch.Tensor) -> torch.Tensor:
+              h = self.norm_1(x)
+              x = x + self.attn(h, h, h, key_padding_mask=is_pad)[0]
+              return x + self.ff(self.norm_2(x))
+
+
+      def mean_over_real(h: torch.Tensor, is_pad: torch.Tensor) -> torch.Tensor:
+          """Mean of token vectors over non-padding positions, shape (batch, d)."""
+          keep = (~is_pad).unsqueeze(-1).float()
+          return (h * keep).sum(dim=1) / keep.sum(dim=1).clamp(min=1.0)
+    annotations:
+      - find: "x = x + self.attn(h, h, h, key_padding_mask=is_pad)[0]"
+        note: "Residual around attention, on the normalised input, with padding ignored."
+      - find: "return x + self.ff(self.norm_2(x))"
+        note: "Residual around the feed-forward layer."
+      - find: "self.ff = nn.Sequential(nn.Linear(d, 4 * d), nn.ReLU(), nn.Linear(4 * d, d))"
+        note: "Four times the model width, not a fixed 2,048."
+      - find: "return (h * keep).sum(dim=1) / keep.sum(dim=1).clamp(min=1.0)"
+        note: "Averages real tokens only. clamp guards against a division by zero."
+  takeaway: |
+    A block is attention then feed-forward, each with layer norm and a residual. Set batch_first, norm_first and dim_feedforward yourself, and pool over real tokens only.
+
+exercises:
+  - id: B25-L6-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      What do the residual connections, `x = x + sublayer(norm(x))`, give a deep transformer?
+    options:
+      - {id: a, text: "Each sub-layer only adds a correction, and gradients reach early layers through the plain x path"}
+      - {id: b, text: "They double the number of parameters"}
+      - {id: c, text: "They replace the need for attention"}
+      - {id: d, text: "They make each token's vector sum to 1"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The identity path passes the input and its gradient through unchanged, so a stack of many blocks still trains."}
+      - {id: r2, text: "Addition is cheaper than multiplication."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "An addition has no parameters."
+      - answer: c
+        feedback: "The residual wraps attention. Attention still does the mixing between tokens."
+      - answer: d
+        feedback: "That describes softmax weights, not residuals."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. It is about the clean path for inputs and gradients."
+    hints:
+      - "What does x + f(x) equal when f outputs zeros?"
+      - "How does a gradient pass through an addition?"
+      - "Corrections, and a clean gradient path."
+    explanation: |
+      With `x + f(x)`, a block starts close to the identity and learns a correction, and the gradient flows back through the `x` path without shrinking.
+
+  - id: B25-L6-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.15)
+    code: |
+      import torch
+      from torch import nn
+
+      out = nn.LayerNorm(4)(torch.tensor([[1.0, 2.0, 3.0, 4.0]]))
+      print([round(v, 4) for v in out[0].tolist()])
+    answer: |
+      [-1.3416, -0.4472, 0.4472, 1.3416]
+    wrong_answers:
+      - answer: "[0.1, 0.2, 0.3, 0.4]"
+        feedback: "Layer norm does not divide by the sum. It subtracts the mean and divides by the standard deviation."
+      - answer: "[-1.1619, -0.3873, 0.3873, 1.1619]"
+        feedback: "Those use the sample standard deviation (n - 1). LayerNorm divides by the population standard deviation (n)."
+    hints:
+      - "Mean 2.5."
+      - "Population variance 1.25, standard deviation 1.118."
+      - "(1 - 2.5) / 1.118."
+    explanation: |
+      Subtract the mean, 2.5, and divide by the standard deviation over the four values, 1.118. A new layer's learned scale is 1 and shift 0, so the result is unchanged by them.
+
+  - id: B25-L6-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Build a pre-norm encoder block that reads `(batch, length, features)`, with a feed-forward width of four times `d_model`.
+    template: |
+      layer = nn.TransformerEncoderLayer(64, 4, dim_feedforward=256, [[g1]]=True, [[g2]]=True)
+    gaps:
+      g1: {accepted: [batch_first, norm_first]}
+      g2: {accepted: [norm_first, batch_first]}
+    wrong_answers:
+      - answer: {g1: batch_first, g2: batch_first}
+        feedback: "Both settings are needed: batch_first for the layout and norm_first for the pre-norm order."
+    hints:
+      - "One argument fixes the layout."
+      - "One argument moves the layer norm before each sub-layer."
+      - "`batch_first` and `norm_first`."
+    explanation: |
+      `batch_first=True` reads `(batch, length, d)`, and `norm_first=True` gives the pre-norm block.
+
+  - id: B25-L6-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `layer_norm(x, eps=1e-5) -> np.ndarray`: normalise each vector along the last axis, as `nn.LayerNorm` does before its learned scale and shift.
+
+      - Return `(x - mean) / sqrt(var + eps)`, with the mean and the population variance (`np.var`) taken along the last axis.
+    primer: |
+      `arr.var(axis=-1)` returns the variance along the last axis, dividing by the count `n`: the population variance. `ddof=1` divides by `n - 1` instead:
+
+      ```python
+      np.array([1.0, 3.0]).var()          # 1.0
+      np.array([1.0, 3.0]).var(ddof=1)    # 2.0
+      ```
+    starter: |
+      import numpy as np
+
+
+      def layer_norm(x, eps=1e-5):
+          return (x - x.mean()) / x.std()
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: layer_norm
+          typed: true
+          docstring: true
+          message: "Give layer_norm type hints and a docstring."
+      tests:
+        - id: per_token
+          code: |
+            x = np.array([[1.0, 2.0, 3.0, 4.0], [2.0, 2.0, 2.0, 2.0]])
+            out = layer_norm(x)
+            assert np.allclose(out, [[-1.3416, -0.4472, 0.4472, 1.3416], [0.0, 0.0, 0.0, 0.0]], atol=1e-4), out.round(4)
+          message: "Normalise each row along the last axis. A constant row becomes zeros, thanks to eps."
+        - id: batch_independent
+          code: |
+            x = np.random.default_rng(0).normal(size=(2, 3, 8)) * 5 + 3
+            out = layer_norm(x)
+            assert out.shape == x.shape
+            assert np.allclose(out.mean(axis=-1), 0, atol=1e-7) and np.allclose(out.std(axis=-1), 1, atol=1e-3)
+            assert np.allclose(layer_norm(x[:1]), out[:1]), "one sequence's result depends on the others"
+          message: "Work along the last axis only, so each token is normalised by its own statistics."
+    solution: |
+      import numpy as np
+
+
+      def layer_norm(x: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+          """Normalise along the last axis to mean 0 and standard deviation 1.
+
+          Args:
+              x: Array whose last axis holds features.
+              eps: Added to the variance to avoid dividing by zero.
+
+          Returns:
+              Array of x's shape.
+          """
+          mean = x.mean(axis=-1, keepdims=True)
+          var = x.var(axis=-1, keepdims=True)
+          return (x - mean) / np.sqrt(var + eps)
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def layer_norm(x: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+            """Normalises over the whole batch."""
+            return (x - x.mean()) / np.sqrt(x.var() + eps)
+      - |
+        import numpy as np
+
+
+        def layer_norm(x: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+            """Uses the sample variance."""
+            mean = x.mean(axis=-1, keepdims=True)
+            var = x.var(axis=-1, ddof=1, keepdims=True)
+            return (x - mean) / np.sqrt(var + eps)
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def layer_norm(x: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+              """Normalises over the whole batch."""
+              return (x - x.mean()) / np.sqrt(x.var() + eps)
+        triggers: per_token
+    hints:
+      - "`x.mean(axis=-1, keepdims=True)`."
+      - "`x.var(axis=-1, keepdims=True)`: population variance by default."
+      - "Divide by `np.sqrt(var + eps)`."
+    explanation: |
+      Statistics along the last axis normalise each token on its own, which is why layer norm does not depend on the batch. `eps` turns a constant vector into zeros instead of a division by zero.
+
+  - id: B25-L6-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `mean_over_real(h, ids, pad_id=0) -> np.ndarray`: one vector per sequence, averaging only non-padding positions.
+
+      - `h` has shape `(N, L, d)` and `ids` has shape `(N, L)`. Return shape `(N, d)`.
+      - Raise `ValueError` when the shapes do not match, or a sequence is all padding.
+    starter: |
+      import numpy as np
+
+
+      def mean_over_real(h, ids, pad_id=0):
+          return h.mean(axis=1)
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+
+        _H = np.arange(24.0).reshape(2, 3, 4)
+        _IDS = np.array([[5, 7, 0], [1, 2, 3]])
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: mean_over_real
+          typed: true
+          docstring: true
+          message: "Give mean_over_real type hints and a docstring."
+      tests:
+        - id: skips_padding
+          code: |
+            out = mean_over_real(_H, _IDS)
+            assert out.shape == (2, 4), out.shape
+            assert np.allclose(out[0], _H[0, :2].mean(axis=0)) and np.allclose(out[1], _H[1].mean(axis=0)), out
+          message: "Average only positions whose ID is not pad_id."
+        - id: padding_invariant
+          code: |
+            h_long = np.concatenate([_H, np.full((2, 2, 4), 99.0)], axis=1)
+            ids_long = np.concatenate([_IDS, np.zeros((2, 2), dtype=int)], axis=1)
+            assert np.allclose(mean_over_real(h_long, ids_long), mean_over_real(_H, _IDS))
+          message: "Extra padding, whatever its vectors hold, must not change the result."
+        - id: guards
+          code: |
+            for h, ids in [(_H, _IDS[:, :2]), (_H, np.zeros((2, 3), dtype=int))]:
+                try:
+                    mean_over_real(h, ids)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {h.shape}, {ids.tolist()}")
+          message: "Raise ValueError for mismatched shapes or an all-padding sequence."
+    solution: |
+      import numpy as np
+
+
+      def mean_over_real(h: np.ndarray, ids: np.ndarray, pad_id: int = 0) -> np.ndarray:
+          """Mean of token vectors over non-padding positions.
+
+          Args:
+              h: Token vectors, shape (N, L, d).
+              ids: Token IDs, shape (N, L).
+              pad_id: The padding ID.
+
+          Returns:
+              Shape (N, d).
+
+          Raises:
+              ValueError: If the shapes do not match or a sequence is all padding.
+          """
+          if h.shape[:2] != ids.shape:
+              raise ValueError(f"h {h.shape} and ids {ids.shape} do not match")
+          keep = (ids != pad_id)[:, :, None].astype(float)
+          counts = keep.sum(axis=1)
+          if (counts == 0).any():
+              raise ValueError("a sequence has no real tokens")
+          return (h * keep).sum(axis=1) / counts
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def mean_over_real(h: np.ndarray, ids: np.ndarray, pad_id: int = 0) -> np.ndarray:
+            """Zeroes padding but divides by the full length."""
+            if h.shape[:2] != ids.shape:
+                raise ValueError("shapes do not match")
+            keep = (ids != pad_id)[:, :, None].astype(float)
+            if (keep.sum(axis=1) == 0).any():
+                raise ValueError("all padding")
+            return (h * keep).mean(axis=1)
+      - |
+        import numpy as np
+
+
+        def mean_over_real(h: np.ndarray, ids: np.ndarray, pad_id: int = 0) -> np.ndarray:
+            """Includes padding."""
+            if h.shape[:2] != ids.shape:
+                raise ValueError("shapes do not match")
+            if ((ids != pad_id).sum(axis=1) == 0).any():
+                raise ValueError("all padding")
+            return h.mean(axis=1)
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def mean_over_real(h: np.ndarray, ids: np.ndarray, pad_id: int = 0) -> np.ndarray:
+              """Zeroes padding but divides by the full length."""
+              if h.shape[:2] != ids.shape:
+                  raise ValueError("shapes do not match")
+              keep = (ids != pad_id)[:, :, None].astype(float)
+              if (keep.sum(axis=1) == 0).any():
+                  raise ValueError("all padding")
+              return (h * keep).mean(axis=1)
+        triggers: skips_padding
+    hints:
+      - "A weight of 1 for real positions and 0 for padding: `(ids != pad_id)[:, :, None]`."
+      - "Sum `h * keep` over axis 1, and count the real positions."
+      - "Check no count is 0, then divide."
+    explanation: |
+      Zeroing padding is half the job. Dividing by the number of real tokens, not the padded length, makes the result independent of how much padding a batch adds.
+
+  - id: B25-L6-E6
+    type: spot_bug
+    difficulty: 4
+    prompt: |
+      The classifier trains, but its accuracy stays near chance. Each batch has shape `(32, 40, 64)`: batch, length, features. Tap the line responsible, then fix it.
+    language: python
+    code: |
+      from torch import nn
+
+      layer = nn.TransformerEncoderLayer(d_model=64, nhead=4, dim_feedforward=256, norm_first=True)
+      encoder = nn.TransformerEncoder(layer, num_layers=2)
+
+
+      def encode(x, is_pad):
+          return encoder(x, src_key_padding_mask=is_pad)
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: batch_first
+          kind: requires_pattern
+          pattern: "TransformerEncoderLayer\\([^)]*batch_first\\s*=\\s*True"
+          message: "Read (batch, length, features): add batch_first=True to the layer."
+    fix_solution: |
+      from torch import nn
+
+      layer = nn.TransformerEncoderLayer(d_model=64, nhead=4, dim_feedforward=256, norm_first=True, batch_first=True)
+      encoder = nn.TransformerEncoder(layer, num_layers=2)
+
+
+      def encode(x, is_pad):
+          return encoder(x, src_key_padding_mask=is_pad)
+    wrong_answers:
+      - lines: [4]
+        feedback: "Stacking two layers is fine. The layer they copy reads the wrong layout."
+      - lines: [8]
+        feedback: "The padding mask is passed correctly. The layer misreads the batch."
+    hints:
+      - "What layout does TransformerEncoderLayer assume by default?"
+      - "With that default, what does dimension 0 of (32, 40, 64) mean?"
+      - "batch_first=True."
+    explanation: |
+      Without `batch_first=True`, the layer treats the 32 answers as positions and the 40 positions as the batch, so attention mixes different answers. The output shape is unchanged, so nothing fails.
+
+recap:
+  - front: "Pre-norm transformer block"
+    back: "x = x + attention(norm_1(x)); x = x + feed_forward(norm_2(x))."
+  - front: "Layer norm"
+    back: "Per token: subtract the mean, divide by sqrt(population variance + eps), then a learned scale and shift."
+  - front: "TransformerEncoderLayer defaults in PyTorch 2.15"
+    back: "batch_first=False, norm_first=False, dim_feedforward=2048, dropout=0.1. Set the first three yourself."
+  - front: "Pooling for classification"
+    back: "Mean over real positions only: sum with a 0/1 mask, divide by the count of real tokens."
+
+claims:
+  - claim: "PyTorch 2.15: nn.LayerNorm(4) maps [1, 2, 3, 4] to [-1.3416, -0.4472, 0.4472, 1.3416] and equals a NumPy (x - mean) / sqrt(var + 1e-5); TransformerEncoderLayer defaults are dim_feedforward 2048, dropout 0.1, activation relu, batch_first False, norm_first False, layer_norm_eps 1e-5; with d_model 16 the default layer has 68,752 parameters and 3,280 with dim_feedforward 64; a (batch, length, d) input without batch_first returns the same shape."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), November 2026."
+
+practical:
+  platform: laptop
+  title: Build a small transformer from scratch and prove each part works
+  intro: |
+    Work in `labs/transformer/` in this repository. You build attention, multi-head attention, sinusoidal positions and a pre-norm block in PyTorch, then train a small classifier on a synthetic task: does a sequence start and end with the same token? The task needs positions, and the tests check your attention against PyTorch's own, and that padding and the future cannot leak. You need PyTorch 2.15 on the laptop. When it trains, push the lab to your own GitHub repository with a written explanation: it is the roadmap's evidence for month 9, a transformer built from scratch.
+  steps:
+    - "Run `cd labs/transformer`, create a virtual environment, then `pip install -e .` and `pip install pytest`. Run `pytest`: most tests fail with NotImplementedError. Read `README.md` and every file in `src/tiny_transformer/`."
+    - "In `src/tiny_transformer/layers.py`, write `attention` (lessons B25-L3 and B25-L4). Run `pytest tests/test_layers.py -k attention`: it compares your output with `F.scaled_dot_product_attention`."
+    - "Write `sinusoidal_positions` and `MultiHeadSelfAttention` (lesson B25-L5), then `Block` (lesson B25-L6). Run `pytest tests/test_layers.py`."
+    - "Write `Classifier` in `src/tiny_transformer/model.py`: token embeddings plus positions, blocks, the mean over real tokens, and a linear head. Run `pytest`: every test passes."
+    - "Run `python -m tiny_transformer train`, then `python -m tiny_transformer train --no-positions`. Compare the accuracy and explain the gap."
+    - "Write your README: each part, the test that proves it, the two runs, and a diagram of one block. Push the folder to a new GitHub repository."
