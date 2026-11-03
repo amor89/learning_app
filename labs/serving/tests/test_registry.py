@@ -25,6 +25,7 @@ NAME = "survey_topics"
 
 @pytest.fixture(autouse=True)
 def tracking(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)  # MLflow writes model artifacts to ./mlruns
     uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
     monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
     monkeypatch.setenv("MLFLOW_DISABLE_AGENT_HINT", "1")
