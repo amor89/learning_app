@@ -35,10 +35,43 @@ await page.getByRole("heading", { name: "Dashboard" }).waitFor();
 const index = JSON.parse(readFileSync(new URL("../../site/content/index.json", import.meta.url), "utf8"));
 const trackCount = index.tracks.length;
 const moduleCount = index.tracks.reduce((n, t) => n + t.modules.length, 0);
-check(await page.locator(".card.track").count() === trackCount, `dashboard lists ${trackCount} tracks`);
-check(await page.locator(".module-chip").count() === moduleCount, `dashboard shows ${moduleCount} module chips`);
+const first = index.pathways[0];
+check(await page.locator(".stage-list > li").count() === first.stages.length, `dashboard shows the ${first.stages.length} stages of ${first.title}`);
+const firstLesson = first.stages.flatMap((s) => s.modules).map((id) => index.tracks.flatMap((t) => t.modules).find((m) => m.id === id)).find((m) => m.lessons.length).lessons[0];
+check((await page.locator(".card.continue").getAttribute("href")) === `#/lesson/${firstLesson.id}`, `Continue opens the pathway's first lesson, ${firstLesson.id}`);
 await noHorizontalScroll("dashboard");
 await page.screenshot({ path: `${shots}/01-dashboard.png`, fullPage: true });
+
+// Library: tracks, module chips and downloads
+await page.goto(`${base}${query}#/library`);
+await page.getByRole("heading", { name: "All tracks and downloads" }).waitFor();
+check(await page.locator(".card.track").count() === trackCount, `library lists ${trackCount} tracks`);
+check(await page.locator(".module-chip").count() === moduleCount, `library shows ${moduleCount} module chips`);
+await noHorizontalScroll("library");
+
+// Pathways: the list, every pathway page, and choosing one
+await page.getByRole("link", { name: "Paths" }).click();
+await page.getByRole("heading", { name: "Pathways" }).waitFor();
+check(await page.locator(".module-list > li").count() === index.pathways.length, `paths lists ${index.pathways.length} pathways`);
+await noHorizontalScroll("pathways");
+for (const pathway of index.pathways) {
+  await page.goto(`${base}${query}#/path/${pathway.id}`);
+  await page.waitForFunction((title) => document.querySelector("h1")?.textContent === title, pathway.title);
+  check(await page.locator("details.path-stage").count() === pathway.stages.length, `${pathway.id} shows ${pathway.stages.length} stages`);
+  await page.evaluate(() => document.querySelectorAll("details.path-stage").forEach((d) => (d.open = true)));
+  await noHorizontalScroll(`pathway ${pathway.id}`);
+}
+await page.screenshot({ path: `${shots}/01b-pathway.png`, fullPage: true });
+const last = index.pathways.at(-1);
+await page.getByRole("button", { name: "Make this my pathway" }).click();
+await page.getByText("Your pathway", { exact: true }).waitFor();
+await page.goto(`${base}${query}#/`);
+check((await page.locator(".pathway-card strong").textContent()) === last.title, `dashboard follows the chosen pathway, ${last.id}`);
+await page.goto(`${base}${query}#/path/${first.id}/${first.stages[1].id}`);
+await page.waitForFunction((title) => document.querySelector("h1")?.textContent === title, first.title);
+check(await page.locator(`#stage-${first.stages[1].id}`).evaluate((d) => d.open), "a stage link opens that stage");
+await page.getByRole("button", { name: "Make this my pathway" }).click();
+await page.getByText("Your pathway", { exact: true }).waitFor();
 
 // Lesson A3-L1: multiple choice with reasoning
 await page.goto(`${base}${query}#/lesson/A3-L1`);

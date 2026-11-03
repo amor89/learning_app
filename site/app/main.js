@@ -1,7 +1,17 @@
 // App entry: loads the content index, routes hash URLs and owns the progress state.
 import * as store from "./store.js";
 import { clear, h, toast } from "./ui.js";
-import { dashboard, lessonView, moduleView, reviewView, settingsView, trackView } from "./views.js";
+import {
+  dashboard,
+  lessonView,
+  libraryView,
+  moduleView,
+  pathwaysView,
+  pathwayView,
+  reviewView,
+  settingsView,
+  trackView,
+} from "./views.js";
 
 const root = document.getElementById("app");
 const lessons = new Map();
@@ -49,6 +59,9 @@ function applyTheme() {
 
 const ROUTES = [
   [/^#?\/?$/, () => dashboard(app), "home"],
+  [/^#\/paths$/, () => pathwaysView(app), "paths"],
+  [/^#\/path\/([\w-]+)(?:\/([\w-]+))?$/, (m) => pathwayView(app, m[1], m[2]), "paths"],
+  [/^#\/library$/, () => libraryView(app), "home"],
   [/^#\/track\/(\w+)$/, (m) => trackView(app, m[1]), "home"],
   [/^#\/module\/(\w+)$/, (m) => moduleView(app, m[1]), "home"],
   [/^#\/lesson\/([\w-]+)$/, (m) => lessonView(app, m[1]), "home"],

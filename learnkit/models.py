@@ -442,6 +442,41 @@ class Roadmap(Strict):
     bands: list[Band]
 
 
+class Stage(Strict):
+    """One step of a pathway: an ordered group of modules."""
+
+    id: str
+    title: str
+    summary: str
+    modules: list[str] = Field(min_length=1)
+
+
+class Pathway(Strict):
+    """An ordered route through modules towards one goal."""
+
+    id: str
+    title: str
+    summary: str
+    stages: list[Stage] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _unique(self) -> Pathway:
+        stage_ids = [s.id for s in self.stages]
+        if len(stage_ids) != len(set(stage_ids)):
+            raise ValueError(f"{self.id}: stage ids must be unique")
+        modules = [m for s in self.stages for m in s.modules]
+        repeats = sorted({m for m in modules if modules.count(m) > 1})
+        if repeats:
+            raise ValueError(f"{self.id}: modules listed twice: {repeats}")
+        return self
+
+
+class Pathways(Strict):
+    """Every pathway, in the order the app lists them."""
+
+    pathways: list[Pathway] = Field(min_length=1)
+
+
 def exercise_summary(exercise: Any) -> dict[str, Any]:
     """Short dict used in indexes and tests."""
     return {"id": exercise.id, "type": exercise.type, "difficulty": exercise.difficulty}

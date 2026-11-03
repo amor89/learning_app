@@ -1,0 +1,123 @@
+# Pathways: ordered routes through modules towards one goal. The app's Paths tab
+# and dashboard read this file. A module may sit in several pathways; every
+# module must sit in at least one. learnkit/loader.py checks both rules.
+pathways:
+  - id: ds-roadmap
+    title: Senior Data Scientist roadmap
+    summary: "The 18-month roadmap in reference/roadmap.md: Python and statistics first, then one stage per three-month band, from PyTorch to serving models."
+    stages:
+      - id: foundations
+        title: Foundations
+        summary: Python, data handling, statistics and the machine-learning workflow that every later stage builds on.
+        modules: [B0, B1, B2, B3, B4, B5, B6, B7, B8, B9, B10, B11, B12, B13, B14]
+      - id: m1-3
+        title: "Months 1 to 3: PyTorch foundations"
+        summary: Tensors, autograd, training loops and the habits that keep PyTorch runs reproducible.
+        modules: [B23, B16]
+      - id: m4-6
+        title: "Months 4 to 6: CNNs"
+        summary: Convolutional networks, image data and transfer learning.
+        modules: [B24]
+      - id: m7-9
+        title: "Months 7 to 9: NLP and transformers"
+        summary: Embeddings, then attention and a transformer built from scratch.
+        modules: [B15, B25]
+      - id: m10-12
+        title: "Months 10 to 12: Fine-tuning"
+        summary: Pretrained weights, warm-up, LoRA and Hugging Face fine-tuning, with honest evaluation.
+        modules: [B26]
+      - id: m13-15
+        title: "Months 13 to 15: LLMs"
+        summary: Prompting with structured output, retrieval-augmented generation and evaluating LLM systems.
+        modules: [B20, B21, B22]
+      - id: m16-18
+        title: "Months 16 to 18: MLOps"
+        summary: The model registry, a served API, containers, Azure, monitoring and rollback.
+        modules: [B27]
+      - id: alongside
+        title: Alongside every month
+        summary: Testing, performance and documentation. Dip in whenever a stage needs them.
+        modules: [B17, B19, B18]
+
+  - id: databricks
+    title: Databricks pipeline engineer
+    summary: Build medallion pipelines on Databricks that are correct, fast, tested and observable, then refactor a messy one.
+    stages:
+      - id: start
+        title: Start here
+        summary: Spark DataFrames, SQL and the lakehouse.
+        modules: [A0]
+      - id: build
+        title: Build pipelines
+        summary: Code structure, the medallion layers, Delta Lake and Unity Catalog.
+        modules: [A1, A2, A3, A4]
+      - id: operate
+        title: Make them fast and reliable
+        summary: Performance, data quality, observability and incremental loads.
+        modules: [A5, A6, A7, A8]
+      - id: ship
+        title: Test and ship
+        summary: Tests and deployment.
+        modules: [A9, A10]
+      - id: errors
+        title: Catch the quiet errors
+        summary: Silent errors and data errors, the failures that pass every run.
+        modules: [D3, D4]
+      - id: capstone
+        title: Capstone
+        summary: Refactor a messy pipeline end to end.
+        modules: [X1]
+
+  - id: fabric
+    title: Microsoft Fabric
+    summary: Use Fabric's lakehouse, pipelines, notebooks and semantic models, with governance and cost in view, then build a unified solution.
+    stages:
+      - id: start
+        title: Start here
+        summary: The foundations Fabric assumes.
+        modules: [C0]
+      - id: platform
+        title: The platform
+        summary: Fabric's architecture, the lakehouse and unifying datasets.
+        modules: [C1, C2, C3]
+      - id: build
+        title: Pipelines and analytics
+        summary: Ingestion, notebooks, semantic models and real-time data.
+        modules: [C4, C5, C6, C7]
+      - id: operate
+        title: AI, governance and cost
+        summary: Copilot, security, DevOps and cost control.
+        modules: [C8, C9, C10]
+      - id: capstone
+        title: Capstone
+        summary: A unified Fabric solution.
+        modules: [X2]
+
+  - id: errors
+    title: Finding errors in code
+    summary: Read tracebacks, debug, catch silent and data errors, check AI-generated code, and review a pull request.
+    stages:
+      - id: start
+        title: Start here
+        summary: The foundations for finding errors.
+        modules: [D0]
+      - id: debug
+        title: Debug
+        summary: Tracebacks and debugging tools.
+        modules: [D1, D2]
+      - id: hidden
+        title: Hidden errors
+        summary: Errors that raise nothing.
+        modules: [D3, D4]
+      - id: ai
+        title: AI-generated code
+        summary: Typical AI errors, verifying AI output and prompting for correct code.
+        modules: [D5, D6, D8]
+      - id: review
+        title: Review practice
+        summary: Review code the way a careful colleague would.
+        modules: [D7]
+      - id: capstone
+        title: Capstone
+        summary: Review an AI-generated pull request.
+        modules: [X3]

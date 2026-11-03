@@ -1,5 +1,5 @@
 // Service worker: offline app shell, fresh content when online, cached Pyodide.
-const SHELL_CACHE = "shell-v1";
+const SHELL_CACHE = "shell-v2";
 const CONTENT_CACHE = "content-v1";
 const PYODIDE_CACHE = "pyodide-v1";
 const SHELL = [
@@ -8,6 +8,7 @@ const SHELL = [
   "manifest.webmanifest",
   "app/main.js",
   "app/views.js",
+  "app/pathways.js",
   "app/exercises.js",
   "app/checkers.js",
   "app/store.js",
