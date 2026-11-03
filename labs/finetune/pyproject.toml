@@ -1,0 +1,19 @@
+# The B26 fine-tuning lab. From this folder: `pip install -e .`, then `pytest`.
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finetune-lab"
+version = "0.1.0"
+description = "Pretrain a small transformer, then compare fine-tuning strategies on a few labels"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2,<3", "torch>=2.14,<3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--strict-markers"

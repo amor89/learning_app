@@ -1,0 +1,404 @@
+id: B26-L1
+title: Transfer learning and loading pretrained weights
+
+concept: |
+  A pretrained model has learned from a large amount of unlabelled data. **Fine-tuning** starts from its weights and trains on your few labelled examples. In the B26 lab, an encoder pretrained on 20,000 unlabelled sequences reached 0.992 accuracy from 60 labels after full fine-tuning. The same model trained from random weights reached 0.759.
+
+  Weights travel as a **state_dict**: a dictionary from parameter names to tensors. In PyTorch 2.15:
+
+  ```python
+  torch.save(model.state_dict(), "encoder.pt")
+  state = torch.load("encoder.pt")      # weights_only=True by default since 2.6
+  result = model.load_state_dict(state, strict=False)
+  result.missing_keys, result.unexpected_keys
+  ```
+
+  Three behaviours of `load_state_dict` matter when you fine-tune:
+
+  - With the default `strict=True`, any missing or extra key raises `RuntimeError`.
+  - With `strict=False`, it loads the keys that match and returns `missing_keys` and `unexpected_keys`. If every name carries an extra prefix such as `model.`, nothing matches. Every key is reported, no weight loads, and no error is raised. Always read the result.
+  - A key whose shape differs raises, even with `strict=False`. A checkpoint head with 2 outputs does not fit a new head with 3. Drop the old head's keys before loading.
+
+  The new head starts at random. Its keys appear in `missing_keys`, and that is expected. Any other missing key means the backbone did not load.
+
+  Then choose what trains. A frozen backbone with a new head, as in lesson B24-L5, is cheapest: call `p.requires_grad_(False)` on each backbone parameter. Full fine-tuning moves every weight, at a smaller learning rate. Lesson B26-L3 adds a third option, LoRA. Count what trains with `sum(p.numel() for p in model.parameters() if p.requires_grad)`.
+
+why_it_matters: |
+  A team fine-tuned a pretrained text encoder on 500 coded survey answers and got accuracy no better than a model trained from scratch. The checkpoint had been saved from a wrapper module, so every key began with `model.`. The loading code used `strict=False` and ignored the result. No pretrained weight had loaded. Checking `missing_keys` would have shown the problem before the first epoch.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      state = torch.load("pretrained.pt")
+      model.load_state_dict(state, strict=False)
+      optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    annotations:
+      - find: "model.load_state_dict(state, strict=False)"
+        note: "The result is ignored. If no key matched, the model trains from random weights and nothing warns you."
+      - find: "state = torch.load(\"pretrained.pt\")"
+        note: "The checkpoint's own head is still in state. If its shape differs from the new head, loading raises."
+  strong:
+    code: |
+      import torch
+      from torch import nn
+
+      BACKBONE_PREFIX = "encoder."
+
+
+      def load_backbone(model: nn.Module, checkpoint: dict[str, torch.Tensor]) -> list[str]:
+          """Copy the encoder weights from a pretraining checkpoint into a new model.
+
+          Args:
+              model: A model whose encoder sits under `encoder.`, with a new head.
+              checkpoint: A state_dict saved after pretraining.
+
+          Returns:
+              The model's keys the checkpoint did not fill, sorted: the new head.
+
+          Raises:
+              ValueError: If the checkpoint has no encoder keys, or the encoder did not load fully.
+          """
+          backbone = {k: v for k, v in checkpoint.items() if k.startswith(BACKBONE_PREFIX)}
+          if not backbone:
+              raise ValueError("checkpoint has no keys starting with 'encoder.'")
+          result = model.load_state_dict(backbone, strict=False)
+          missing = [k for k in result.missing_keys if k.startswith(BACKBONE_PREFIX)]
+          if missing or result.unexpected_keys:
+              raise ValueError(f"encoder did not load: missing {missing}, unexpected {result.unexpected_keys}")
+          return sorted(result.missing_keys)
+    annotations:
+      - find: "backbone = {k: v for k, v in checkpoint.items() if k.startswith(BACKBONE_PREFIX)}"
+        note: "Keep the encoder only. The old head would raise a size mismatch."
+      - find: "result = model.load_state_dict(backbone, strict=False)"
+        note: "strict=False because the new head is meant to be missing."
+      - find: "if missing or result.unexpected_keys:"
+        note: "Read the result: any missing encoder key or unexpected key means the weights did not load."
+      - find: "return sorted(result.missing_keys)"
+        note: "Return what stayed random, so the caller can log it."
+  takeaway: |
+    Load only the backbone, use strict=False for the new head, and check missing_keys and unexpected_keys every time.
+
+exercises:
+  - id: B26-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Every key in a checkpoint starts with `model.`, but your model's keys do not. What does `model.load_state_dict(state, strict=False)` do?
+    options:
+      - {id: a, text: "Loads no weights, raises no error, and lists every key in missing_keys or unexpected_keys"}
+      - {id: b, text: "Raises RuntimeError because the names differ"}
+      - {id: c, text: "Strips the prefix and loads every weight"}
+      - {id: d, text: "Loads the weights whose shapes match, ignoring the names"}
+    answer: a
+    reasons:
+      - {id: r1, text: "strict=False matches keys by exact name and reports the rest instead of raising."}
+      - {id: r2, text: "strict=False only skips the shape checks."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That is strict=True. With strict=False, unmatched names are reported, not raised."
+      - answer: c
+        feedback: "PyTorch never rewrites names. You strip a prefix yourself."
+      - answer: d
+        feedback: "Loading matches by name only. A shape mismatch on a matching name raises even with strict=False."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. A shape mismatch still raises with strict=False. It relaxes the key-name check."
+    hints:
+      - "How does load_state_dict match a tensor to a parameter?"
+      - "What does strict=False change?"
+      - "Unmatched names are reported in the result."
+    explanation: |
+      Names are matched exactly. With `strict=False`, unmatched names go into `missing_keys` and `unexpected_keys` and nothing raises, so the model keeps its random weights unless you read the result.
+
+  - id: B26-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      A pretrained network had a 2-class head. You build the same network with a 3-class head and load only the body. What does this print?
+    code: |
+      import torch
+      from torch import nn
+
+      pretrained = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 2))
+      state = {k: v for k, v in pretrained.state_dict().items() if k.startswith("0.")}
+      model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+      result = model.load_state_dict(state, strict=False)
+      print(result.missing_keys, result.unexpected_keys)
+    answer: |
+      ['2.weight', '2.bias'] []
+    wrong_answers:
+      - answer: "[] []"
+        feedback: "The new head's keys were left out of state, so they are missing."
+      - answer: "['2.weight', '2.bias'] ['2.weight', '2.bias']"
+        feedback: "Only keys starting with '0.' were kept, so the checkpoint has no head keys to be unexpected."
+    hints:
+      - "nn.Sequential names parameters by position: 0, 1, 2."
+      - "Which keys does state hold?"
+      - "Which of the model's keys does state not fill?"
+    explanation: |
+      `state` holds `0.weight` and `0.bias` only. The model's head, `2.weight` and `2.bias`, is missing and keeps its random start, which is what you want. Nothing is unexpected.
+
+  - id: B26-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Load a backbone where the new head is meant to be missing, then stop if any key from the checkpoint went unused.
+    template: |
+      result = model.load_state_dict(backbone, strict=[[g1]])
+      if result.[[g2]]:
+          raise ValueError(f"unused checkpoint keys: {result.unexpected_keys}")
+    gaps:
+      g1: {accepted: ["False"]}
+      g2: {accepted: [unexpected_keys]}
+    wrong_answers:
+      - answer: {g1: "True", g2: unexpected_keys}
+        feedback: "strict=True raises on the missing head keys before you can check anything."
+      - answer: {g1: "False", g2: missing_keys}
+        feedback: "The new head is always missing, so this raises every time. Unused checkpoint keys are unexpected_keys."
+    hints:
+      - "The new head will not be in the checkpoint."
+      - "Which list holds checkpoint keys the model has no place for?"
+      - "`False` and `unexpected_keys`."
+    explanation: |
+      `strict=False` lets the new head stay missing. `unexpected_keys` lists checkpoint keys with no match in the model, a sign of a prefix or architecture mismatch.
+
+  - id: B26-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `compare_keys(model_keys, checkpoint_keys) -> tuple[list[str], list[str]]`, the check `load_state_dict(strict=False)` reports.
+
+      - `missing`: model keys not in the checkpoint. `unexpected`: checkpoint keys not in the model.
+      - Return both sorted, as `(missing, unexpected)`.
+    primer: |
+      Set difference keeps the items of the first set that the second lacks:
+
+      ```python
+      {"a", "b", "c"} - {"b"}          # {'a', 'c'}
+      sorted({"c", "a"})               # ['a', 'c']
+      ```
+    starter: |
+      def compare_keys(model_keys, checkpoint_keys):
+          return [], []
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: compare_keys
+          typed: true
+          docstring: true
+          message: "Give compare_keys type hints and a docstring."
+      tests:
+        - id: head_missing
+          code: |
+            model = ["encoder.w", "encoder.b", "head.weight", "head.bias"]
+            ckpt = ["encoder.w", "encoder.b"]
+            assert compare_keys(model, ckpt) == (["head.bias", "head.weight"], []), compare_keys(model, ckpt)
+          message: "Missing keys are the model's keys that the checkpoint lacks, sorted."
+        - id: prefix
+          code: |
+            model = ["encoder.w", "head.w"]
+            ckpt = ["model.encoder.w", "model.head.w"]
+            assert compare_keys(model, ckpt) == (["encoder.w", "head.w"], ["model.encoder.w", "model.head.w"])
+          message: "Unexpected keys are the checkpoint's keys that the model lacks, sorted."
+        - id: match
+          code: |
+            assert compare_keys(["b", "a"], ["a", "b"]) == ([], [])
+          message: "When every name matches, both lists are empty."
+        - id: sorted_order
+          code: |
+            names = [f"layer{i}.weight" for i in range(8)]
+            missing, unexpected = compare_keys(names, [])
+            assert missing == sorted(names) and unexpected == [], missing
+            missing, unexpected = compare_keys([], names)
+            assert unexpected == sorted(names) and missing == [], unexpected
+          message: "Return both lists sorted. Set order is arbitrary."
+    solution: |
+      def compare_keys(model_keys: list[str], checkpoint_keys: list[str]) -> tuple[list[str], list[str]]:
+          """Keys a strict=False load would report.
+
+          Args:
+              model_keys: Parameter names of the model.
+              checkpoint_keys: Names in the checkpoint.
+
+          Returns:
+              (missing, unexpected), each sorted.
+          """
+          model_set, checkpoint_set = set(model_keys), set(checkpoint_keys)
+          return sorted(model_set - checkpoint_set), sorted(checkpoint_set - model_set)
+    seeded_bugs:
+      - |
+        def compare_keys(model_keys: list[str], checkpoint_keys: list[str]) -> tuple[list[str], list[str]]:
+            """Swaps the two lists."""
+            model_set, checkpoint_set = set(model_keys), set(checkpoint_keys)
+            return sorted(checkpoint_set - model_set), sorted(model_set - checkpoint_set)
+      - |
+        def compare_keys(model_keys: list[str], checkpoint_keys: list[str]) -> tuple[list[str], list[str]]:
+            """Not sorted."""
+            model_set, checkpoint_set = set(model_keys), set(checkpoint_keys)
+            return list(model_set - checkpoint_set), list(checkpoint_set - model_set)
+    wrong_answers:
+      - answer: |
+          def compare_keys(model_keys: list[str], checkpoint_keys: list[str]) -> tuple[list[str], list[str]]:
+              """Swaps the two lists."""
+              model_set, checkpoint_set = set(model_keys), set(checkpoint_keys)
+              return sorted(checkpoint_set - model_set), sorted(model_set - checkpoint_set)
+        triggers: head_missing
+    hints:
+      - "Turn both lists into sets."
+      - "Missing: model set minus checkpoint set."
+      - "Sort each result."
+    explanation: |
+      Two set differences give the two lists. Missing keys are what the model needs and the checkpoint lacks. Unexpected keys are the reverse.
+
+  - id: B26-L1-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Checkpoints saved from a wrapper module carry a prefix such as `model.` on every key. Write `strip_prefix(state, prefix) -> dict`.
+
+      - Return a new dictionary with `prefix` removed from the start of every key, values unchanged.
+      - Raise `ValueError` if any key does not start with `prefix`, so a wrong prefix fails loudly.
+    primer: |
+      `str.removeprefix` drops a prefix when it is there and leaves the string alone otherwise:
+
+      ```python
+      "net.layer.w".removeprefix("net.")    # 'layer.w'
+      "layer.w".removeprefix("net.")        # 'layer.w'
+      ```
+    starter: |
+      def strip_prefix(state, prefix):
+          return state
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: strip_prefix
+          typed: true
+          docstring: true
+          message: "Give strip_prefix type hints and a docstring."
+      tests:
+        - id: strips
+          code: |
+            out = strip_prefix({"model.encoder.w": 1, "model.head.b": 2}, "model.")
+            assert out == {"encoder.w": 1, "head.b": 2}, out
+          message: "Remove the prefix from the start of every key and keep the values."
+        - id: only_start
+          code: |
+            out = strip_prefix({"model.sub.model.w": 3}, "model.")
+            assert out == {"sub.model.w": 3}, out
+          message: "Remove the prefix only at the start, not wherever it appears."
+        - id: guard
+          code: |
+            try:
+                strip_prefix({"model.a": 1, "b": 2}, "model.")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for a key without the prefix")
+          message: "Raise ValueError when a key lacks the prefix."
+        - id: new_dict
+          code: |
+            state = {"model.w": 1}
+            strip_prefix(state, "model.")
+            assert state == {"model.w": 1}, state
+          message: "Return a new dictionary. Leave the input unchanged."
+    solution: |
+      def strip_prefix(state: dict[str, object], prefix: str) -> dict[str, object]:
+          """Remove a wrapper prefix from every checkpoint key.
+
+          Args:
+              state: A state_dict, or any dictionary keyed by parameter name.
+              prefix: The prefix every key must start with, such as "model.".
+
+          Returns:
+              A new dictionary with the prefix removed from each key.
+
+          Raises:
+              ValueError: If any key does not start with prefix.
+          """
+          wrong = [k for k in state if not k.startswith(prefix)]
+          if wrong:
+              raise ValueError(f"keys without prefix {prefix!r}: {wrong[:3]}")
+          return {k.removeprefix(prefix): v for k, v in state.items()}
+    seeded_bugs:
+      - |
+        def strip_prefix(state: dict[str, object], prefix: str) -> dict[str, object]:
+            """Replaces the prefix everywhere in the key."""
+            wrong = [k for k in state if not k.startswith(prefix)]
+            if wrong:
+                raise ValueError(f"keys without prefix {prefix!r}: {wrong[:3]}")
+            return {k.replace(prefix, ""): v for k, v in state.items()}
+      - |
+        def strip_prefix(state: dict[str, object], prefix: str) -> dict[str, object]:
+            """No guard: keys without the prefix pass through silently."""
+            return {k.removeprefix(prefix): v for k, v in state.items()}
+    wrong_answers:
+      - answer: |
+          def strip_prefix(state: dict[str, object], prefix: str) -> dict[str, object]:
+              """No guard: keys without the prefix pass through silently."""
+              return {k.removeprefix(prefix): v for k, v in state.items()}
+        triggers: guard
+    hints:
+      - "Find keys that do not start with the prefix first."
+      - "Raise if there are any."
+      - "Build a new dict with `k.removeprefix(prefix)`."
+    explanation: |
+      `removeprefix` touches only the start of the key, unlike `replace`. The guard turns a wrong prefix into an error instead of a silent load of nothing.
+
+  - id: B26-L1-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      Fine-tuning from this checkpoint scores the same as training from scratch. The checkpoint's keys begin with `model.encoder.`. Tap the line that lets the problem pass unnoticed.
+    code: |
+      import torch
+
+
+      def build(model, path):
+          state = torch.load(path)
+          backbone = {k: v for k, v in state.items() if "encoder." in k}
+          model.load_state_dict(backbone, strict=False)
+          for p in model.encoder.parameters():
+              p.requires_grad_(False)
+          return model
+    bug_lines: [7]
+    wrong_answers:
+      - lines: [6]
+        feedback: "The filter keeps the encoder keys. They still carry the model. prefix, but the line that should notice that is the load."
+      - lines: [9]
+        feedback: "Freezing the encoder is a valid strategy. The encoder it freezes is still random."
+      - lines: [5]
+        feedback: "torch.load reads the file correctly. The weights fail to arrive later."
+    hints:
+      - "Do the checkpoint's names match the model's?"
+      - "What does strict=False do with names that do not match?"
+      - "Which line throws away the report?"
+    explanation: |
+      The keys are `model.encoder...` but the model expects `encoder...`, so nothing matches. `load_state_dict(strict=False)` reports every key and raises nothing, and line 7 discards that report. Strip the prefix and check `missing_keys` and `unexpected_keys`.
+
+recap:
+  - front: "state_dict"
+    back: "A dictionary from parameter names to tensors. torch.save writes it, torch.load reads it (weights_only=True by default since PyTorch 2.6)."
+  - front: "load_state_dict(strict=False)"
+    back: "Loads matching names and returns missing_keys and unexpected_keys. Nothing raises if no name matches, so always check the result."
+  - front: "Shape mismatch"
+    back: "Raises even with strict=False. Drop the old head's keys before loading into a model with a new head."
+  - front: "Expected missing keys"
+    back: "Only the new head. Any other missing key means the backbone did not load."
+
+claims:
+  - claim: "PyTorch 2.15: load_state_dict with strict=False returns _IncompatibleKeys(missing_keys, unexpected_keys); a prefixed checkpoint loads nothing and raises nothing; a size mismatch raises 'size mismatch for head.weight: copying a param with shape torch.Size([2, 8]) from checkpoint, the shape in current model is torch.Size([3, 8])' even with strict=False; strict=True reports 'Missing key(s) in state_dict'; torch.load refuses a pickled class by default with 'Weights only load failed'."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), November 2026."
+  - claim: "B26 lab: with 60 labelled sequences, full fine-tuning from the pretrained encoder reached 0.992 mean validation accuracy over seeds 0 to 2, and training from scratch 0.759."
+    status: verified
+    source: "labs/finetune reference run, PyTorch 2.15.0, November 2026."

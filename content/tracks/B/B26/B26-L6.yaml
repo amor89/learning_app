@@ -1,0 +1,473 @@
+id: B26-L6
+title: Evaluating a fine-tuned model
+
+concept: |
+  A fine-tuned model's score means something only next to other numbers. Report at least three:
+
+  - **A trivial baseline**: always predict the most common class, or tag every word `O`.
+  - **A simple model**: for text, word counts with logistic regression. If fine-tuning does not beat it clearly, the cheaper model wins.
+  - **The other strategies**: from scratch, a frozen encoder with a new head, full fine-tuning and LoRA, as in the B26 lab.
+
+  **Seeds.** On small data, the result depends on the seed. In the lab, LoRA on 60 labels scored 0.990, 0.982 and 0.929 over three seeds. Run at least three seeds and report the mean and the range. Picking the best seed reports luck.
+
+  **Validation, then test.** Choose the strategy, learning rate and epochs on validation data. Score the test set once, at the end. Every extra look at the test set turns it into validation data.
+
+  **Entity-level F1 for NER.** Token accuracy flatters a tagger, because most tokens are `O`. If 90% of tokens are `O`, a model that tags everything `O` scores 0.90 token accuracy and finds no entity. Score whole entities instead. Turn each tag sequence into spans of type, start and end:
+
+  ```python
+  ["B-PER", "O", "B-LOC", "I-LOC"]    # {("PER", 0, 1), ("LOC", 2, 4)}
+  ```
+
+  A predicted span counts only if type, start and end all match a true span. Precision is correct spans over predicted spans, recall is correct spans over true spans, and F1 is their harmonic mean. Report it for each entity type as well, since a rare type hides inside the overall number.
+
+  **Forgetting.** Full fine-tuning overwrites the pretrained weights. If the same base model must serve other tasks, LoRA adapters leave it unchanged.
+
+why_it_matters: |
+  A team reported 0.96 accuracy for a product-name tagger on survey answers. A reviewer asked for entity-level F1: it was 0.41. Nine in ten tokens were `O`, and the model missed most multi-word product names or cut them short. The team had also tuned on the test set over twelve runs. A fresh test set and three seeds gave an honest 0.58, which set the plan for more labelling.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      scores = [run(seed) for seed in range(5)]
+      print("accuracy", max(scores))
+      token_acc = sum(p == t for p, t in zip(pred_tags, true_tags)) / len(true_tags)
+    annotations:
+      - find: "print(\"accuracy\", max(scores))"
+        note: "The best of five seeds reports luck, not the method."
+      - find: "token_acc = sum(p == t for p, t in zip(pred_tags, true_tags)) / len(true_tags)"
+        note: "Token accuracy for NER: mostly measures how often O is right."
+  strong:
+    code: |
+      def bio_spans(tags: list[str]) -> set[tuple[str, int, int]]:
+          """Entity spans (type, start, end exclusive) from BIO tags.
+
+          An I- tag after O or after another type starts a new entity.
+          """
+          spans: set[tuple[str, int, int]] = set()
+          start: int | None = None
+          kind: str | None = None
+          for i, tag in enumerate([*tags, "O"]):
+              continues = tag.startswith("I-") and tag[2:] == kind
+              if not continues:
+                  if start is not None and kind is not None:
+                      spans.add((kind, start, i))
+                  start, kind = (i, tag[2:]) if tag != "O" else (None, None)
+          return spans
+
+
+      def entity_f1(true_tags: list[str], pred_tags: list[str]) -> float:
+          """F1 over whole entities: type, start and end must all match.
+
+          Raises:
+              ValueError: If the tag lists differ in length.
+          """
+          if len(true_tags) != len(pred_tags):
+              raise ValueError(f"{len(true_tags)} true tags but {len(pred_tags)} predicted")
+          true, pred = bio_spans(true_tags), bio_spans(pred_tags)
+          if not true and not pred:
+              return 1.0
+          correct = len(true & pred)
+          precision = correct / len(pred) if pred else 0.0
+          recall = correct / len(true) if true else 0.0
+          return 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
+    annotations:
+      - find: "for i, tag in enumerate([*tags, \"O\"]):"
+        note: "A trailing O closes an entity that runs to the end of the sentence."
+      - find: "continues = tag.startswith(\"I-\") and tag[2:] == kind"
+        note: "Only an I- tag of the same type continues the current entity."
+      - find: "correct = len(true & pred)"
+        note: "Set intersection: a span counts only if type, start and end all match."
+      - find: "return 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)"
+        note: "Guard the division when nothing is correct."
+  takeaway: |
+    Compare against a trivial baseline and a simple model, report mean and range over seeds, score the test set once, and use entity-level F1 for NER.
+
+exercises:
+  - id: B26-L6-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A tagger scores 0.90 token accuracy on survey answers where 90% of tokens are `O`. What do you know about how well it finds entities?
+    options:
+      - {id: a, text: "Nothing yet: tagging every token O would also score 0.90. Compute entity-level F1"}
+      - {id: b, text: "It finds about 90% of entities"}
+      - {id: c, text: "It is better than a baseline, because 0.90 is high"}
+      - {id: d, text: "It finds no entities"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The score matches what the all-O baseline gets, so it says nothing about entities."}
+      - {id: r2, text: "Token accuracy is always 0.1 higher than entity F1."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Token accuracy counts tokens, mostly O tokens, not entities."
+      - answer: c
+        feedback: "The all-O baseline also scores 0.90, so 0.90 shows no gain over it."
+      - answer: d
+        feedback: "It might find some. Token accuracy cannot tell you either way."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. There is no fixed gap between the two measures."
+    hints:
+      - "What does predicting O everywhere score?"
+      - "Which measure counts whole entities?"
+      - "Compare with the baseline."
+    explanation: |
+      When 90% of tokens are `O`, an all-`O` tagger scores 0.90 token accuracy and 0 entity F1. Only an entity-level score shows whether the model finds entities.
+
+  - id: B26-L6-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      tags = ["B-PER", "O", "B-LOC", "I-LOC", "O", "B-ORG"]
+      spans, start, kind = [], None, None
+      for i, tag in enumerate(tags + ["O"]):
+          if not (tag.startswith("I-") and tag[2:] == kind):
+              if start is not None:
+                  spans.append((kind, start, i))
+              start, kind = (i, tag[2:]) if tag != "O" else (None, None)
+      print(spans)
+    answer: |
+      [('PER', 0, 1), ('LOC', 2, 4), ('ORG', 5, 6)]
+    wrong_answers:
+      - answer: "[('PER', 0, 1), ('LOC', 2, 3), ('LOC', 3, 4), ('ORG', 5, 6)]"
+        feedback: "I-LOC continues the LOC that B-LOC started, so it is one span from 2 to 4."
+      - answer: "[('PER', 0, 1), ('LOC', 2, 4)]"
+        feedback: "The extra O at the end closes the ORG span that runs to the last word."
+    hints:
+      - "End positions are exclusive."
+      - "I-LOC after B-LOC continues the entity."
+      - "What does the added O do?"
+    explanation: |
+      Each span closes at the first tag that does not continue it. The trailing `"O"` closes `ORG`, which would otherwise be lost.
+
+  - id: B26-L6-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the steps of an honest evaluation of a fine-tuned classifier.
+    items:
+      - {id: split, text: "Split into training, validation and test sets, and set the test set aside"}
+      - {id: baselines, text: "Score the majority-class baseline and a simple model on validation"}
+      - {id: tune, text: "Fine-tune and choose strategy, learning rate and epochs on validation"}
+      - {id: seeds, text: "Rerun the chosen set-up with three seeds and record mean and range"}
+      - {id: test, text: "Score the final set-up once on the test set"}
+    answer: [split, baselines, tune, seeds, test]
+    wrong_answers:
+      - answer: [split, tune, seeds, test, baselines]
+        feedback: "Baselines come before tuning, on the same validation data, so you know what you must beat."
+      - answer: [split, baselines, tune, test, seeds]
+        feedback: "Seeds belong to the choice of set-up. Run them on validation, then look at the test set once."
+    hints:
+      - "The test set waits until the end."
+      - "You need the baselines' scores before you tune."
+      - "Check the spread before the final score."
+    explanation: |
+      Split first, so nothing leaks. Baselines set the bar, tuning and seeds use validation only, and the test set gives one final, unbiased number.
+
+  - id: B26-L6-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `bio_spans(tags) -> set[tuple[str, int, int]]`: the entities in a BIO tag list as `(type, start, end)`, with `end` exclusive.
+
+      - `B-X` starts an entity of type `X`. `I-X` continues an entity of type `X`.
+      - An `I-X` after `O`, or after an entity of another type, starts a new entity.
+      - `O` ends any open entity, and so does the end of the list.
+    starter: |
+      def bio_spans(tags):
+          return set()
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: bio_spans
+          typed: true
+          docstring: true
+          message: "Give bio_spans type hints and a docstring."
+      tests:
+        - id: basic
+          code: |
+            got = bio_spans(["B-PER", "O", "B-LOC", "I-LOC", "O"])
+            assert got == {("PER", 0, 1), ("LOC", 2, 4)}, got
+          message: "B- starts an entity, I- of the same type continues it, O ends it."
+        - id: at_end
+          code: |
+            got = bio_spans(["O", "B-ORG", "I-ORG"])
+            assert got == {("ORG", 1, 3)}, got
+          message: "Close an entity that runs to the end of the list."
+        - id: adjacent
+          code: |
+            got = bio_spans(["B-LOC", "B-LOC", "I-PER"])
+            assert got == {("LOC", 0, 1), ("LOC", 1, 2), ("PER", 2, 3)}, got
+          message: "A B- tag always starts a new entity, and an I- tag of another type does too."
+        - id: stray_i
+          code: |
+            assert bio_spans(["O", "I-LOC", "I-LOC"]) == {("LOC", 1, 3)}
+            assert bio_spans([]) == set()
+          message: "An I- tag after O starts an entity. No tags give no spans."
+    solution: |
+      def bio_spans(tags: list[str]) -> set[tuple[str, int, int]]:
+          """Entity spans (type, start, end exclusive) from BIO tags.
+
+          Args:
+              tags: One BIO tag per word, such as "B-LOC", "I-LOC" or "O".
+
+          Returns:
+              The set of spans.
+          """
+          spans: set[tuple[str, int, int]] = set()
+          start: int | None = None
+          kind: str | None = None
+          for i, tag in enumerate([*tags, "O"]):
+              continues = tag.startswith("I-") and tag[2:] == kind
+              if not continues:
+                  if start is not None and kind is not None:
+                      spans.add((kind, start, i))
+                  start, kind = (i, tag[2:]) if tag != "O" else (None, None)
+          return spans
+    seeded_bugs:
+      - |
+        def bio_spans(tags: list[str]) -> set[tuple[str, int, int]]:
+            """Loses an entity that runs to the end."""
+            spans: set[tuple[str, int, int]] = set()
+            start: int | None = None
+            kind: str | None = None
+            for i, tag in enumerate(tags):
+                continues = tag.startswith("I-") and tag[2:] == kind
+                if not continues:
+                    if start is not None and kind is not None:
+                        spans.add((kind, start, i))
+                    start, kind = (i, tag[2:]) if tag != "O" else (None, None)
+            return spans
+      - |
+        def bio_spans(tags: list[str]) -> set[tuple[str, int, int]]:
+            """Lets I- continue any entity, whatever its type."""
+            spans: set[tuple[str, int, int]] = set()
+            start: int | None = None
+            kind: str | None = None
+            for i, tag in enumerate([*tags, "O"]):
+                continues = tag.startswith("I-") and kind is not None
+                if not continues:
+                    if start is not None and kind is not None:
+                        spans.add((kind, start, i))
+                    start, kind = (i, tag[2:]) if tag != "O" else (None, None)
+            return spans
+    wrong_answers:
+      - answer: |
+          def bio_spans(tags: list[str]) -> set[tuple[str, int, int]]:
+              """Loses an entity that runs to the end."""
+              spans: set[tuple[str, int, int]] = set()
+              start: int | None = None
+              kind: str | None = None
+              for i, tag in enumerate(tags):
+                  continues = tag.startswith("I-") and tag[2:] == kind
+                  if not continues:
+                      if start is not None and kind is not None:
+                          spans.add((kind, start, i))
+                      start, kind = (i, tag[2:]) if tag != "O" else (None, None)
+              return spans
+        triggers: at_end
+    hints:
+      - "Add an \"O\" to the end so the last entity closes."
+      - "A tag continues the entity only if it is I- with the same type."
+      - "Otherwise close any open span, then start one unless the tag is O."
+    explanation: |
+      Every tag either continues the open entity or closes it. Appending `"O"` closes the last one. Comparing types stops `B-LOC I-PER` from becoming one mixed entity.
+
+  - id: B26-L6-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `entity_f1(true_tags, pred_tags) -> float`. `bio_spans(tags)` is defined for you and returns a set of `(type, start, end)` spans.
+
+      - Precision is correct spans over predicted spans. Recall is correct spans over true spans. F1 is `2 * p * r / (p + r)`.
+      - Return 1.0 when neither list has an entity, and 0.0 when nothing is correct.
+      - Raise `ValueError` if the lists differ in length.
+    starter: |
+      def entity_f1(true_tags, pred_tags):
+          return sum(t == p for t, p in zip(true_tags, pred_tags)) / len(true_tags)
+    checker:
+      kind: python
+      setup: |
+        def bio_spans(tags):
+            spans, start, kind = set(), None, None
+            for i, tag in enumerate([*tags, "O"]):
+                if not (tag.startswith("I-") and tag[2:] == kind):
+                    if start is not None:
+                        spans.add((kind, start, i))
+                    start, kind = (i, tag[2:]) if tag != "O" else (None, None)
+            return spans
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: entity_f1
+          typed: true
+          docstring: true
+          message: "Give entity_f1 type hints and a docstring."
+      tests:
+        - id: partial
+          code: |
+            true = ["B-PER", "O", "B-LOC", "I-LOC", "O"]
+            pred = ["B-PER", "O", "B-LOC", "O", "O"]
+            got = entity_f1(true, pred)
+            assert abs(got - 0.5) < 1e-9, got
+          message: "A span cut short is wrong: 1 of 2 predicted and 1 of 2 true spans are correct, F1 0.5."
+        - id: all_o
+          code: |
+            got = entity_f1(["B-ORG", "O", "O", "O"], ["O", "O", "O", "O"])
+            assert got == 0.0, got
+          message: "Predicting no entities when there is one scores 0.0, not token accuracy."
+        - id: none_at_all
+          code: |
+            assert entity_f1(["O", "O"], ["O", "O"]) == 1.0
+          message: "With no entities on either side, return 1.0."
+        - id: guard
+          code: |
+            try:
+                entity_f1(["O"], ["O", "O"])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for lists of different length")
+          message: "Raise ValueError when the lists differ in length."
+    solution: |
+      def entity_f1(true_tags: list[str], pred_tags: list[str]) -> float:
+          """F1 over whole entities: type, start and end must all match.
+
+          Args:
+              true_tags: Gold BIO tags.
+              pred_tags: Predicted BIO tags, same length.
+
+          Returns:
+              Entity-level F1 in [0, 1].
+
+          Raises:
+              ValueError: If the lists differ in length.
+          """
+          if len(true_tags) != len(pred_tags):
+              raise ValueError(f"{len(true_tags)} true tags but {len(pred_tags)} predicted")
+          true, pred = bio_spans(true_tags), bio_spans(pred_tags)
+          if not true and not pred:
+              return 1.0
+          correct = len(true & pred)
+          precision = correct / len(pred) if pred else 0.0
+          recall = correct / len(true) if true else 0.0
+          return 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
+    seeded_bugs:
+      - |
+        def entity_f1(true_tags: list[str], pred_tags: list[str]) -> float:
+            """Token accuracy, not entity F1."""
+            if len(true_tags) != len(pred_tags):
+                raise ValueError("lengths differ")
+            return sum(t == p for t, p in zip(true_tags, pred_tags)) / len(true_tags)
+      - |
+        def entity_f1(true_tags: list[str], pred_tags: list[str]) -> float:
+            """Divides by zero when nothing is predicted."""
+            if len(true_tags) != len(pred_tags):
+                raise ValueError("lengths differ")
+            true, pred = bio_spans(true_tags), bio_spans(pred_tags)
+            correct = len(true & pred)
+            precision = correct / len(pred)
+            recall = correct / len(true)
+            return 2 * precision * recall / (precision + recall)
+    wrong_answers:
+      - answer: |
+          def entity_f1(true_tags: list[str], pred_tags: list[str]) -> float:
+              """Token accuracy, not entity F1."""
+              if len(true_tags) != len(pred_tags):
+                  raise ValueError("lengths differ")
+              return sum(t == p for t, p in zip(true_tags, pred_tags)) / len(true_tags)
+        triggers: partial
+    hints:
+      - "Check lengths, then build both span sets."
+      - "Correct spans: `len(true & pred)`."
+      - "Guard each division and the F1 denominator."
+    explanation: |
+      Spans compare whole entities, so a span cut short counts as one miss and one false alarm. The guards cover the cases with no entities on one or both sides, which are common on short survey answers.
+
+  - id: B26-L6-E6
+    type: design
+    difficulty: 4
+    prompt: |
+      Plan the evaluation of a LoRA tagger for brand names, fine-tuned on 800 labelled survey answers.
+    slots:
+      - id: metric
+        label: Headline metric
+        options:
+          - {id: entity, text: "Entity-level F1, overall and for each entity type"}
+          - {id: token, text: "Token accuracy"}
+          - {id: loss, text: "Final training loss"}
+        answer: entity
+      - id: compare
+        label: Compare against
+        options:
+          - {id: both, text: "A brand-list lookup and full fine-tuning, on the same validation set"}
+          - {id: none, text: "Nothing: the F1 speaks for itself"}
+          - {id: test, text: "Several set-ups, each scored on the test set"}
+        answer: both
+      - id: seeds
+        label: Seeds
+        options:
+          - {id: three, text: "Three seeds, report mean and range"}
+          - {id: best, text: "Five seeds, report the best"}
+          - {id: one, text: "One seed, to save time"}
+        answer: three
+    model_answer: |
+      - Entity-level F1, overall and for each type, because most tokens are O.
+      - A brand-list lookup is the cheap rival to beat, and full fine-tuning shows what LoRA gives up. Compare all of them on validation.
+      - Three seeds with mean and range, then one final score on the test set.
+    wrong_answers:
+      - answer: {metric: token}
+        feedback: "Most tokens are O, so token accuracy stays high even when brands are missed."
+      - answer: {metric: loss}
+        feedback: "Training loss says how well the model fits its training data, not how it does on new answers."
+      - answer: {compare: none}
+        feedback: "Without a baseline you cannot tell whether a simple lookup would do as well."
+      - answer: {compare: test}
+        feedback: "Choosing between set-ups on the test set makes it validation data. Compare on validation."
+      - answer: {seeds: best}
+        feedback: "The best of five reports luck. Report the mean and the range."
+      - answer: {seeds: one}
+        feedback: "On 800 answers, one seed can be far from typical. In the lab, LoRA's seeds ranged from 0.929 to 0.990."
+    hints:
+      - "Most words in an answer are not brands."
+      - "What would a team without a model use?"
+      - "One seed or the best seed both mislead."
+    explanation: |
+      Entity F1 measures what matters, baselines show whether the model is worth its cost, and several seeds show how much of the score is luck.
+
+recap:
+  - front: "Baselines for a fine-tuned model"
+    back: "The trivial baseline (majority class, or all O), a simple model, and the other fine-tuning strategies, on the same validation set."
+  - front: "Seeds"
+    back: "Run at least three, report mean and range. The best seed reports luck."
+  - front: "Entity-level F1"
+    back: "Spans (type, start, end) must match exactly. Precision over predicted spans, recall over true spans."
+  - front: "Test set"
+    back: "Score it once, at the end. Every extra look turns it into validation data."
+
+claims:
+  - claim: "B26 lab: LoRA with r 4 on 60 labels scored 0.990, 0.982 and 0.929 validation accuracy over seeds 0, 1 and 2."
+    status: verified
+    source: "labs/finetune reference run, PyTorch 2.15.0, November 2026."
+
+practical:
+  platform: laptop
+  title: Compare fine-tuning strategies, then fine-tune a model on your own task
+  intro: |
+    Work in `labs/finetune/` in this repository. You pretrain a small transformer on unlabelled sequences, then fine-tune it on 60 labels four ways: from scratch, a frozen encoder with a new head, full fine-tuning and LoRA. You write the weight loading, the freezing, the warm-up schedule and LoRA, and the tests check each. You need PyTorch 2.15 on the laptop. Then apply the same steps with Hugging Face to a work task. That fine-tuned model is the roadmap's evidence for month 12.
+  steps:
+    - "Run `cd labs/finetune`, create a virtual environment, then `pip install -e .` and `pip install pytest`. Run `pytest`: most tests fail with NotImplementedError. Read `README.md` and every file in `src/finetune_lab/`."
+    - "Write `warmup_linear` in `schedule.py` (lesson B26-L2). Run `pytest tests/test_data_and_schedule.py`."
+    - "Write `load_backbone`, `set_trainable` and `count_parameters` in `strategies.py` (lesson B26-L1), then `LoRALinear` and `add_lora` in `lora.py` (lesson B26-L3). Run `pytest`: every test passes."
+    - "Run `python -m finetune_lab pretrain`, then `python -m finetune_lab compare` and `python -m finetune_lab compare --n-train 600`. Compare your tables with the README's reference numbers."
+    - "Choose a work task with a few hundred labelled texts: coded open answers for classification, or brand names for tagging. Fine-tune a small pretrained encoder from the Hugging Face Hub with transformers and peft (lessons B26-L4 and B26-L5). Use integer labels and `task_type`, and check the load report."
+    - "Evaluate as in this lesson: a majority-class baseline, a simple model, LoRA against full fine-tuning, three seeds, entity-level F1 if you tag. Score the test set once."
+    - "Write your README: the lab tables, your task, the data, every score with its range, and what you would try next. Push it to a new GitHub repository."

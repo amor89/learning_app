@@ -1,0 +1,470 @@
+id: B26-L5
+title: Token classification, named entities and subword labels
+
+concept: |
+  **Named entity recognition** (NER) labels every word. The usual scheme is **BIO**: `B-` begins an entity, `I-` continues it, and `O` is outside any entity. "Ana visited New York" is `B-PER O B-LOC I-LOC`. On open survey answers, NER finds brands, products and places.
+
+  The labels belong to words, but the model sees subword tokens. A BERT tokenizer splits "staffs" into `staff` and `##s`, and adds `[CLS]` and `[SEP]`. Pass the words already split, and ask which word each token came from (transformers 5.22):
+
+  ```python
+  enc = tokenizer(["Ana", "visited", "London", "staffs"], is_split_into_words=True)
+  enc.word_ids()     # [None, 0, 1, 2, 3, 3, None]
+  ```
+
+  `None` marks a special token. A repeated ID marks a word split into several tokens. Align the word labels to tokens with three rules:
+
+  - a special token gets `-100`;
+  - the first token of a word gets the word's label;
+  - any later token of the same word gets `-100`.
+
+  `-100` is the default `ignore_index` of `nn.CrossEntropyLoss` in PyTorch 2.15, and the Hugging Face token-classification loss uses it. Those positions add nothing to the loss, so each word counts once, whatever its number of pieces.
+
+  `AutoModelForTokenClassification.from_pretrained(name, num_labels=len(tags), id2label=..., label2id=...)` returns logits of shape `(batch, tokens, num_labels)`. To predict, take the argmax per token, then read each word's label from its first token. The load report lists the pooler weights as UNEXPECTED. That is fine: a token head does not use the pooler.
+
+  Check alignment on a real example before training. Labels shifted by one position still train, and the loss still falls, but the model learns to tag the word next to each entity.
+
+why_it_matters: |
+  A team trained a model to find product names in open answers. Validation F1 looked fine on short answers and collapsed on answers with brand names such as "SuperSaver". Their alignment gave the word's label to every token by position in the word list, so after the first split word, every label slid one or more tokens to the right. Aligning with `word_ids()` fixed it.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      enc = tokenizer(words, is_split_into_words=True)
+      labels = [-100] + word_labels + [-100]
+      labels = labels + [-100] * (len(enc["input_ids"]) - len(labels))
+    annotations:
+      - find: "labels = [-100] + word_labels + [-100]"
+        note: "Assumes one token per word. After the first split word, every label sits on the wrong token."
+      - find: "labels = labels + [-100] * (len(enc[\"input_ids\"]) - len(labels))"
+        note: "Padding the list to the right length hides the misalignment instead of fixing it."
+  strong:
+    code: |
+      IGNORE = -100
+
+
+      def align_labels(word_ids: list[int | None], word_labels: list[int]) -> list[int]:
+          """Token labels from word labels: first token of each word only.
+
+          Args:
+              word_ids: From enc.word_ids(): the word index of each token, None for special tokens.
+              word_labels: One label ID per word.
+
+          Returns:
+              One label per token, IGNORE for special tokens and later pieces of a word.
+
+          Raises:
+              ValueError: If a word index has no label.
+          """
+          aligned: list[int] = []
+          previous: int | None = None
+          for word_id in word_ids:
+              if word_id is None:
+                  aligned.append(IGNORE)
+              elif word_id != previous:
+                  if word_id >= len(word_labels):
+                      raise ValueError(f"word {word_id} has no label; got {len(word_labels)} labels")
+                  aligned.append(word_labels[word_id])
+              else:
+                  aligned.append(IGNORE)
+              previous = word_id
+          return aligned
+
+
+      def encode_example(tokenizer, words: list[str], tags: list[str], label2id: dict[str, int]) -> dict[str, list[int]]:
+          """Token IDs, attention mask and aligned labels for one sentence."""
+          enc = tokenizer(words, is_split_into_words=True, truncation=True)
+          labels = align_labels(enc.word_ids(), [label2id[t] for t in tags])
+          return {"input_ids": enc["input_ids"], "attention_mask": enc["attention_mask"], "labels": labels}
+    annotations:
+      - find: "if word_id is None:"
+        note: "Special tokens. Use `is None`: word 0 is falsy and would be skipped by `if not word_id`."
+      - find: "elif word_id != previous:"
+        note: "A new word starts: its first token carries the label."
+      - find: "labels = align_labels(enc.word_ids(), [label2id[t] for t in tags])"
+        note: "word_ids() comes from the same call, so it matches the tokens exactly, truncation included."
+  takeaway: |
+    Tokenise with is_split_into_words=True, align with word_ids(), label the first piece of each word, and give everything else -100.
+
+exercises:
+  - id: B26-L5-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Why do special tokens and the later pieces of a split word get the label `-100`?
+    options:
+      - {id: a, text: "Cross-entropy ignores -100 by default, so those positions add nothing to the loss"}
+      - {id: b, text: "-100 is the ID of the O tag"}
+      - {id: c, text: "The tokenizer cannot read -100, so it skips those tokens"}
+      - {id: d, text: "It tells the model to predict nothing at those positions at prediction time"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Each word then counts once in the loss, whatever its number of tokens."}
+      - {id: r2, text: "Negative labels make the gradient smaller."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "O is a real class with its own ID, usually 0. -100 means no label at all."
+      - answer: c
+        feedback: "Labels never reach the tokenizer. They go to the loss."
+      - answer: d
+        feedback: "The model still outputs logits at every position. You choose to read only each word's first token."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Ignored positions give no gradient at all, not a smaller one."
+    hints:
+      - "Which loss argument has a default of -100?"
+      - "What happens to an ignored position's loss?"
+      - "Count words, not pieces."
+    explanation: |
+      `nn.CrossEntropyLoss` has `ignore_index=-100` by default. Positions with that label are skipped, so special tokens do not count and a long word does not count several times.
+
+  - id: B26-L5-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      word_ids = [None, 0, 1, 1, 2, None]
+      word_labels = [1, 0, 3]
+      aligned, previous = [], None
+      for w in word_ids:
+          if w is None:
+              aligned.append(-100)
+          elif w != previous:
+              aligned.append(word_labels[w])
+          else:
+              aligned.append(-100)
+          previous = w
+      print(aligned)
+    answer: |
+      [-100, 1, 0, -100, 3, -100]
+    wrong_answers:
+      - answer: "[-100, 1, 0, 0, 3, -100]"
+        feedback: "The second piece of word 1 repeats the previous word ID, so it gets -100."
+      - answer: "[1, 0, 3, -100, -100, -100]"
+        feedback: "Labels follow word_ids, not list position. The first token is special."
+    hints:
+      - "None gives -100."
+      - "Word 1 has two tokens."
+      - "Only the first token of each word carries the label."
+    explanation: |
+      `[CLS]` and `[SEP]` get -100. Words 0, 1 and 2 put their labels on their first tokens, and the second piece of word 1 gets -100.
+
+  - id: B26-L5-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the special-token rule in the alignment loop.
+    template: |
+      for word_id in enc.word_ids():
+          if word_id is [[g1]]:
+              labels.append([[g2]])
+    gaps:
+      g1: {accepted: ["None"]}
+      g2: {accepted: ["-100"]}
+    wrong_answers:
+      - answer: {g1: "None", g2: "0"}
+        feedback: "0 is usually the O tag, a real class. Special tokens need the ignored label, -100."
+    hints:
+      - "What does word_ids() give for [CLS] and [SEP]?"
+      - "Which label does the loss ignore?"
+      - "`None` and `-100`."
+    explanation: |
+      Special tokens have no word, so `word_ids()` gives `None`. They get `-100`, which the loss skips.
+
+  - id: B26-L5-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `align_labels(word_ids, word_labels) -> list[int]`.
+
+      - A `None` word ID gets `-100`.
+      - The first token of each word gets that word's label. Later tokens of the same word get `-100`.
+      - Raise `ValueError` if a word ID has no label in `word_labels`.
+    starter: |
+      def align_labels(word_ids, word_labels):
+          return [word_labels[w] for w in word_ids]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: align_labels
+          typed: true
+          docstring: true
+          message: "Give align_labels type hints and a docstring."
+      tests:
+        - id: basic
+          code: |
+            got = align_labels([None, 0, 1, 2, 3, 3, None], [1, 0, 3, 0])
+            assert got == [-100, 1, 0, 3, 0, -100, -100], got
+          message: "Label the first token of each word, -100 for later pieces and special tokens."
+        - id: word_zero
+          code: |
+            got = align_labels([None, 0, 0, 1, None], [2, 0])
+            assert got == [-100, 2, -100, 0, -100], got
+          message: "Word 0 is a real word. Test for None with `is None`, not truthiness."
+        - id: guard
+          code: |
+            try:
+                align_labels([None, 0, 1, 2, None], [1, 0])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError when word 2 has no label")
+          message: "Raise ValueError when a word ID has no label."
+    solution: |
+      def align_labels(word_ids: list[int | None], word_labels: list[int]) -> list[int]:
+          """Token labels from word labels, first token of each word only.
+
+          Args:
+              word_ids: Word index per token, None for special tokens.
+              word_labels: One label ID per word.
+
+          Returns:
+              One label per token, -100 where the loss should ignore it.
+
+          Raises:
+              ValueError: If a word index has no label.
+          """
+          aligned: list[int] = []
+          previous: int | None = None
+          for word_id in word_ids:
+              if word_id is None:
+                  aligned.append(-100)
+              elif word_id != previous:
+                  if word_id >= len(word_labels):
+                      raise ValueError(f"word {word_id} has no label")
+                  aligned.append(word_labels[word_id])
+              else:
+                  aligned.append(-100)
+              previous = word_id
+          return aligned
+    seeded_bugs:
+      - |
+        def align_labels(word_ids: list[int | None], word_labels: list[int]) -> list[int]:
+            """Labels every piece of a word."""
+            aligned: list[int] = []
+            for word_id in word_ids:
+                if word_id is None:
+                    aligned.append(-100)
+                elif word_id >= len(word_labels):
+                    raise ValueError("no label")
+                else:
+                    aligned.append(word_labels[word_id])
+            return aligned
+      - |
+        def align_labels(word_ids: list[int | None], word_labels: list[int]) -> list[int]:
+            """Truthiness test drops word 0."""
+            aligned: list[int] = []
+            previous: int | None = None
+            for word_id in word_ids:
+                if not word_id:
+                    aligned.append(-100)
+                elif word_id != previous:
+                    if word_id >= len(word_labels):
+                        raise ValueError("no label")
+                    aligned.append(word_labels[word_id])
+                else:
+                    aligned.append(-100)
+                previous = word_id
+            return aligned
+    wrong_answers:
+      - answer: |
+          def align_labels(word_ids: list[int | None], word_labels: list[int]) -> list[int]:
+              """Labels every piece of a word."""
+              aligned: list[int] = []
+              for word_id in word_ids:
+                  if word_id is None:
+                      aligned.append(-100)
+                  elif word_id >= len(word_labels):
+                      raise ValueError("no label")
+                  else:
+                      aligned.append(word_labels[word_id])
+              return aligned
+        triggers: basic
+    hints:
+      - "Keep the previous word ID."
+      - "`is None` first, then compare with the previous ID."
+      - "Check the ID against `len(word_labels)` before indexing."
+    explanation: |
+      Tracking the previous word ID separates a word's first token from its later pieces. `is None` matters: word 0 is falsy, and a truthiness test would give the first word of every sentence -100.
+
+  - id: B26-L5-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `word_predictions(word_ids, token_preds) -> list[int]`: one predicted label per word, read from each word's first token.
+
+      - `token_preds` holds one predicted label per token, aligned with `word_ids`.
+      - Skip `None` positions. Return the predictions in word order.
+      - Raise `ValueError` if the two lists differ in length.
+    starter: |
+      def word_predictions(word_ids, token_preds):
+          return token_preds
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: word_predictions
+          typed: true
+          docstring: true
+          message: "Give word_predictions type hints and a docstring."
+      tests:
+        - id: first_piece
+          code: |
+            got = word_predictions([None, 0, 1, 1, 2, None], [0, 3, 1, 2, 0, 0])
+            assert got == [3, 1, 0], got
+          message: "Take the prediction at each word's first token and skip special tokens."
+        - id: word_zero
+          code: |
+            got = word_predictions([None, 0, 0, None], [4, 2, 5, 4])
+            assert got == [2], got
+          message: "Word 0 counts. Compare with None using `is None`."
+        - id: guard
+          code: |
+            try:
+                word_predictions([None, 0, None], [1, 2])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for lists of different length")
+          message: "Raise ValueError when word_ids and token_preds differ in length."
+    solution: |
+      def word_predictions(word_ids: list[int | None], token_preds: list[int]) -> list[int]:
+          """One label per word, from the word's first token.
+
+          Args:
+              word_ids: Word index per token, None for special tokens.
+              token_preds: Predicted label per token.
+
+          Returns:
+              Predicted labels in word order.
+
+          Raises:
+              ValueError: If the lists differ in length.
+          """
+          if len(word_ids) != len(token_preds):
+              raise ValueError(f"{len(word_ids)} word IDs but {len(token_preds)} predictions")
+          preds: list[int] = []
+          previous: int | None = None
+          for word_id, pred in zip(word_ids, token_preds):
+              if word_id is not None and word_id != previous:
+                  preds.append(pred)
+              previous = word_id
+          return preds
+    seeded_bugs:
+      - |
+        def word_predictions(word_ids: list[int | None], token_preds: list[int]) -> list[int]:
+            """Keeps the last piece of each word instead of the first."""
+            if len(word_ids) != len(token_preds):
+                raise ValueError("lengths differ")
+            by_word: dict[int, int] = {}
+            for word_id, pred in zip(word_ids, token_preds):
+                if word_id is not None:
+                    by_word[word_id] = pred
+            return [by_word[w] for w in sorted(by_word)]
+      - |
+        def word_predictions(word_ids: list[int | None], token_preds: list[int]) -> list[int]:
+            """Truthiness drops word 0."""
+            if len(word_ids) != len(token_preds):
+                raise ValueError("lengths differ")
+            preds: list[int] = []
+            previous = None
+            for word_id, pred in zip(word_ids, token_preds):
+                if word_id and word_id != previous:
+                    preds.append(pred)
+                previous = word_id
+            return preds
+    wrong_answers:
+      - answer: |
+          def word_predictions(word_ids: list[int | None], token_preds: list[int]) -> list[int]:
+              """Keeps the last piece of each word instead of the first."""
+              if len(word_ids) != len(token_preds):
+                  raise ValueError("lengths differ")
+              by_word: dict[int, int] = {}
+              for word_id, pred in zip(word_ids, token_preds):
+                  if word_id is not None:
+                      by_word[word_id] = pred
+              return [by_word[w] for w in sorted(by_word)]
+        triggers: first_piece
+    hints:
+      - "Check the lengths first."
+      - "Walk both lists together with `zip`."
+      - "Keep a prediction when the word ID is not None and differs from the previous one."
+    explanation: |
+      Training put each word's label on its first token, so prediction reads the same position. Later pieces were never trained against a label and are less reliable.
+
+  - id: B26-L5-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      The model never learns the first word of any sentence. Tap the line responsible, then fix it.
+    code: |
+      def align_labels(word_ids, word_labels):
+          aligned, previous = [], None
+          for word_id in word_ids:
+              if not word_id:
+                  aligned.append(-100)
+              elif word_id != previous:
+                  aligned.append(word_labels[word_id])
+              else:
+                  aligned.append(-100)
+              previous = word_id
+          return aligned
+    bug_lines: [4]
+    fix_checker:
+      kind: python
+      tests:
+        - id: word_zero
+          code: |
+            got = align_labels([None, 0, 1, 1, None], [2, 0])
+            assert got == [-100, 2, 0, -100, -100], got
+          message: "Word 0 must get its label. Test for None with `is None`."
+    fix_solution: |
+      def align_labels(word_ids, word_labels):
+          aligned, previous = [], None
+          for word_id in word_ids:
+              if word_id is None:
+                  aligned.append(-100)
+              elif word_id != previous:
+                  aligned.append(word_labels[word_id])
+              else:
+                  aligned.append(-100)
+              previous = word_id
+          return aligned
+    wrong_answers:
+      - lines: [6]
+        feedback: "Comparing with the previous ID is how a new word is spotted. Word 0 never reaches this line."
+      - lines: [10]
+        feedback: "Tracking the previous ID is right. The first word is lost earlier."
+    hints:
+      - "What is the word ID of the first word?"
+      - "Is 0 truthy?"
+      - "Test for None with `is None`."
+    explanation: |
+      Word 0 is falsy, so `if not word_id` treats it like a special token and gives it -100. The first word of every sentence never trains. `if word_id is None` separates the two.
+
+recap:
+  - front: "BIO tags"
+    back: "B- begins an entity, I- continues it, O is outside. \"New York\" is B-LOC I-LOC."
+  - front: "word_ids() (transformers 5.22)"
+    back: "With is_split_into_words=True, the word index of each token: None for special tokens, repeats for split words."
+  - front: "Label alignment"
+    back: "None gets -100, a word's first token gets its label, later pieces get -100. Test with `is None`, never truthiness."
+  - front: "-100"
+    back: "The default ignore_index of nn.CrossEntropyLoss (PyTorch 2.15). Those positions add nothing to the loss."
+
+claims:
+  - claim: "transformers 5.22.1: a BERT tokenizer with a vocabulary holding 'staff' and '##s' tokenises ['Ana', 'visited', 'London', 'staffs'] with is_split_into_words=True to [CLS] ana visited london staff ##s [SEP], word_ids() [None, 0, 1, 2, 3, 3, None]; BertForTokenClassification returns logits (1, 7, 5), and its load report from a saved BertModel lists pooler.dense weights as UNEXPECTED and classifier weights as MISSING."
+    status: verified
+    source: "Run locally on transformers 5.22.1 and PyTorch 2.15.0 with a local vocabulary and a BERT built from a config, November 2026."
+  - claim: "PyTorch 2.15: nn.CrossEntropyLoss().ignore_index is -100."
+    status: verified
+    source: "Run on PyTorch 2.15.0, November 2026."
