@@ -4,7 +4,7 @@ Standards for every file in this repository. They come from `reference/pipelines
 
 ## Project
 
-A static, offline-capable learning web app (GitHub Pages, PWA, Pyodide) with four tracks: A Databricks pipeline engineering, B Python for data science, C Microsoft Fabric, D Finding errors in code. Lesson content lives in `content/` and drives both the app and the handbook. Never write lesson text twice.
+A static, offline-capable learning web app (GitHub Pages, PWA, Pyodide) with four tracks: A Databricks pipeline engineering, B Python for data science, C Microsoft Fabric, D Finding errors in code. Lesson content lives in `content/` and drives both the app and the handbook. Never write lesson text twice. Add every new module to a stage in `content/pathways.yaml`: the loader rejects a module that sits in no pathway.
 
 ## Writing style for lesson content
 

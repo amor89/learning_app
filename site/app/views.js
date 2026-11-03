@@ -1,5 +1,6 @@
 // Page views. Each view returns a DOM node for #app.
 import { renderExercise } from "./exercises.js";
+import * as paths from "./pathways.js";
 import * as store from "./store.js";
 import {
   codeBlock,
@@ -36,12 +37,31 @@ function notFound(what) {
 
 // Dashboard ------------------------------------------------------------------
 
+function nextUpCard(step, label = "Next up") {
+  if (!step) return h("p", { class: "card" }, "Every published lesson in this pathway is complete.");
+  return h("a", { class: "card continue", href: `#/lesson/${step.lesson.id}` },
+    h("span", { class: "muted small" }, `${label} · ${step.stage.title} · ${step.module.id} ${step.module.title}`),
+    h("strong", {}, step.lesson.title),
+  );
+}
+
+function stageLink(app, pathway, stage, modules, current) {
+  const p = paths.stageProgress(app.state, stage, modules);
+  return h("li", {}, h("a", { class: "card stage-link", href: `#/path/${pathway.id}/${stage.id}` },
+    h("span", { class: "module-head" }, h("strong", {}, stage.title), stage.id === current ? h("span", { class: "pill ok" }, "Now") : null),
+    progressBar(p.share, `${stage.title} progress`),
+    h("span", { class: "muted small" }, `${p.done} of ${p.total} exercises · ${stage.modules.join(", ")}`),
+  ));
+}
+
 export function dashboard(app) {
   const { index, state } = app;
+  const modules = paths.moduleIndex(index);
+  const pathway = paths.chosenPathway(index, state);
+  const progress = paths.pathwayProgress(state, pathway, modules);
+  const current = paths.currentStageId(state, pathway, modules);
   const due = store.dueCards(state).length;
   const streak = store.currentStreak(state);
-  const next = allLessons(index).find((l) => !store.lessonComplete(state, l));
-  const bands = store.bandMastery(state, index).filter((b) => b.exercises > 0);
   const badges = Object.keys(state.badges).length;
 
   return h(
@@ -56,12 +76,123 @@ export function dashboard(app) {
       h("div", { class: "stat" }, h("span", { class: "stat-value" }, badges), h("span", { class: "stat-label" }, "Badges")),
       h("a", { class: "stat link", href: "#/review" }, h("span", { class: "stat-value" }, due), h("span", { class: "stat-label" }, "Cards due")),
     ),
-    next
-      ? h("a", { class: "card continue", href: `#/lesson/${next.id}` },
-          h("span", { class: "muted small" }, `Continue · ${next.module.id} ${next.module.title}`),
-          h("strong", {}, next.title),
-        )
-      : h("p", { class: "card" }, "Every published lesson is complete. New lessons arrive with each build phase."),
+    nextUpCard(paths.nextStep(state, pathway, modules), "Continue"),
+    h("div", { class: "card pathway-card" },
+      h("span", { class: "track-id" }, "Your pathway"),
+      h("strong", {}, pathway.title),
+      progressBar(progress.share, `${pathway.title} progress`),
+      h("span", { class: "muted small" }, `${progress.done} of ${progress.total} exercises done`),
+      h("div", { class: "actions" },
+        h("a", { class: "btn secondary", href: `#/path/${pathway.id}` }, "Open pathway"),
+        h("a", { class: "btn ghost", href: "#/paths" }, "Change pathway"),
+      ),
+    ),
+    h("h2", {}, "Stages"),
+    h("ol", { class: "stage-list" }, pathway.stages.map((stage) => stageLink(app, pathway, stage, modules, current))),
+    h("p", {}, h("a", { href: "#/library" }, "All tracks, mastery and handbook downloads")),
+  );
+}
+
+// Pathways ---------------------------------------------------------------------
+
+export function pathwaysView(app) {
+  const modules = paths.moduleIndex(app.index);
+  const chosen = paths.chosenPathway(app.index, app.state);
+  return h(
+    "section",
+    { class: "page" },
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard")),
+    h("h1", {}, "Pathways"),
+    h("p", {}, "Each pathway is an ordered route through the modules towards one goal. Pick one, and the dashboard follows it."),
+    h("ol", { class: "module-list" }, app.index.pathways.map((pathway) => {
+      const p = paths.pathwayProgress(app.state, pathway, modules);
+      const count = pathway.stages.reduce((n, s) => n + s.modules.length, 0);
+      return h("li", {}, h("a", { class: "card", href: `#/path/${pathway.id}` },
+        h("span", { class: "module-head" }, h("strong", {}, pathway.title), pathway.id === chosen.id ? h("span", { class: "pill ok" }, "Your pathway") : null),
+        h("span", { class: "muted small" }, pathway.summary),
+        progressBar(p.share, `${pathway.title} progress`),
+        h("span", { class: "small" }, `${pathway.stages.length} stages · ${count} modules · ${p.done} of ${p.total} exercises done`),
+      ));
+    })),
+  );
+}
+
+function lessonRow(app, lesson) {
+  const complete = store.lessonComplete(app.state, lesson);
+  const lab = lesson.practical ? h("span", { class: "pill" }, lesson.practical === "laptop" ? "Laptop lab" : `${lesson.practical[0].toUpperCase()}${lesson.practical.slice(1)} practical`) : null;
+  return h("li", {}, h("a", { class: `path-lesson${complete ? " done" : ""}`, href: `#/lesson/${lesson.id}` },
+    h("span", { class: "path-lesson-title" }, lesson.title),
+    h("span", { class: "muted small" }, lessonStatus(app.state, lesson), lab ? " " : "", lab),
+  ));
+}
+
+function moduleBlock(app, module) {
+  const mastery = store.masteryOf(app.state, store.moduleExercises(module));
+  return h("li", { class: "card path-module" },
+    h("a", { class: "module-head", href: `#/module/${module.id}` },
+      h("strong", {}, `${module.id} ${module.title}`),
+      h("span", { class: "muted small" }, module.lessons.length ? pct(mastery) : "soon"),
+    ),
+    module.lessons.length
+      ? h("ol", { class: "path-lessons" }, module.lessons.map((l) => lessonRow(app, l)))
+      : h("span", { class: "muted small" }, "Coming in a later phase"),
+  );
+}
+
+export function pathwayView(app, pathwayId, stageId) {
+  const pathway = app.index.pathways.find((p) => p.id === pathwayId);
+  if (!pathway) return notFound(`Pathway ${pathwayId}`);
+  const modules = paths.moduleIndex(app.index);
+  const chosen = paths.chosenPathway(app.index, app.state);
+  const progress = paths.pathwayProgress(app.state, pathway, modules);
+  const current = paths.currentStageId(app.state, pathway, modules);
+  const open = pathway.stages.some((s) => s.id === stageId) ? stageId : current;
+  if (stageId) setTimeout(() => document.getElementById(`stage-${stageId}`)?.scrollIntoView(), 0);
+
+  return h(
+    "section",
+    { class: "page" },
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard"), " › ", h("a", { href: "#/paths" }, "Pathways")),
+    h("h1", {}, pathway.title),
+    h("p", {}, pathway.summary),
+    progressBar(progress.share, `${pathway.title} progress`),
+    h("p", { class: "muted small" }, `${progress.done} of ${progress.total} exercises done`),
+    pathway.id === chosen.id
+      ? h("p", {}, h("span", { class: "pill ok" }, "Your pathway"))
+      : h("div", { class: "actions" }, h("button", {
+          type: "button",
+          class: "btn",
+          onclick: () => {
+            paths.choosePathway(app.state, pathway.id);
+            app.replaceState(app.state);
+          },
+        }, "Make this my pathway")),
+    nextUpCard(paths.nextStep(app.state, pathway, modules)),
+    h("ol", { class: "path-stages" }, pathway.stages.map((stage, i) => {
+      const p = paths.stageProgress(app.state, stage, modules);
+      return h("li", {}, h("details", { class: "path-stage", id: `stage-${stage.id}`, open: stage.id === open },
+        h("summary", {},
+          h("span", { class: "module-head" }, h("strong", {}, `${i + 1}. ${stage.title}`), stage.id === current ? h("span", { class: "pill ok" }, "Now") : null),
+          progressBar(p.share, `${stage.title} progress`),
+          h("span", { class: "muted small" }, `${p.done} of ${p.total} exercises`),
+        ),
+        h("p", { class: "muted small" }, stage.summary),
+        h("ol", { class: "module-list" }, paths.stageModules(stage, modules).map((m) => moduleBlock(app, m))),
+      ));
+    })),
+  );
+}
+
+// Library: tracks, mastery and downloads ---------------------------------------
+
+export function libraryView(app) {
+  const { index, state } = app;
+  const bands = store.bandMastery(state, index).filter((b) => b.exercises > 0);
+  return h(
+    "section",
+    { class: "page" },
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard")),
+    h("h1", {}, "All tracks and downloads"),
     h("h2", {}, "Tracks"),
     h(
       "div",
@@ -258,8 +389,16 @@ export async function lessonView(app, lessonId) {
     h("section", { id: "practice" }, h("h2", {}, "Practice"), dots, stage),
     h("section", { id: "recap" }, h("h2", {}, "Recap"), recapHolder),
     practical,
+    nextInPathway(app, lesson.id),
     claimsSection(lesson.claims),
   );
+}
+
+function nextInPathway(app, lessonId) {
+  const pathway = paths.chosenPathway(app.index, app.state);
+  const following = paths.followingLesson(pathway, paths.moduleIndex(app.index), lessonId);
+  if (!following) return null;
+  return h("section", { id: "next" }, h("h2", {}, "Next in your pathway"), nextUpCard(following, pathway.title));
 }
 
 // Review -----------------------------------------------------------------------

@@ -229,6 +229,7 @@ def build_index(course: Course, version: str) -> dict[str, Any]:
                             "title": lesson.title,
                             "exercises": [e.id for e in lesson.exercises],
                             "xp": sum(e.difficulty * XP_PER_LEVEL for e in lesson.exercises),
+                            "practical": lesson.practical.platform if lesson.practical else None,
                         }
                         for lesson in module.lessons
                     ],
@@ -247,6 +248,7 @@ def build_index(course: Course, version: str) -> dict[str, Any]:
         "version": version,
         "bands": [b.model_dump() for b in course.roadmap.bands],
         "tracks": tracks,
+        "pathways": [p.model_dump() for p in course.pathways],
         "downloads": download_links("handbook-full"),
     }
 

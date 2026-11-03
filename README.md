@@ -4,6 +4,12 @@ A personal, offline-capable course with four tracks: Databricks pipeline enginee
 
 Status: Phase 6 complete. All four tracks and three capstones are written: Track A (Databricks pipeline engineering) 33 lessons, Track B (Python for data science) 104, including PyTorch foundations for roadmap months 1 to 3, convolutional networks for months 4 to 6, attention and transformers from scratch for months 7 to 9, fine-tuning for months 10 to 12, prompting, RAG and LLM evaluation for months 13 to 15, and serving and monitoring for months 16 to 18, Track C (Microsoft Fabric) 33, checked against Microsoft Learn, Track D (Finding errors in code) 26, and the Capstones track with 3 projects.
 
+## Pathways
+
+The **Paths** tab lists four routes through the modules: the Senior Data Scientist roadmap, Databricks pipeline engineer, Microsoft Fabric, and Finding errors in code. Each pathway splits into stages, and each stage lists its modules and lessons with your progress, so you reach any lesson in two taps. Choose one with **Make this my pathway**: the dashboard's **Continue** button, its stage list and the **Next in your pathway** card at the end of each lesson then follow it. Tracks, module mastery and the handbook downloads sit under **All tracks, mastery and handbook downloads** on the dashboard.
+
+`content/pathways.yaml` defines the pathways. The build rejects a pathway that names a missing module, lists a module twice, or leaves any module out of every pathway.
+
 ## Install on your iPhone
 
 1. Open the site in **Safari**.
@@ -67,7 +73,7 @@ pip install -e . --group dev
 python scripts/build_all.py
 ruff check . && ruff format --check . && mypy
 pytest                                   # Python checkers: solutions pass, seeded bugs fail
-node --test tests/app/checkers.test.mjs tests/app/store.test.mjs
+node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs
 ```
 
 WeasyPrint needs Pango. On macOS: `brew install pango`. On Ubuntu: `apt install libpango-1.0-0 libpangoft2-1.0-0`.
