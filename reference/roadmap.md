@@ -19,5 +19,5 @@ Running throughout:
 
 Tagging rule for the learning app:
 - Track A and Track C modules support months 16-18 (production and MLOps) and current work.
-- Track B modules B1 to B14 are prerequisites for all months. B15 maps to months 7-9. B16 maps to months 1-3.
+- Track B modules B1 to B14 are prerequisites for all months. B15 maps to months 7-9. B16 maps to months 1-3. B20 to B22 (prompting, RAG and LLM evaluation, with the RAG lab) map to months 13-15.
 - Track D applies to every month.

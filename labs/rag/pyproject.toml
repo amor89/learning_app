@@ -1,0 +1,22 @@
+# The B21 RAG lab. From this folder: `pip install -e .`, then `pytest`.
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "survey-rag"
+version = "0.1.0"
+description = "Retrieval-augmented generation over survey methodology notes"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2,<3", "scikit-learn>=1.9,<1.10"]
+
+[project.optional-dependencies]
+llm = ["anthropic>=2.4,<3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--strict-markers"

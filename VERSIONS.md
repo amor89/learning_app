@@ -37,6 +37,7 @@ Checked on 25 September 2026. Status key:
 | pytest-cov | 7.1.0, with coverage 7.17.0 | 7.1.x | Verified (PyPI, local run). Dev group, for module B19 and its lab |
 | python-docx | 1.2.0 | 1.2.x | Verified (PyPI) |
 | WeasyPrint (PDF build) | 70.0 | 70.x | Verified (PyPI) |
+| anthropic (Python SDK) | 2.4.0 | 2.4.x, optional `llm` extra of `labs/rag` only | Verified (PyPI, signatures and source inspected locally; no live API call). Modules B20 to B22 and the RAG lab |
 
 ## Track B libraries (tested, not pinned for the app)
 
@@ -51,6 +52,7 @@ Checked on 25 September 2026. Status key:
 | PyTorch | 2.14.0, CPU | scratch environment, Python 3.12, PyPI wheel | Verified (local run). Not in the dev group or Pyodide |
 | sentence-transformers | Not installed | none | Unverified. Its API in B15-L1 comes from the library documentation |
 | uv | 0.8.17 | build machine | Verified (local run) |
+| scikit-learn TfidfVectorizer | 1.9.1 (dev), 1.8.0 (parity) | `labs/rag` index | Verified (local run). Lab retrieval on 12 gold questions: recall at 3 1.000, MRR 0.903 at chunk size 80 |
 | mutmut | 3.8.1 | not installed | Search only (PyPI listing). B19-L8 names it as an example of mutation testing and teaches no commands |
 
 ## Browser runtime
@@ -180,6 +182,13 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 | pytest-cov branch coverage: 100% line and 83% branch for one-sided `if`, missing jump `2->4`; `--cov-fail-under` exits 1; `--strict-markers` and `strict = true` reject unregistered markers. | Verified | Local, pytest-cov 7.1.0, coverage 7.17.0 |
 | Start-here modules: `0.0` falsy and `f"{0.125:.1%}"`; pandas `df[w > 0 & in_scope]` silently ignores `in_scope`; `size`/`count`/`sum` named aggregations; left against inner merge; `np.std` ddof 0 against pandas ddof 1 (2.0 and 2.138); CSV loses `01234`, Parquet keeps it. | Verified | Local, pandas 3.0.2 and 3.0.6, NumPy 2.4.6, pyarrow 22.0.0 and 26.0.0 |
 | Start-here modules, Spark: transformations against actions, immutable `withColumn`, `COUNT(*)` against `COUNT(col)`, `= NULL` matches nothing, `LEFT ANTI JOIN`, `ROW_NUMBER` latest per key, Delta `_delta_log` commits and `VERSION AS OF`. | Verified | Local, Spark 4.0.4, delta-spark 4.0.1 |
+
+| anthropic 2.4.0: `messages.create` takes `model`, `max_tokens`, `system`, `messages` and no `temperature`; `messages.parse(output_format=...)` and `ParsedMessage.parsed_output`; `messages.count_tokens(...).input_tokens`; `StopReason` values end_turn, max_tokens, stop_sequence, tool_use, pause_turn, refusal, model_context_window_exceeded; retries on connection errors, 408, 409, 429 and >= 500, `DEFAULT_MAX_RETRIES = 2`, 600 s timeout; `beta.messages.create` accepts `fallbacks="default"` with beta `server-side-fallback-2026-07-01`. | Verified | anthropic 2.4.0 source and `inspect.signature`, November 2026. No live API call: the build has no API key |
+| Model IDs `claude-opus-5-5` and `claude-sonnet-5-5`. | Search only | Anthropic API skill model table, cached 2026-10-06 |
+| pydantic `model_validate_json`: `json_invalid` for prose before JSON, `literal_error`, `less_than_equal`; lax mode converts the JSON string "0.7" to float. | Verified | Local, pydantic 2.12.5 and 2.14.2 |
+| Reciprocal rank fusion: score is the sum of 1 / (k + rank); k = 60 fixed in a pilot and not critical (Cormack, Clarke and Buettcher, SIGIR 2009). | Search only | Search results quoting the paper. plg.uwaterloo.ca blocked by the build network |
+| LLM judges show position, verbosity and self-enhancement bias (Zheng et al., NeurIPS 2023, arXiv 2306.05685). | Search only | Search results. arxiv.org blocked by the build network |
+| Modules B20 to B22 worked numbers: SHA-256 hex digest length 64; token F1 of "Weights are not capped at 5" against "Weights are capped at 5" is 0.909; Wilson 45/50 is 0.786 to 0.957. | Verified | Local, Python 3.11 and 3.13, statsmodels 0.14 |
 
 ## Track D facts (checked September 2026)
 

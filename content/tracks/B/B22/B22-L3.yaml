@@ -1,0 +1,483 @@
+id: B22-L3
+title: Regression evals and release gates for prompt changes
+
+concept: |
+  Every change to a prompt, model, chunk size or retrieval setting can fix some answers and break others. A **regression eval** runs one evaluation set on the current version, the **baseline**, and on the **candidate**, then decides whether the candidate may ship.
+
+  - **Freeze the set and split it.** Keep a development set for trying ideas and a test set you only use to decide. Tuning on the test set makes its score optimistic, as with any model (module B11).
+  - **Compare item by item.** Pass rates hide churn. A candidate at 84% against a baseline at 84% can have fixed 20 items and broken 20 others. Count the **fixed** items (fail to pass) and the **broken** ones (pass to fail), and read every broken one.
+  - **Repeat noisy items.** Replies vary between calls, so run each item three times and take the majority verdict: it passes when `sum(runs) > len(runs) / 2`. An item that passes one run in three is unstable. Flag it, whatever the majority says.
+  - **Write the gate before you run.** For example: every critical item passes, at most two items break, and the pass rate drops by no more than two points. Critical items include questions the sources cannot answer, where the only right reply is the refusal.
+  - **Log the run.** Record model, prompt version, eval set version, verdicts per item and token counts in MLflow (module B14) or the run log. A later regression can then be traced to the change that caused it.
+
+  ```python
+  fixed = sorted(q for q in baseline if not baseline[q] and candidate[q])
+  broken = sorted(q for q in baseline if baseline[q] and not candidate[q])
+  ```
+
+  Both runs must cover the same items. A candidate that skipped a hard question would look better than it is, so check the keys match before you compare.
+
+why_it_matters: |
+  A prompt rewrite raised the pass rate from 86% to 89%, and it shipped. A week later, clients received confident answers about wave W15, which had not started: the new prompt had stopped refusing questions the sources could not answer. Three critical "must refuse" items had broken, hidden inside a higher average. A gate that required every critical item to pass would have blocked the release.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def should_ship(baseline, candidate):
+          return sum(candidate.values()) >= sum(baseline.values())
+    annotations:
+      - find: "return sum(candidate.values()) >= sum(baseline.values())"
+        note: "Only totals. Broken critical items and churn stay hidden, and mismatched items go unnoticed."
+  strong:
+    code: |
+      def compare_runs(baseline: dict[str, bool], candidate: dict[str, bool]) -> dict[str, list[str]]:
+          """Items fixed and broken by the candidate.
+
+          Raises:
+              ValueError: If the two runs cover different items.
+          """
+          if baseline.keys() != candidate.keys():
+              raise ValueError("baseline and candidate cover different items")
+          return {
+              "fixed": sorted(q for q in baseline if not baseline[q] and candidate[q]),
+              "broken": sorted(q for q in baseline if baseline[q] and not candidate[q]),
+          }
+
+
+      def release_gate(
+          baseline: dict[str, bool],
+          candidate: dict[str, bool],
+          critical: set[str],
+          max_broken: int = 2,
+          max_drop: float = 0.02,
+      ) -> tuple[bool, list[str]]:
+          """Decide whether the candidate may ship, with the reasons if not.
+
+          Args:
+              baseline: Pass or fail per item for the current version.
+              candidate: Pass or fail per item for the new version.
+              critical: Items that must pass, such as must-refuse questions.
+              max_broken: Most items allowed to go from pass to fail.
+              max_drop: Largest allowed fall in pass rate, as a share.
+
+          Returns:
+              True with no reasons, or False with every rule that failed.
+          """
+          changes = compare_runs(baseline, candidate)
+          reasons = [f"critical:{q}" for q in sorted(critical) if not candidate[q]]
+          if len(changes["broken"]) > max_broken:
+              reasons.append("too_many_broken")
+          drop = sum(baseline.values()) / len(baseline) - sum(candidate.values()) / len(candidate)
+          if drop > max_drop:
+              reasons.append("pass_rate_drop")
+          return not reasons, reasons
+    annotations:
+      - find: "if baseline.keys() != candidate.keys():"
+        note: "Both runs must cover the same items."
+      - find: '"broken": sorted(q for q in baseline if baseline[q] and not candidate[q]),'
+        note: "Pass to fail: read every one of these."
+      - find: 'reasons = [f"critical:{q}" for q in sorted(critical) if not candidate[q]]'
+        note: "Critical items must pass in the candidate, whatever the average."
+      - find: "return not reasons, reasons"
+        note: "The decision comes with every reason, for the release note."
+  takeaway: |
+    Compare per item, repeat noisy items, write the gate first, and never let a higher average hide a broken critical item.
+
+exercises:
+  - id: B22-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      On the test set, the baseline and the candidate prompt both pass 84% of items. What do you do before deciding?
+    options:
+      - {id: a, text: "Count the fixed and broken items and read every broken one"}
+      - {id: b, text: "Ship the candidate: it is no worse"}
+      - {id: c, text: "Keep the baseline: it is no worse"}
+      - {id: d, text: "Tune the candidate on the test set until it passes 90%"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Equal pass rates can hide many fixes and as many breaks, including critical ones."}
+      - {id: r2, text: "Reading items is faster than computing a pass rate."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Equal totals can hide broken critical items. Look per item first."
+      - answer: c
+        feedback: "The candidate may fix important items. You cannot tell from the totals."
+      - answer: d
+        feedback: "Tuning on the test set makes its score optimistic. Tune on the development set."
+      - answer: a|r2
+        feedback: "Right step, wrong reason. It is about churn hidden by equal totals."
+    hints:
+      - "Can two runs with the same total differ?"
+      - "Which items matter most?"
+      - "Fixed and broken."
+    explanation: |
+      Equal totals say nothing about which items changed. Count fixed and broken items, and read the broken ones.
+
+  - id: B22-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      baseline = {"q1": True, "q2": True, "q3": False, "q4": False, "q5": True}
+      candidate = {"q1": True, "q2": False, "q3": True, "q4": True, "q5": True}
+      fixed = sorted(q for q in baseline if not baseline[q] and candidate[q])
+      broken = sorted(q for q in baseline if baseline[q] and not candidate[q])
+      print(sum(baseline.values()), sum(candidate.values()), fixed, broken)
+    answer: |
+      3 4 ['q3', 'q4'] ['q2']
+    wrong_answers:
+      - answer: "3 4 ['q3', 'q4'] []"
+        feedback: "q2 passed in the baseline and fails in the candidate. It is broken."
+      - answer: "3 4 ['q2'] ['q3', 'q4']"
+        feedback: "Fixed means fail to pass. q3 and q4 went from False to True."
+    hints:
+      - "sum counts True as 1."
+      - "Which items went from False to True?"
+      - "And from True to False?"
+    explanation: |
+      The candidate passes one more item overall, but it fixed two and broke one. The broken item, q2, needs reading before any release.
+
+  - id: B22-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Three runs per item: take the majority verdict, and flag items whose runs disagree.
+    template: |
+      passed = sum(runs) [[g1]] len(runs) / 2
+      unstable = 0 < sum(runs) < [[g2]](runs)
+    gaps:
+      g1: {accepted: [">"]}
+      g2: {accepted: [len]}
+    wrong_answers:
+      - answer: {g1: ">=", g2: len}
+        feedback: "With an even number of runs, >= would pass a split vote. A majority is strictly more than half."
+    hints:
+      - "A majority is more than half."
+      - "Unstable: some runs pass, but not all."
+      - "`>` and `len`."
+    explanation: |
+      A majority needs more than half the runs to pass. An item is unstable when the pass count is above 0 and below the number of runs.
+
+  - id: B22-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `compare_runs(baseline: dict[str, bool], candidate: dict[str, bool]) -> dict[str, list[str]]`.
+
+      - Raise `ValueError` when the two dicts have different keys.
+      - Return `{"fixed": [...], "broken": [...]}`: items that went from fail to pass, and from pass to fail, each sorted.
+    starter: |
+      def compare_runs(baseline, candidate):
+          return {"fixed": [], "broken": []}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: compare_runs
+          typed: true
+          docstring: true
+          message: "Give compare_runs type hints and a docstring."
+      tests:
+        - id: churn
+          code: |
+            baseline = {"q5": True, "q2": True, "q3": False, "q4": False, "q1": True}
+            candidate = {"q1": True, "q2": False, "q3": True, "q4": True, "q5": False}
+            assert compare_runs(baseline, candidate) == {"fixed": ["q3", "q4"], "broken": ["q2", "q5"]}
+          message: "Fixed is fail to pass and broken is pass to fail, each sorted."
+        - id: no_change
+          code: |
+            same = {"a": True, "b": False}
+            assert compare_runs(same, dict(same)) == {"fixed": [], "broken": []}
+          message: "Unchanged items are neither fixed nor broken."
+        - id: same_items
+          code: |
+            for base, cand in [({"a": True}, {"a": True, "b": True}), ({"a": True, "b": False}, {"a": True})]:
+                try:
+                    compare_runs(base, cand)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for keys {set(base)} and {set(cand)}")
+          message: "Raise ValueError when the two runs cover different items."
+    solution: |
+      def compare_runs(baseline: dict[str, bool], candidate: dict[str, bool]) -> dict[str, list[str]]:
+          """Items fixed and broken by the candidate.
+
+          Args:
+              baseline: Pass or fail per item for the current version.
+              candidate: Pass or fail per item for the new version.
+
+          Returns:
+              Sorted item IDs under "fixed" (fail to pass) and "broken" (pass to fail).
+
+          Raises:
+              ValueError: If the two runs cover different items.
+          """
+          if baseline.keys() != candidate.keys():
+              raise ValueError("baseline and candidate cover different items")
+          return {
+              "fixed": sorted(q for q in baseline if not baseline[q] and candidate[q]),
+              "broken": sorted(q for q in baseline if baseline[q] and not candidate[q]),
+          }
+    seeded_bugs:
+      - |
+        def compare_runs(baseline: dict[str, bool], candidate: dict[str, bool]) -> dict[str, list[str]]:
+            """Ignores items missing from the candidate."""
+            return {
+                "fixed": sorted(q for q in candidate if not baseline[q] and candidate[q]),
+                "broken": sorted(q for q in candidate if baseline[q] and not candidate[q]),
+            }
+      - |
+        def compare_runs(baseline: dict[str, bool], candidate: dict[str, bool]) -> dict[str, list[str]]:
+            """Swaps fixed and broken."""
+            if baseline.keys() != candidate.keys():
+                raise ValueError("different items")
+            return {
+                "fixed": sorted(q for q in baseline if baseline[q] and not candidate[q]),
+                "broken": sorted(q for q in baseline if not baseline[q] and candidate[q]),
+            }
+      - |
+        def compare_runs(baseline: dict[str, bool], candidate: dict[str, bool]) -> dict[str, list[str]]:
+            """Unsorted."""
+            if baseline.keys() != candidate.keys():
+                raise ValueError("different items")
+            return {
+                "fixed": [q for q in baseline if not baseline[q] and candidate[q]],
+                "broken": [q for q in baseline if baseline[q] and not candidate[q]],
+            }
+    wrong_answers:
+      - answer: |
+          def compare_runs(baseline: dict[str, bool], candidate: dict[str, bool]) -> dict[str, list[str]]:
+              """Ignores items missing from the candidate."""
+              return {
+                  "fixed": sorted(q for q in candidate if not baseline[q] and candidate[q]),
+                  "broken": sorted(q for q in candidate if baseline[q] and not candidate[q]),
+              }
+        triggers: same_items
+    hints:
+      - "Compare `baseline.keys()` with `candidate.keys()` first."
+      - "Fixed: `not baseline[q] and candidate[q]`."
+      - "Wrap each comprehension in `sorted`."
+    explanation: |
+      The key check stops a run with missing items from looking better than it is. The two comprehensions split the changes by direction.
+
+  - id: B22-L3-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `release_gate(baseline, candidate, critical, max_broken=2, max_drop=0.02) -> tuple[bool, list[str]]`. `compare_runs` is defined for you.
+
+      - Add `"critical:<id>"` for each critical item that fails in the candidate, in sorted order.
+      - Add `"too_many_broken"` when more than `max_broken` items broke.
+      - Add `"pass_rate_drop"` when the candidate's pass rate is more than `max_drop` below the baseline's.
+      - Return `(True, [])` when no rule fails, otherwise `(False, reasons)`.
+    starter: |
+      def release_gate(baseline, candidate, critical, max_broken=2, max_drop=0.02):
+          return sum(candidate.values()) >= sum(baseline.values()), []
+    checker:
+      kind: python
+      setup: |
+        def compare_runs(baseline, candidate):
+            if baseline.keys() != candidate.keys():
+                raise ValueError("baseline and candidate cover different items")
+            return {
+                "fixed": sorted(q for q in baseline if not baseline[q] and candidate[q]),
+                "broken": sorted(q for q in baseline if baseline[q] and not candidate[q]),
+            }
+
+
+        def _run(passes, total=100):
+            return {f"q{i:03d}": i < passes for i in range(total)}
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: release_gate
+          typed: true
+          docstring: true
+          message: "Give release_gate type hints and a docstring."
+      tests:
+        - id: ships
+          code: |
+            base = _run(80)
+            cand = dict(base, q090=True, q091=True)
+            assert release_gate(base, cand, {"q000"}) == (True, [])
+          message: "Return (True, []) when every rule passes."
+        - id: critical
+          code: |
+            base = _run(80)
+            cand = dict(base, q005=False, q090=True, q091=True)
+            assert release_gate(base, cand, {"q005", "q001"}) == (False, ["critical:q005"])
+            cand = dict(base, q090=True)
+            assert release_gate(base, cand, {"q095"}) == (False, ["critical:q095"])
+          message: "Fail every critical item that fails in the candidate, even if it failed before too."
+        - id: broken_and_drop
+          code: |
+            base = _run(80)
+            cand = dict(base, q010=False, q011=False, q012=False, q090=True, q091=True, q092=True)
+            assert release_gate(base, cand, set()) == (False, ["too_many_broken"])
+            cand = dict(base, q010=False, q011=False, q012=False)
+            assert release_gate(base, cand, set(), max_broken=5) == (False, ["pass_rate_drop"])
+            assert release_gate(base, cand, set(), max_broken=5, max_drop=0.05) == (True, [])
+          message: "Add too_many_broken above max_broken, and pass_rate_drop when the rate falls by more than max_drop."
+    solution: |
+      def release_gate(
+          baseline: dict[str, bool],
+          candidate: dict[str, bool],
+          critical: set[str],
+          max_broken: int = 2,
+          max_drop: float = 0.02,
+      ) -> tuple[bool, list[str]]:
+          """Decide whether the candidate may ship, with the reasons if not.
+
+          Args:
+              baseline: Pass or fail per item for the current version.
+              candidate: Pass or fail per item for the new version.
+              critical: Items that must pass, such as must-refuse questions.
+              max_broken: Most items allowed to go from pass to fail.
+              max_drop: Largest allowed fall in pass rate, as a share.
+
+          Returns:
+              True with no reasons, or False with every rule that failed.
+          """
+          changes = compare_runs(baseline, candidate)
+          reasons = [f"critical:{q}" for q in sorted(critical) if not candidate[q]]
+          if len(changes["broken"]) > max_broken:
+              reasons.append("too_many_broken")
+          drop = sum(baseline.values()) / len(baseline) - sum(candidate.values()) / len(candidate)
+          if drop > max_drop:
+              reasons.append("pass_rate_drop")
+          return not reasons, reasons
+    seeded_bugs:
+      - |
+        def release_gate(
+            baseline: dict[str, bool],
+            candidate: dict[str, bool],
+            critical: set[str],
+            max_broken: int = 2,
+            max_drop: float = 0.02,
+        ) -> tuple[bool, list[str]]:
+            """Only critical items that broke."""
+            changes = compare_runs(baseline, candidate)
+            reasons = [f"critical:{q}" for q in changes["broken"] if q in critical]
+            if len(changes["broken"]) > max_broken:
+                reasons.append("too_many_broken")
+            drop = sum(baseline.values()) / len(baseline) - sum(candidate.values()) / len(candidate)
+            if drop > max_drop:
+                reasons.append("pass_rate_drop")
+            return not reasons, reasons
+      - |
+        def release_gate(
+            baseline: dict[str, bool],
+            candidate: dict[str, bool],
+            critical: set[str],
+            max_broken: int = 2,
+            max_drop: float = 0.02,
+        ) -> tuple[bool, list[str]]:
+            """Pass rate only."""
+            drop = sum(baseline.values()) / len(baseline) - sum(candidate.values()) / len(candidate)
+            reasons = ["pass_rate_drop"] if drop > max_drop else []
+            return not reasons, reasons
+    wrong_answers:
+      - answer: |
+          def release_gate(
+              baseline: dict[str, bool],
+              candidate: dict[str, bool],
+              critical: set[str],
+              max_broken: int = 2,
+              max_drop: float = 0.02,
+          ) -> tuple[bool, list[str]]:
+              """Pass rate only."""
+              drop = sum(baseline.values()) / len(baseline) - sum(candidate.values()) / len(candidate)
+              reasons = ["pass_rate_drop"] if drop > max_drop else []
+              return not reasons, reasons
+        triggers: critical
+    hints:
+      - "Start the reasons with the critical items that fail in the candidate."
+      - "Use `compare_runs` for the broken count."
+      - "Pass rate is `sum(run.values()) / len(run)`."
+    explanation: |
+      Each rule adds its own reason, so a blocked release says exactly why. Critical items are judged on the candidate alone: a must-refuse item that failed before still blocks.
+
+  - id: B22-L3-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      A candidate prompt stopped refusing questions the sources cannot answer, and the gate let it ship. Tap the line responsible, then fix it.
+    code: |
+      def release_gate(baseline, candidate, critical, max_broken=2, max_drop=0.02):
+          reasons = []
+          changes = compare_runs(baseline, candidate)
+          for item in sorted(critical):
+              if not baseline[item]:
+                  reasons.append(f"critical:{item}")
+          if len(changes["broken"]) > max_broken:
+              reasons.append("too_many_broken")
+          drop = sum(baseline.values()) / len(baseline) - sum(candidate.values()) / len(candidate)
+          if drop > max_drop:
+              reasons.append("pass_rate_drop")
+          return not reasons, reasons
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      setup: |
+        def compare_runs(baseline, candidate):
+            return {
+                "fixed": sorted(q for q in baseline if not baseline[q] and candidate[q]),
+                "broken": sorted(q for q in baseline if baseline[q] and not candidate[q]),
+            }
+      tests:
+        - id: candidate_checked
+          code: |
+            base = {f"q{i}": True for i in range(100)}
+            cand = dict(base, q1=False)
+            assert release_gate(base, cand, {"q1"}) == (False, ["critical:q1"])
+            assert release_gate(base, dict(base), {"q1"}) == (True, [])
+          message: "Check the critical items in the candidate, not in the baseline."
+    fix_solution: |
+      def release_gate(baseline, candidate, critical, max_broken=2, max_drop=0.02):
+          reasons = []
+          changes = compare_runs(baseline, candidate)
+          for item in sorted(critical):
+              if not candidate[item]:
+                  reasons.append(f"critical:{item}")
+          if len(changes["broken"]) > max_broken:
+              reasons.append("too_many_broken")
+          drop = sum(baseline.values()) / len(baseline) - sum(candidate.values()) / len(candidate)
+          if drop > max_drop:
+              reasons.append("pass_rate_drop")
+          return not reasons, reasons
+    wrong_answers:
+      - lines: [7]
+        feedback: "One broken critical item is within max_broken, so this rule cannot catch it alone. The critical rule must."
+      - lines: [9]
+        feedback: "The pass rate barely moves for one item. The critical check looks at the wrong run."
+    hints:
+      - "Which version is about to ship?"
+      - "Whose verdicts should the critical rule read?"
+      - "candidate[item]."
+    explanation: |
+      The critical rule reads the baseline, which still refused correctly, so the candidate's failures never count. Read `candidate[item]`.
+
+recap:
+  - front: "Fixed and broken items"
+    back: "Fixed: fail in the baseline, pass in the candidate. Broken: the reverse. Read every broken item."
+  - front: "Majority over repeated runs"
+    back: "Pass when sum(runs) > len(runs) / 2. Unstable when 0 < sum(runs) < len(runs)."
+  - front: "A release gate"
+    back: "Written before the run: every critical item passes, at most N items break, and the pass rate drops by no more than a set share."
+  - front: "What to log for each eval run"
+    back: "Model, prompt version, eval set version, verdicts per item and token counts."
+
+claims:
+  - claim: "The E2 code prints 3 4 ['q3', 'q4'] ['q2']."
+    status: verified
+    source: "Run on Python 3.11 and 3.13."

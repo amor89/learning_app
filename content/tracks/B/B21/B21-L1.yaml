@@ -1,0 +1,418 @@
+id: B21-L1
+title: Chunk documents for retrieval
+
+concept: |
+  Retrieval-augmented generation (RAG) answers a question from your own documents in three steps. **Retrieve** the passages most related to the question. Put them in the prompt. Ask the model to answer from those passages alone, citing each one it uses. The answer then rests on your methodology notes, not on the model's training data. This module covers chunking here, retrieval in B21-L2 and the grounded prompt in B21-L3.
+
+  Retrieval works on **chunks**, not whole documents. A 40-page methodology report covers dozens of topics, so one vector for the whole report matches everything a little and nothing well.
+
+  - **Split on structure first.** Headings and paragraphs mark where topics change. Split there, then cut any long section by size.
+  - **Choose a size, then test it.** Size counts the tokens of your embedding model. In these exercises, words stand in for tokens. Small chunks match precisely but lose context, such as the table a sentence refers to. Large chunks keep context but blur the match and use more of the prompt. Compare two or three sizes on a retrieval evaluation set (lesson B22-L1) and keep the best.
+  - **Overlap the windows.** With size 200 and overlap 50, each window starts 150 words after the last, so text near a boundary appears in two chunks with context on both sides.
+  - **Keep the tail, once.** The last window is often shorter than `size`. Keep it, but do not add a window that holds only words the previous one already has.
+  - **Keep metadata.** Store each chunk with its document ID, section heading and position. Citations, filters and re-indexing all need them. A stable ID such as `methodology_v4#weighting#2` lets you re-index only the documents that changed.
+
+  A sliding window over words:
+
+  ```python
+  words = text.split()
+  step = size - overlap
+  starts = range(0, max(len(words) - overlap, 1), step)
+  chunks = [" ".join(words[i:i + size]) for i in starts]
+  ```
+
+  A start at `len(words) - overlap` or later adds nothing new.
+
+why_it_matters: |
+  A team's first assistant over its methodology library stored each report as one vector. Asked for the minimum base for regional cuts, it found the right report, the sampling guide. But only the first pages fitted in the prompt, and the rule sat on page 31, so the model said the guide did not cover it. With chunks per section, the one paragraph that held the rule would have been retrieved and quoted.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def chunk(text, size):
+          words = text.split()
+          return [" ".join(words[i:i + size]) for i in range(0, len(words) - size, size)]
+    annotations:
+      - find: 'return [" ".join(words[i:i + size]) for i in range(0, len(words) - size, size)]'
+        note: "No overlap, no metadata, and the range stops early, so the last words of the section are lost."
+  strong:
+    code: |
+      from dataclasses import dataclass
+
+
+      @dataclass(frozen=True)
+      class Chunk:
+          """One retrievable passage. Grain: one window of one section."""
+
+          chunk_id: str
+          doc_id: str
+          section: str
+          text: str
+
+
+      def chunk_words(text: str, size: int, overlap: int) -> list[str]:
+          """Split text into overlapping windows of words.
+
+          Args:
+              text: The section text.
+              size: Words per window.
+              overlap: Words shared by neighbouring windows.
+
+          Returns:
+              Windows in order. The last may be shorter than size.
+
+          Raises:
+              ValueError: If size is not positive or overlap is not in [0, size).
+          """
+          if size <= 0 or not 0 <= overlap < size:
+              raise ValueError(f"need size > 0 and 0 <= overlap < size, got {size}, {overlap}")
+          words = text.split()
+          if not words:
+              return []
+          step = size - overlap
+          return [" ".join(words[i:i + size]) for i in range(0, max(len(words) - overlap, 1), step)]
+
+
+      def chunk_section(doc_id: str, section: str, text: str, size: int, overlap: int) -> list[Chunk]:
+          """Chunks of one section, with stable IDs for citations and re-indexing."""
+          return [
+              Chunk(chunk_id=f"{doc_id}#{section}#{n}", doc_id=doc_id, section=section, text=window)
+              for n, window in enumerate(chunk_words(text, size, overlap))
+          ]
+    annotations:
+      - find: '"""One retrievable passage. Grain: one window of one section."""'
+        note: "The grain is stated, as for any table."
+      - find: "if size <= 0 or not 0 <= overlap < size:"
+        note: "An overlap as large as the size would never move forward. Fail fast."
+      - find: 'return [" ".join(words[i:i + size]) for i in range(0, max(len(words) - overlap, 1), step)]'
+        note: "Every word lands in a chunk, and no window holds only repeated words."
+      - find: 'Chunk(chunk_id=f"{doc_id}#{section}#{n}", doc_id=doc_id, section=section, text=window)'
+        note: "Document, section and position travel with the text."
+  takeaway: |
+    Split on structure, then by size with overlap. Keep every word, and keep the metadata that citations need.
+
+exercises:
+  - id: B21-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Why does a RAG system embed chunks of a long report instead of the whole report as one vector?
+    options:
+      - {id: a, text: "One vector for a report on many topics matches each topic weakly, and the whole report will not fit in the prompt"}
+      - {id: b, text: "Embedding models cannot read more than one paragraph"}
+      - {id: c, text: "Chunks are cheaper to store than reports"}
+      - {id: d, text: "The model refuses to answer from whole documents"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Retrieval needs passages about one topic each, small enough to put several in the prompt."}
+      - {id: r2, text: "Smaller vectors take less memory."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Embedding models have input limits, but the main problem is matching: one vector blurs many topics."
+      - answer: c
+        feedback: "Chunks usually take more storage, not less. They exist to make retrieval precise."
+      - answer: d
+        feedback: "The model answers from whatever you send. The problem is what you can find and fit."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Every vector from one model has the same length, whatever the text."
+    hints:
+      - "How many topics does a methodology report cover?"
+      - "How much of a 40-page report fits in a prompt?"
+      - "Precise matches and room in the prompt."
+    explanation: |
+      Chunks about one topic each match precisely, and several of them fit in one prompt.
+
+  - id: B21-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      words = "w1 w2 w3 w4 w5 w6 w7 w8 w9 w10".split()
+      size, overlap = 4, 1
+      step = size - overlap
+      starts = range(0, max(len(words) - overlap, 1), step)
+      chunks = [" ".join(words[i:i + size]) for i in starts]
+      print(len(chunks))
+      print(chunks[-1])
+    answer: |
+      3
+      w7 w8 w9 w10
+    wrong_answers:
+      - answer: |
+          4
+          w10
+        feedback: "The range stops before 10 - 1 = 9, so no window starts at w10. It would hold only a word the third window has."
+      - answer: |
+          2
+          w4 w5 w6 w7
+        feedback: "Starts are 0, 3 and 6, all below 9. Three windows."
+    hints:
+      - "step is 3. List the starts below 9."
+      - "Starts 0, 3, 6."
+      - "words[6:10] is the last window."
+    explanation: |
+      Starts 0, 3 and 6 give windows w1 to w4, w4 to w7 and w7 to w10. Each pair shares one word, and every word is covered.
+
+  - id: B21-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the window so neighbouring chunks share `overlap` words.
+    template: |
+      step = size [[g1]] overlap
+      chunks = [" ".join(words[i:i + [[g2]]]) for i in range(0, max(len(words) - overlap, 1), step)]
+    gaps:
+      g1: {accepted: ["-"]}
+      g2: {accepted: [size]}
+    wrong_answers:
+      - answer: {g1: "+", g2: size}
+        feedback: "A step of size + overlap leaves gaps between windows. Each window starts size - overlap words after the last."
+    hints:
+      - "Overlap means the next window starts before this one ends."
+      - "Each window holds `size` words."
+      - "`-` and `size`."
+    explanation: |
+      A step of `size - overlap` makes neighbours share `overlap` words, and each slice takes `size` words.
+
+  - id: B21-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `chunk_words(text: str, size: int, overlap: int) -> list[str]`.
+
+      - Raise `ValueError` unless `size > 0` and `0 <= overlap < size`.
+      - Split `text` on whitespace. Return `[]` when there are no words.
+      - Return windows of `size` words joined by single spaces, each starting `size - overlap` words after the last.
+      - Cover every word. Do not add a final window that holds only words the previous window already has.
+    starter: |
+      def chunk_words(text, size, overlap):
+          words = text.split()
+          return [" ".join(words[i:i + size]) for i in range(0, len(words), size)]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: chunk_words
+          typed: true
+          docstring: true
+          message: "Give chunk_words type hints and a docstring."
+      tests:
+        - id: windows
+          code: |
+            text = " ".join(f"w{i}" for i in range(1, 11))
+            out = chunk_words(text, 4, 1)
+            assert out == ["w1 w2 w3 w4", "w4 w5 w6 w7", "w7 w8 w9 w10"], out
+          message: "Windows of size words, each starting size - overlap words after the last."
+        - id: tail_once
+          code: |
+            for n in range(1, 30):
+                words = [f"w{i}" for i in range(n)]
+                out = chunk_words(" ".join(words), 5, 2)
+                covered = {w for chunk in out for w in chunk.split()}
+                assert covered == set(words), f"{n} words: lost {set(words) - covered}"
+                if len(out) > 1:
+                    last, prev = out[-1].split(), out[-2].split()
+                    assert not set(last) <= set(prev), f"{n} words: last window repeats {last}"
+          message: "Cover every word, and add no final window made only of words the previous one has."
+        - id: short_and_empty
+          code: |
+            assert chunk_words("only three words", 5, 2) == ["only three words"]
+            assert chunk_words("   ", 5, 2) == []
+          message: "Return one window for short text and [] for blank text."
+        - id: bad_args
+          code: |
+            for size, overlap in [(4, 4), (4, 5), (0, 0), (4, -1)]:
+                try:
+                    chunk_words("a b c", size, overlap)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for size={size}, overlap={overlap}")
+          message: "Raise ValueError unless size > 0 and 0 <= overlap < size."
+    solution: |
+      def chunk_words(text: str, size: int, overlap: int) -> list[str]:
+          """Split text into overlapping windows of words.
+
+          Args:
+              text: The section text.
+              size: Words per window.
+              overlap: Words shared by neighbouring windows.
+
+          Returns:
+              Windows in order. The last may be shorter than size.
+
+          Raises:
+              ValueError: If size is not positive or overlap is not in [0, size).
+          """
+          if size <= 0 or not 0 <= overlap < size:
+              raise ValueError(f"need size > 0 and 0 <= overlap < size, got {size}, {overlap}")
+          words = text.split()
+          if not words:
+              return []
+          step = size - overlap
+          return [" ".join(words[i:i + size]) for i in range(0, max(len(words) - overlap, 1), step)]
+    seeded_bugs:
+      - |
+        def chunk_words(text: str, size: int, overlap: int) -> list[str]:
+            """Adds a tail window of repeated words."""
+            if size <= 0 or not 0 <= overlap < size:
+                raise ValueError("bad size or overlap")
+            words = text.split()
+            step = size - overlap
+            return [" ".join(words[i:i + size]) for i in range(0, len(words), step)]
+      - |
+        def chunk_words(text: str, size: int, overlap: int) -> list[str]:
+            """Drops the tail."""
+            if size <= 0 or not 0 <= overlap < size:
+                raise ValueError("bad size or overlap")
+            words = text.split()
+            step = size - overlap
+            return [" ".join(words[i:i + size]) for i in range(0, max(len(words) - size, 1), step)]
+      - |
+        def chunk_words(text: str, size: int, overlap: int) -> list[str]:
+            """No argument checks."""
+            words = text.split()
+            if not words:
+                return []
+            step = max(size - overlap, 1)
+            return [" ".join(words[i:i + size]) for i in range(0, max(len(words) - overlap, 1), step)]
+    wrong_answers:
+      - answer: |
+          def chunk_words(text: str, size: int, overlap: int) -> list[str]:
+              """Adds a tail window of repeated words."""
+              if size <= 0 or not 0 <= overlap < size:
+                  raise ValueError("bad size or overlap")
+              words = text.split()
+              step = size - overlap
+              return [" ".join(words[i:i + size]) for i in range(0, len(words), step)]
+        triggers: windows
+    hints:
+      - "Check the arguments first, then split and return [] for no words."
+      - "`step = size - overlap`."
+      - "Stop the starts at `max(len(words) - overlap, 1)`."
+    explanation: |
+      Stopping the starts at `len(words) - overlap` covers every word without a window of repeats. The argument check stops an overlap that would never move forward.
+
+  - id: B21-L1-E5
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      Questions about the last paragraph of a section never find it. Tap the line that loses it, then fix it.
+    code: |
+      def chunk_words(text, size, overlap):
+          if size <= 0 or not 0 <= overlap < size:
+              raise ValueError("bad size or overlap")
+          words = text.split()
+          if not words:
+              return []
+          step = size - overlap
+          starts = range(0, max(len(words) - size, 1), step)
+          return [" ".join(words[i:i + size]) for i in starts]
+    bug_lines: [8]
+    fix_checker:
+      kind: python
+      tests:
+        - id: covers_tail
+          code: |
+            for n in range(1, 25):
+                words = [f"w{i}" for i in range(n)]
+                out = chunk_words(" ".join(words), 4, 1)
+                covered = {w for chunk in out for w in chunk.split()}
+                assert covered == set(words), f"{n} words: lost {set(words) - covered}"
+          message: "Stop the starts at len(words) - overlap, so the last words land in a window."
+        - id: no_repeat_tail
+          code: |
+            out = chunk_words(" ".join(f"w{i}" for i in range(1, 11)), 4, 1)
+            assert out == ["w1 w2 w3 w4", "w4 w5 w6 w7", "w7 w8 w9 w10"], out
+          message: "Do not add a window made only of words the previous one has."
+    fix_solution: |
+      def chunk_words(text, size, overlap):
+          if size <= 0 or not 0 <= overlap < size:
+              raise ValueError("bad size or overlap")
+          words = text.split()
+          if not words:
+              return []
+          step = size - overlap
+          starts = range(0, max(len(words) - overlap, 1), step)
+          return [" ".join(words[i:i + size]) for i in starts]
+    wrong_answers:
+      - lines: [7]
+        feedback: "A step of size - overlap is right. Look at where the starts stop."
+      - lines: [9]
+        feedback: "Each window takes size words from its start. Which starts are missing?"
+    hints:
+      - "Try 8 words with size 4 and overlap 1."
+      - "Which starts does the range give, and what is the last word covered?"
+      - "Stop at len(words) - overlap."
+    explanation: |
+      With 8 words, size 4 and overlap 1, the range stops before 4, so the starts are 0 and 3 and w8 is never covered. Stopping at `len(words) - overlap` adds the start at 6.
+
+  - id: B21-L1-E6
+    type: design
+    difficulty: 4
+    prompt: |
+      Plan the chunking for a library of 60 methodology reports, each with headings. Reports get new versions a few times a year.
+    slots:
+      - id: split
+        label: How to split
+        options:
+          - {id: structure, text: "By heading first, then by size with overlap within long sections"}
+          - {id: fixed, text: "Fixed windows across the whole report, ignoring headings"}
+          - {id: whole, text: "One chunk per report"}
+        answer: structure
+      - id: meta
+        label: Stored with each chunk
+        options:
+          - {id: full, text: "Document ID and version, section heading, position and a stable chunk ID"}
+          - {id: text_only, text: "The text only"}
+        answer: full
+      - id: update
+        label: When a report gets a new version
+        options:
+          - {id: changed, text: "Re-chunk and re-embed that report, and drop its old chunks"}
+          - {id: append, text: "Add the new chunks and keep the old ones"}
+          - {id: all, text: "Rebuild the whole index every night"}
+        answer: changed
+    model_answer: |
+      - Headings mark topic changes, so split there first and cut long sections by size with overlap.
+      - Metadata gives citations, filters and incremental updates.
+      - Replace the changed report's chunks only. Old chunks would let the assistant quote a retired rule.
+    wrong_answers:
+      - answer: {split: fixed}
+        feedback: "Fixed windows cut across topic changes, so one chunk can mix two sections."
+      - answer: {split: whole}
+        feedback: "One vector per report blurs every topic in it."
+      - answer: {meta: text_only}
+        feedback: "Without document and section, the answer cannot cite its source, and updates cannot find the old chunks."
+      - answer: {update: append}
+        feedback: "The old version's chunks stay retrievable, so the assistant can quote a rule that changed."
+      - answer: {update: all}
+        feedback: "It works, but it re-embeds 60 reports to change one. Stable IDs let you replace only what changed."
+    hints:
+      - "Where do topics change in a report?"
+      - "What does a citation need to name?"
+      - "What happens to the old version's chunks?"
+    explanation: |
+      Split on structure, keep the metadata, and replace a changed report's chunks so no retired text stays retrievable.
+
+recap:
+  - front: "The three steps of RAG"
+    back: "Retrieve relevant chunks, put them in the prompt, and answer from them alone with citations."
+  - front: "Sliding window starts"
+    back: "range(0, max(len(words) - overlap, 1), size - overlap). Every word covered, no window of repeats."
+  - front: "Chunk size trade-off"
+    back: "Small chunks match precisely but lose context. Large chunks keep context but blur the match. Test sizes on an evaluation set."
+  - front: "Metadata on every chunk"
+    back: "Document ID and version, section, position and a stable chunk ID, for citations, filters and re-indexing."
+
+claims:
+  - claim: "The E2 code prints 3 and w7 w8 w9 w10; the chunk_words solution covers every word and adds no repeat-only window for 1 to 29 words."
+    status: verified
+    source: "Run on Python 3.11 and 3.13."

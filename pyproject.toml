@@ -64,13 +64,13 @@ ignore = ["N812"]
 [tool.mypy]
 strict = true
 python_version = "3.11"
-files = ["learnkit", "checkers", "scripts", "practice", "labs/testing/src"]
+files = ["learnkit", "checkers", "scripts", "practice", "labs/testing/src", "labs/rag/src", "labs/rag/solution"]
 exclude = ["practice/exercises/", "practice/capstone/before_pipeline.py", "practice/capstone/pr_review"]
 # Pygments and nbformat ship without full type hints.
 untyped_calls_exclude = ["pygments", "nbformat"]
 
 [[tool.mypy.overrides]]
-module = ["docx.*", "weasyprint.*", "nbformat.*", "pyspark.*", "delta.*", "pandas.*"]
+module = ["docx.*", "weasyprint.*", "nbformat.*", "pyspark.*", "delta.*", "pandas.*", "sklearn.*", "anthropic.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

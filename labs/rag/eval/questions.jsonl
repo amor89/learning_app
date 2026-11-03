@@ -1,0 +1,12 @@
+{"question": "What is the minimum base for a regional cut?", "relevant": ["sampling#minimum-base-sizes"]}
+{"question": "What changed in the W14 weighting?", "relevant": ["weighting#w14-change"]}
+{"question": "At what values are weights trimmed?", "relevant": ["weighting#weight-caps"]}
+{"question": "What was the W12 response rate?", "relevant": ["fieldwork#response-rate"]}
+{"question": "Which respondents are removed as speeders?", "relevant": ["fieldwork#quality-checks"]}
+{"question": "When does a model-coded answer go to a human coder?", "relevant": ["coding#model-assisted-coding"]}
+{"question": "How many days does fieldwork last?", "relevant": ["fieldwork#field-dates"]}
+{"question": "How are respondents who refuse the income question weighted?", "relevant": ["weighting#missing-targets"]}
+{"question": "How long after fieldwork are results released?", "relevant": ["reporting#release-timing"]}
+{"question": "What confidence level do wave-on-wave tests use?", "relevant": ["reporting#significance-tests"]}
+{"question": "Which themes does the codeframe have?", "relevant": ["coding#codeframe"]}
+{"question": "How were North region respondents boosted in W12?", "relevant": ["sampling#boosts"]}

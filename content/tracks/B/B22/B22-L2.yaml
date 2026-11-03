@@ -1,0 +1,507 @@
+id: B22-L2
+title: Evaluate answers, exact checks, token F1 and LLM judges
+
+concept: |
+  Retrieval scores say whether the passage arrived. Answer checks say whether the reply used it well. Use the cheapest check that can decide, in this order.
+
+  **1. Exact checks.** Some outputs have one right value: a theme label, a number, yes or no. Normalise both sides, such as case and spaces, and compare. The citation check and the refusal sentence from lesson B21-L3 are exact checks too.
+
+  **2. Reference overlap.** For short factual answers, compare the reply's words with a reference answer. **Token F1** counts shared words. Precision is shared words over the reply's words, recall is shared words over the reference's words, and F1 is `2 * p * r / (p + r)`. It is fast, but "Weights are not capped at 5" scores 0.91 against "Weights are capped at 5". Use it to follow trends, not to judge one answer.
+
+  **3. An LLM judge.** For free text, a second model call grades the reply against a rubric, such as "Is every claim supported by the cited sources?" and "Does it answer the question?" Have the judge return structured output (lesson B20-L2): a pass or fail per criterion, with a one-line reason. Grade one criterion per call. A single 1 to 10 score hides why an answer failed.
+
+  Judges have known biases. Zheng and colleagues (NeurIPS 2023) report **position bias**, a preference for the answer shown first, along with **verbosity bias**, a preference for longer answers, and **self-enhancement bias**, a preference for the judge's own outputs. When a judge compares two answers, run it twice with the order swapped, and call a tie when the two verdicts disagree.
+
+  **Validate the judge.** Before you trust it, have people grade a sample of answers, and measure how often the judge agrees, criterion by criterion. Check again whenever the judge's prompt or model changes.
+
+why_it_matters: |
+  A team compared two prompt versions with a judge that saw version A's answer first every time. A won 71% of comparisons, and the team shipped it. A rerun with the order swapped gave B 64% of the wins. Most of A's lead came from going first. Running each comparison in both orders, and counting disagreements as ties, would have shown the two prompts were close.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def judge_pair(judge, question, answer_a, answer_b):
+          verdict = judge(question, answer_a, answer_b)
+          return "a" if verdict == "first" else "b"
+    annotations:
+      - find: "verdict = judge(question, answer_a, answer_b)"
+        note: "A is always first, so position bias counts as a win for A."
+  strong:
+    code: |
+      import re
+      from collections import Counter
+      from collections.abc import Callable
+      from typing import Literal
+
+      Judge = Callable[[str, str, str], Literal["first", "second"]]
+      TOKEN = re.compile(r"[a-z0-9]+")
+
+
+      def token_f1(prediction: str, reference: str) -> float:
+          """Word-overlap F1 between a reply and a reference answer.
+
+          Args:
+              prediction: The reply.
+              reference: A person's reference answer.
+
+          Returns:
+              A value from 0 to 1. 0.0 when either side has no words.
+          """
+          pred, ref = TOKEN.findall(prediction.lower()), TOKEN.findall(reference.lower())
+          shared = sum((Counter(pred) & Counter(ref)).values())
+          if shared == 0:
+              return 0.0
+          precision, recall = shared / len(pred), shared / len(ref)
+          return 2 * precision * recall / (precision + recall)
+
+
+      def judge_pair(judge: Judge, question: str, answer_a: str, answer_b: str) -> Literal["a", "b", "tie"]:
+          """Pairwise verdict that cancels position bias.
+
+          Args:
+              judge: Returns "first" or "second" for the better answer.
+              question: The question both answers address.
+              answer_a: The first candidate.
+              answer_b: The second candidate.
+
+          Returns:
+              "a" or "b" when both orders agree, otherwise "tie".
+          """
+          forward = judge(question, answer_a, answer_b)
+          backward = judge(question, answer_b, answer_a)
+          if forward == "first" and backward == "second":
+              return "a"
+          if forward == "second" and backward == "first":
+              return "b"
+          return "tie"
+    annotations:
+      - find: "shared = sum((Counter(pred) & Counter(ref)).values())"
+        note: "Counter & keeps each word's smaller count, so repeated words are not double-counted."
+      - find: "if shared == 0:"
+        note: "Guards the division when nothing overlaps or a side is empty."
+      - find: "backward = judge(question, answer_b, answer_a)"
+        note: "The same comparison with the order swapped."
+      - find: 'return "tie"'
+        note: "Verdicts that flip with the order are position bias, not preference."
+  takeaway: |
+    Exact checks first, token F1 for trends, and a validated, structured judge for free text, run in both orders for pairs.
+
+exercises:
+  - id: B22-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You evaluate the theme coder from lesson B20-L2, which returns one of Price, Service, Product or Other. People have coded 400 answers. Which check do you use?
+    options:
+      - {id: a, text: "Exact match of the model's theme against the person's theme"}
+      - {id: b, text: "An LLM judge asked whether the theme is reasonable"}
+      - {id: c, text: "Token F1 between the theme and the answer text"}
+      - {id: d, text: "Read 20 answers and decide"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The output has one right value, so the cheapest exact check decides it, with no judge to validate."}
+      - {id: r2, text: "Judges cannot read single words."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "A judge adds cost and its own errors. With a person's label to compare against, an exact match decides."
+      - answer: c
+        feedback: "Token F1 compares two texts that should say the same thing. A theme and an answer do not."
+      - answer: d
+        feedback: "You already have 400 labelled answers. Use all of them, with an exact check."
+      - answer: a|r2
+        feedback: "Right check, wrong reason. Judges can grade labels. Exact match is cheaper and exact."
+    hints:
+      - "How many right values does each answer have?"
+      - "Which check needs no model?"
+      - "Compare labels directly."
+    explanation: |
+      A closed label has one right value. Compare it exactly with the human label and report agreement.
+
+  - id: B22-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      import re
+
+
+      def tokens(text):
+          return re.findall(r"[a-z0-9]+", text.lower())
+
+
+      reply = tokens("Weights are not capped at 5")
+      reference = tokens("Weights are capped at 5")
+      shared = len(set(reply) & set(reference))
+      p, r = shared / len(reply), shared / len(reference)
+      print(shared, round(p, 2), round(r, 2), round(2 * p * r / (p + r), 3))
+    answer: |
+      5 0.83 1.0 0.909
+    wrong_answers:
+      - answer: "5 1.0 0.83 0.909"
+        feedback: "Precision divides by the reply's 6 words. Recall divides by the reference's 5."
+      - answer: "4 0.67 0.8 0.727"
+        feedback: "All five reference words appear in the reply. Only \"not\" is extra."
+    hints:
+      - "Count the words in each list."
+      - "Which reply word is not in the reference?"
+      - "p = 5/6, r = 5/5."
+    explanation: |
+      The reply shares all five reference words and adds "not". F1 is 0.909, although the reply says the opposite. Overlap measures words, not meaning.
+
+  - id: B22-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete token F1 from precision and recall.
+    template: |
+      precision = shared / len([[g1]])
+      recall = shared / len(ref)
+      f1 = 2 * precision * recall / ([[g2]])
+    gaps:
+      g1: {accepted: [pred]}
+      g2: {accepted: ["precision + recall", "recall + precision"]}
+    wrong_answers:
+      - answer: {g1: ref, g2: "precision + recall"}
+        feedback: "Precision divides by the reply's words, pred. Recall uses the reference."
+    hints:
+      - "Precision asks: how much of the reply is right?"
+      - "F1 is the harmonic mean of precision and recall."
+      - "`pred` and `precision + recall`."
+    explanation: |
+      Precision divides by the reply's words, recall by the reference's, and F1 is `2pr / (p + r)`.
+
+  - id: B22-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `token_f1(prediction: str, reference: str) -> float`.
+
+      - Tokens are `re.findall(r"[a-z0-9]+", text.lower())`.
+      - Shared tokens count with repeats, up to the smaller count on each side: use `Counter`.
+      - Return `0.0` when nothing is shared, including when either side has no tokens.
+    primer: |
+      `Counter` from `collections` counts items. `&` between two counters keeps each key with the smaller count, and `.values()` gives the counts:
+
+      ```python
+      from collections import Counter
+
+      a = Counter(["x", "x", "y"])
+      b = Counter(["x", "z"])
+      a & b                     # Counter({'x': 1})
+      sum((a & b).values())     # 1
+      ```
+    starter: |
+      def token_f1(prediction, reference):
+          return 0.0
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: token_f1
+          typed: true
+          docstring: true
+          message: "Give token_f1 type hints and a docstring."
+      tests:
+        - id: basic
+          code: |
+            assert abs(token_f1("Weights are not capped at 5", "Weights are capped at 5") - 10 / 11) < 1e-9
+            assert token_f1("Capped at 5.", "capped AT 5") == 1.0
+          message: "Lower-case, keep [a-z0-9]+ tokens, and return 2pr / (p + r)."
+        - id: repeats
+          code: |
+            assert abs(token_f1("five five five", "five") - 0.5) < 1e-9
+          message: "Count a repeated word at most as often as it appears on the other side."
+        - id: empty
+          code: |
+            assert token_f1("", "capped at 5") == 0.0
+            assert token_f1("no overlap here", "capped at 5") == 0.0
+            assert token_f1("...", "!!!") == 0.0
+          message: "Return 0.0 when nothing is shared, without dividing by zero."
+    solution: |
+      import re
+      from collections import Counter
+
+      TOKEN = re.compile(r"[a-z0-9]+")
+
+
+      def token_f1(prediction: str, reference: str) -> float:
+          """Word-overlap F1 between a reply and a reference answer.
+
+          Args:
+              prediction: The reply.
+              reference: A person's reference answer.
+
+          Returns:
+              A value from 0 to 1. 0.0 when either side has no words.
+          """
+          pred, ref = TOKEN.findall(prediction.lower()), TOKEN.findall(reference.lower())
+          shared = sum((Counter(pred) & Counter(ref)).values())
+          if shared == 0:
+              return 0.0
+          precision, recall = shared / len(pred), shared / len(ref)
+          return 2 * precision * recall / (precision + recall)
+    seeded_bugs:
+      - |
+        import re
+
+
+        def token_f1(prediction: str, reference: str) -> float:
+            """Counts every repeat."""
+            pred = re.findall(r"[a-z0-9]+", prediction.lower())
+            ref = re.findall(r"[a-z0-9]+", reference.lower())
+            shared = sum(1 for word in pred if word in ref)
+            if shared == 0:
+                return 0.0
+            precision, recall = shared / len(pred), shared / len(ref)
+            return 2 * precision * recall / (precision + recall)
+      - |
+        import re
+        from collections import Counter
+
+
+        def token_f1(prediction: str, reference: str) -> float:
+            """No lower-casing."""
+            pred = re.findall(r"[a-z0-9]+", prediction)
+            ref = re.findall(r"[a-z0-9]+", reference)
+            shared = sum((Counter(pred) & Counter(ref)).values())
+            if shared == 0:
+                return 0.0
+            precision, recall = shared / len(pred), shared / len(ref)
+            return 2 * precision * recall / (precision + recall)
+      - |
+        import re
+        from collections import Counter
+
+
+        def token_f1(prediction: str, reference: str) -> float:
+            """No zero guard."""
+            pred = re.findall(r"[a-z0-9]+", prediction.lower())
+            ref = re.findall(r"[a-z0-9]+", reference.lower())
+            shared = sum((Counter(pred) & Counter(ref)).values())
+            precision, recall = shared / len(pred), shared / len(ref)
+            return 2 * precision * recall / (precision + recall)
+    wrong_answers:
+      - answer: |
+          import re
+
+
+          def token_f1(prediction: str, reference: str) -> float:
+              """Counts every repeat."""
+              pred = re.findall(r"[a-z0-9]+", prediction.lower())
+              ref = re.findall(r"[a-z0-9]+", reference.lower())
+              shared = sum(1 for word in pred if word in ref)
+              if shared == 0:
+                  return 0.0
+              precision, recall = shared / len(pred), shared / len(ref)
+              return 2 * precision * recall / (precision + recall)
+        triggers: repeats
+    hints:
+      - "Tokenise both sides with `re.findall` on the lower-cased text."
+      - "`sum((Counter(pred) & Counter(ref)).values())` counts shared tokens."
+      - "Return 0.0 before dividing when nothing is shared."
+    explanation: |
+      `Counter &` caps each shared word at its smaller count, and the zero guard covers empty and disjoint texts before any division.
+
+  - id: B22-L2-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `judge_pair(judge, question, answer_a, answer_b) -> str`. `judge(question, first, second)` returns `"first"` or `"second"` for the better answer.
+
+      - Call the judge twice: with `answer_a` first, then with `answer_b` first.
+      - Return `"a"` when both calls prefer `answer_a`, `"b"` when both prefer `answer_b`, and `"tie"` otherwise.
+    starter: |
+      def judge_pair(judge, question, answer_a, answer_b):
+          return "a" if judge(question, answer_a, answer_b) == "first" else "b"
+    checker:
+      kind: python
+      setup: |
+        class _Judge:
+            def __init__(self, decide):
+                self.decide = decide
+                self.calls = []
+
+            def __call__(self, question, first, second):
+                self.calls.append((question, first, second))
+                return self.decide(first, second)
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: judge_pair
+          typed: true
+          docstring: true
+          message: "Give judge_pair type hints and a docstring."
+      tests:
+        - id: consistent
+          code: |
+            prefers_short = _Judge(lambda first, second: "first" if len(first) < len(second) else "second")
+            assert judge_pair(prefers_short, "q", "short", "much longer answer") == "a"
+            assert judge_pair(prefers_short, "q", "much longer answer", "short") == "b"
+          message: "Return a or b when both orders agree on the same answer."
+        - id: position_bias
+          code: |
+            always_first = _Judge(lambda first, second: "first")
+            assert judge_pair(always_first, "q", "A", "B") == "tie"
+            always_second = _Judge(lambda first, second: "second")
+            assert judge_pair(always_second, "q", "A", "B") == "tie"
+          message: "A judge that always picks one position must give a tie."
+        - id: both_orders
+          code: |
+            judge = _Judge(lambda first, second: "first")
+            judge_pair(judge, "q", "A", "B")
+            assert judge.calls == [("q", "A", "B"), ("q", "B", "A")], judge.calls
+          message: "Call the judge with A first, then with B first."
+    solution: |
+      from collections.abc import Callable
+      from typing import Literal
+
+      Judge = Callable[[str, str, str], Literal["first", "second"]]
+
+
+      def judge_pair(judge: Judge, question: str, answer_a: str, answer_b: str) -> Literal["a", "b", "tie"]:
+          """Pairwise verdict that cancels position bias.
+
+          Args:
+              judge: Returns "first" or "second" for the better answer.
+              question: The question both answers address.
+              answer_a: The first candidate.
+              answer_b: The second candidate.
+
+          Returns:
+              "a" or "b" when both orders agree, otherwise "tie".
+          """
+          forward = judge(question, answer_a, answer_b)
+          backward = judge(question, answer_b, answer_a)
+          if forward == "first" and backward == "second":
+              return "a"
+          if forward == "second" and backward == "first":
+              return "b"
+          return "tie"
+    seeded_bugs:
+      - |
+        from collections.abc import Callable
+        from typing import Literal
+
+        Judge = Callable[[str, str, str], Literal["first", "second"]]
+
+
+        def judge_pair(judge: Judge, question: str, answer_a: str, answer_b: str) -> Literal["a", "b", "tie"]:
+            """Reads the swapped verdict the wrong way round."""
+            forward = judge(question, answer_a, answer_b)
+            backward = judge(question, answer_b, answer_a)
+            if forward == backward == "first":
+                return "a"
+            if forward == backward == "second":
+                return "b"
+            return "tie"
+      - |
+        from collections.abc import Callable
+        from typing import Literal
+
+        Judge = Callable[[str, str, str], Literal["first", "second"]]
+
+
+        def judge_pair(judge: Judge, question: str, answer_a: str, answer_b: str) -> Literal["a", "b", "tie"]:
+            """One order only."""
+            return "a" if judge(question, answer_a, answer_b) == "first" else "b"
+    wrong_answers:
+      - answer: |
+          from collections.abc import Callable
+          from typing import Literal
+
+          Judge = Callable[[str, str, str], Literal["first", "second"]]
+
+
+          def judge_pair(judge: Judge, question: str, answer_a: str, answer_b: str) -> Literal["a", "b", "tie"]:
+              """Reads the swapped verdict the wrong way round."""
+              forward = judge(question, answer_a, answer_b)
+              backward = judge(question, answer_b, answer_a)
+              if forward == backward == "first":
+                  return "a"
+              if forward == backward == "second":
+                  return "b"
+              return "tie"
+        triggers: consistent
+    hints:
+      - "Call the judge once in each order."
+      - "In the swapped call, preferring A means the verdict is \"second\"."
+      - "Anything else is a tie."
+    explanation: |
+      In the swapped call, A sits second. A real preference for A gives "first" then "second". A judge that always picks one position gives the same word twice, which is a tie.
+
+  - id: B22-L2-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      The judge replies with JSON such as `{"verdict": "fail", "reason": "would only pass with a citation"}`. The pass rate jumped to 98% after a prompt change that made reasons longer. Tap the line responsible, then fix it.
+    code: |
+      def parse_verdict(reply):
+          text = reply.lower()
+          if "pass" in text:
+              return "pass"
+          return "fail"
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      tests:
+        - id: reads_field
+          code: |
+            assert parse_verdict('{"verdict": "fail", "reason": "would only pass with a citation"}') == "fail"
+            assert parse_verdict('{"verdict": "pass", "reason": "every claim is cited"}') == "pass"
+          message: "Read the verdict field from the JSON, not a substring of the whole reply."
+        - id: rejects_unknown
+          code: |
+            try:
+                parse_verdict('{"verdict": "maybe", "reason": "unsure"}')
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for an unknown verdict")
+          message: "Raise ValueError when the verdict is neither pass nor fail."
+    fix_solution: |
+      import json
+
+
+      def parse_verdict(reply):
+          verdict = json.loads(reply)["verdict"]
+          if verdict not in {"pass", "fail"}:
+              raise ValueError(f"unknown verdict: {verdict}")
+          return verdict
+    wrong_answers:
+      - lines: [2]
+        feedback: "Lower-casing is harmless. The test on the next line looks at the wrong text."
+      - lines: [5]
+        feedback: "Defaulting to fail is the safer side. The pass branch fires too often."
+    hints:
+      - "Where can the word pass appear in a failing reply?"
+      - "The reply is JSON with a verdict field."
+      - "json.loads(reply)[\"verdict\"]."
+    explanation: |
+      "pass" appears inside the reason of a failing verdict, so the substring test counts it as a pass. Parse the JSON and read the verdict field, and reject anything that is not pass or fail.
+
+recap:
+  - front: "Order of answer checks"
+    back: "Exact checks first, then token F1 for trends, then a validated LLM judge for free text."
+  - front: "Token F1"
+    back: "Shared words with Counter &; p = shared / reply words, r = shared / reference words, F1 = 2pr / (p + r)."
+  - front: "LLM judge biases (Zheng et al., NeurIPS 2023)"
+    back: "Position, verbosity and self-enhancement bias. Swap the order for pairs and call disagreements ties."
+  - front: "Before trusting a judge"
+    back: "Compare it with human grades on a sample, criterion by criterion, and re-check after any prompt or model change."
+
+claims:
+  - claim: "Zheng et al., Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (NeurIPS 2023 Datasets and Benchmarks), examine position, verbosity and self-enhancement biases."
+    status: search-only
+    source: "Search results for arXiv 2306.05685, November 2026. arxiv.org was not reachable from the build session."
+  - claim: "The E2 code prints 5 0.83 1.0 0.909; Counter & keeps the minimum count per key."
+    status: verified
+    source: "Run on Python 3.11 and 3.13."
