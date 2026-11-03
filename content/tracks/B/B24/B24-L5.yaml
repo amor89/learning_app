@@ -1,0 +1,417 @@
+id: B24-L5
+title: Transfer learning, a pretrained backbone with a new head
+
+concept: |
+  A CNN trained from scratch needs many labelled images. **Transfer learning** starts from a network already trained on a large dataset, such as ImageNet's 1,000 classes, and reuses its filters, which detect edges, textures and shapes that most photos share (torchvision 0.29, PyTorch 2.15):
+
+  ```python
+  weights = ResNet18_Weights.DEFAULT
+  model = resnet18(weights=weights)
+  for param in model.parameters():
+      param.requires_grad = False
+  model.fc = nn.Linear(model.fc.in_features, n_classes)
+  optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=1e-3)
+  preprocess = weights.transforms()
+  ```
+
+  1. **Load** the weights. `ResNet18_Weights.DEFAULT` is `IMAGENET1K_V1`. They download from download.pytorch.org on first use.
+  2. **Freeze** the backbone. With `requires_grad = False`, autograd computes no gradients for those weights (lesson B23-L2).
+  3. **Replace the head.** ResNet-18 ends in `model.fc`, a `Linear(512, 1000)`. A new `Linear(512, n_classes)` trains from scratch: for 3 classes, 1,539 of 11.7 million parameters.
+  4. **Build the optimiser after the new head**, from the trainable parameters. An optimiser built earlier never sees the head, and the head never changes.
+  5. **Preprocess as the backbone was trained.** `weights.transforms()` resizes to 256, crops the centre 224 and normalises with ImageNet's mean `[0.485, 0.456, 0.406]` and standard deviation `[0.229, 0.224, 0.225]`.
+
+  **Batch norm still updates in training mode.** Freezing stops gradient updates, but in `model.train()` the batch-norm layers keep updating their running mean and variance from your batches. In a check, a frozen ResNet-18's first batch-norm layer changed its running mean after one training-mode pass, and kept it in eval mode. Put the frozen backbone in eval mode while the head trains.
+
+  **Fine-tuning** comes next: unfreeze the last block, `model.layer4`, and train it with a smaller learning rate than the head, through optimiser parameter groups: `AdamW([{"params": model.layer4.parameters(), "lr": 1e-4}, {"params": model.fc.parameters(), "lr": 1e-3}])`.
+
+why_it_matters: |
+  A team had 400 labelled photos of store displays in four layouts. A CNN trained from scratch reached 0.55 validation accuracy and overfitted within ten epochs. A frozen pretrained ResNet-18 with a new four-class head, fed with the weights' own preprocessing, gave a model the team could use after one afternoon. They wrote down that the backbone's weights came from ImageNet, so the model card named its training data.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      model = resnet18(weights=ResNet18_Weights.DEFAULT)
+      optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+      model.fc = nn.Linear(512, 4)
+      tf = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True), v2.Normalize(OUR_MEAN, OUR_STD)])
+    annotations:
+      - find: "optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)"
+        note: "Built before the new head and with nothing frozen: it updates the old backbone and never the new head."
+      - find: "tf = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True), v2.Normalize(OUR_MEAN, OUR_STD)])"
+        note: "Statistics the backbone never saw, and no resize to the 224 crop it was trained on."
+  strong:
+    code: |
+      import torch
+      from torch import nn
+      from torchvision.models import ResNet18_Weights, resnet18
+
+
+      def build_transfer_model(n_classes: int) -> tuple[nn.Module, torch.optim.Optimizer, object]:
+          """Frozen pretrained ResNet-18 with a new head, its optimiser and its preprocessing.
+
+          Args:
+              n_classes: Number of classes in your data.
+
+          Returns:
+              The model, an AdamW optimiser over the head only, and the weights' transforms.
+          """
+          weights = ResNet18_Weights.DEFAULT
+          model = resnet18(weights=weights)
+          for param in model.parameters():
+              param.requires_grad = False
+          model.fc = nn.Linear(model.fc.in_features, n_classes)
+          optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=1e-3)
+          return model, optimizer, weights.transforms()
+
+
+      def set_training_mode(model: nn.Module) -> None:
+          """Train the head while the frozen backbone keeps its batch-norm statistics."""
+          model.eval()
+          model.fc.train()
+    annotations:
+      - find: "param.requires_grad = False"
+        note: "No gradients, so no updates, for the pretrained filters."
+      - find: "model.fc = nn.Linear(model.fc.in_features, n_classes)"
+        note: "A new head sized from the old one's input: 512 for ResNet-18."
+      - find: "optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=1e-3)"
+        note: "Built after the new head, from trainable parameters only."
+      - find: "return model, optimizer, weights.transforms()"
+        note: "The resize, crop and ImageNet normalisation the backbone expects."
+      - find: "model.eval()"
+        note: "Batch-norm layers stop updating their running statistics. The head has none, so train mode changes nothing for it."
+  takeaway: |
+    Load pretrained weights, freeze them, replace the head, build the optimiser afterwards from trainable parameters, and preprocess exactly as the backbone was trained.
+
+exercises:
+  - id: B24-L5-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You have 300 labelled photos in 3 classes. Which plan is most likely to work?
+    options:
+      - {id: a, text: "A pretrained ResNet-18, frozen, with a new 3-class head and the weights' own preprocessing"}
+      - {id: b, text: "A new ResNet-18 trained from scratch on the 300 photos"}
+      - {id: c, text: "A pretrained ResNet-18 with all layers trained at a high learning rate"}
+      - {id: d, text: "A pretrained ResNet-18 with its 1,000-class head, mapping its predictions to your classes"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The pretrained filters already detect general image features, so 300 photos only need to train a small head."}
+      - {id: r2, text: "Frozen models run faster on a CPU."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "11.7 million parameters from 300 photos will overfit. Reuse filters learned on a large dataset."
+      - answer: c
+        feedback: "A high learning rate on every layer can wipe out the pretrained filters before the head has learned anything."
+      - answer: d
+        feedback: "ImageNet's classes are not your classes. Train a head for your labels."
+      - answer: a|r2
+        feedback: "Right plan, wrong reason. It is about reusing learned features with little data."
+    hints:
+      - "How many parameters does ResNet-18 have?"
+      - "What do its early layers detect?"
+      - "Reuse the backbone, train a head."
+    explanation: |
+      With little data, reuse a backbone's general features and train only a small new head on top of them.
+
+  - id: B24-L5-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? `weights=None` builds the architecture without downloading anything. (torchvision 0.29)
+    primer: |
+      `model.named_parameters()` yields `(name, parameter)` pairs. Names follow the attribute path, so a layer stored as `model.fc` gives `fc.weight` and `fc.bias`.
+    code: |
+      from torch import nn
+      from torchvision.models import resnet18
+
+      model = resnet18(weights=None)
+      for param in model.parameters():
+          param.requires_grad = False
+      model.fc = nn.Linear(model.fc.in_features, 3)
+      trainable = [name for name, p in model.named_parameters() if p.requires_grad]
+      print(trainable, sum(p.numel() for p in model.parameters() if p.requires_grad))
+    answer: |
+      ['fc.weight', 'fc.bias'] 1539
+    wrong_answers:
+      - answer: "[] 0"
+        feedback: "The new Linear layer is created after the freeze, and new layers have requires_grad=True."
+      - answer: "['fc.weight', 'fc.bias'] 1536"
+        feedback: "The bias counts too: 512 * 3 + 3."
+    hints:
+      - "Which parameters exist after the loop has run?"
+      - "What is requires_grad on a freshly built layer?"
+      - "512 inputs, 3 outputs."
+    explanation: |
+      The freeze touched only the old parameters. The new head has 512 × 3 weights and 3 biases, all trainable: 1,539.
+
+  - id: B24-L5-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Freeze the backbone, and size the new head from the old one.
+    template: |
+      for param in model.parameters():
+          param.[[g1]] = False
+      model.fc = nn.Linear(model.fc.[[g2]], 3)
+    gaps:
+      g1: {accepted: [requires_grad]}
+      g2: {accepted: [in_features]}
+    wrong_answers:
+      - answer: {g1: requires_grad, g2: out_features}
+        feedback: "out_features is 1000, the ImageNet classes. The new head reads the same 512 inputs: in_features."
+    hints:
+      - "Which flag tells autograd to skip a tensor?"
+      - "The new head receives what the old head received."
+      - "`requires_grad` and `in_features`."
+    explanation: |
+      `requires_grad = False` freezes each weight, and `model.fc.in_features` (512) sizes the new head.
+
+  - id: B24-L5-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `normalise_chw(image, mean, std) -> np.ndarray`: normalise a `(C, H, W)` float image in [0, 1] channel by channel, as `v2.Normalize` does with a pretrained model's statistics.
+
+      - Return `(image - mean[c]) / std[c]` for each channel `c`.
+      - Raise `ValueError` when the image is not 3-D, when `mean` or `std` has a length other than `C`, or when any `std` is not positive.
+    primer: |
+      `arr[:, None, None]` adds two dimensions of size 1, so a length-C array broadcasts across a `(C, H, W)` image one channel at a time:
+
+      ```python
+      np.array([1.0, 2.0])[:, None, None].shape    # (2, 1, 1)
+      ```
+    starter: |
+      import numpy as np
+
+
+      def normalise_chw(image, mean, std):
+          return (image - mean) / std
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+
+        _MEAN = np.array([0.485, 0.456, 0.406])
+        _STD = np.array([0.229, 0.224, 0.225])
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: normalise_chw
+          typed: true
+          docstring: true
+          message: "Give normalise_chw type hints and a docstring."
+      tests:
+        - id: imagenet
+          code: |
+            out = normalise_chw(np.full((3, 2, 4), 0.5), _MEAN, _STD)
+            assert out.shape == (3, 2, 4), out.shape
+            assert np.allclose(out[:, 0, 0], [0.0655, 0.1964, 0.4178], atol=1e-4), out[:, 0, 0]
+          message: "Subtract each channel's mean and divide by its standard deviation."
+        - id: per_channel
+          code: |
+            image = np.stack([np.zeros((2, 3)), np.ones((2, 3))])
+            out = normalise_chw(image, np.array([0.0, 0.5]), np.array([1.0, 0.25]))
+            assert np.allclose(out[0], 0.0) and np.allclose(out[1], 2.0), out
+          message: "Match statistics to channels, not to columns: mean[c] for channel c."
+        - id: guards
+          code: |
+            bad = [
+                (np.ones((2, 2)), _MEAN, _STD),
+                (np.ones((3, 2, 2)), _MEAN[:2], _STD),
+                (np.ones((3, 2, 2)), _MEAN, np.array([0.2, 0.0, 0.2])),
+            ]
+            for image, mean, std in bad:
+                try:
+                    normalise_chw(image, mean, std)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {image.shape}, {mean}, {std}")
+          message: "Raise ValueError for a non-3-D image, mismatched lengths, or a non-positive std."
+    solution: |
+      import numpy as np
+
+
+      def normalise_chw(image: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+          """Normalise a (C, H, W) image channel by channel.
+
+          Args:
+              image: Float image in [0, 1], channels first.
+              mean: One mean per channel.
+              std: One positive standard deviation per channel.
+
+          Returns:
+              The normalised image, same shape.
+
+          Raises:
+              ValueError: If the shapes do not match or a std is not positive.
+          """
+          if image.ndim != 3 or len(mean) != image.shape[0] or len(std) != image.shape[0]:
+              raise ValueError(f"need (C, H, W) and C statistics, got {image.shape}, {len(mean)}, {len(std)}")
+          if (std <= 0).any():
+              raise ValueError("every standard deviation must be positive")
+          return (image - mean[:, None, None]) / std[:, None, None]
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def normalise_chw(image: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+            """Broadcasts the statistics along the last axis, not the channels."""
+            if image.ndim != 3 or len(mean) != image.shape[0] or len(std) != image.shape[0]:
+                raise ValueError("bad shapes")
+            if (std <= 0).any():
+                raise ValueError("bad std")
+            return (image - mean) / std
+      - |
+        import numpy as np
+
+
+        def normalise_chw(image: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+            """One mean and std for all channels."""
+            if image.ndim != 3 or len(mean) != image.shape[0] or len(std) != image.shape[0]:
+                raise ValueError("bad shapes")
+            if (std <= 0).any():
+                raise ValueError("bad std")
+            return (image - mean.mean()) / std.mean()
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def normalise_chw(image: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+              """One mean and std for all channels."""
+              if image.ndim != 3 or len(mean) != image.shape[0] or len(std) != image.shape[0]:
+                  raise ValueError("bad shapes")
+              if (std <= 0).any():
+                  raise ValueError("bad std")
+              return (image - mean.mean()) / std.mean()
+        triggers: imagenet
+    hints:
+      - "Check `image.ndim`, the two lengths and `(std <= 0).any()`."
+      - "Reshape the statistics to `(C, 1, 1)` with `[:, None, None]`."
+      - "`(image - mean[:, None, None]) / std[:, None, None]`."
+    explanation: |
+      Reshaped to `(C, 1, 1)`, each statistic broadcasts over its own channel's height and width. Without it, a length-3 array would line up with the last axis, the width.
+
+  - id: B24-L5-E5
+    type: design
+    difficulty: 3
+    prompt: |
+      Plan a classifier for 2,000 labelled shelf photos in 5 classes, starting from a pretrained ResNet-18.
+    slots:
+      - id: start
+        label: First phase
+        options:
+          - {id: frozen, text: "Freeze the backbone and train a new 5-class head"}
+          - {id: all, text: "Train every layer from the start at lr 1e-3"}
+          - {id: scratch, text: "Start from random weights"}
+        answer: frozen
+      - id: prep
+        label: Preprocessing
+        options:
+          - {id: weights, text: "weights.transforms(): resize 256, crop 224, ImageNet mean and std"}
+          - {id: own, text: "Normalise with the shelf photos' own mean and std"}
+          - {id: none, text: "Feed raw 0 to 255 values"}
+        answer: weights
+      - id: next
+        label: When the head has converged
+        options:
+          - {id: layer4, text: "Unfreeze layer4 and train it at a smaller learning rate than the head"}
+          - {id: done, text: "Stop: the backbone must never change"}
+          - {id: all_high, text: "Unfreeze everything at the head's learning rate"}
+        answer: layer4
+    model_answer: |
+      - Train the head first, so random head weights do not send large gradients into good filters.
+      - Use the preprocessing the backbone was trained with.
+      - Then fine-tune the last block gently, with its own smaller learning rate in a parameter group.
+    wrong_answers:
+      - answer: {start: all}
+        feedback: "A random head sends large, noisy gradients into every layer and can damage the pretrained filters."
+      - answer: {start: scratch}
+        feedback: "2,000 photos are few for 11.7 million parameters. Start from the pretrained weights."
+      - answer: {prep: own}
+        feedback: "The filters were trained on inputs normalised with ImageNet's statistics. Keep them."
+      - answer: {prep: none}
+        feedback: "The backbone expects normalised floats at 224 by 224."
+      - answer: {next: all_high}
+        feedback: "A high rate on every layer can undo what pretraining learned. Unfreeze the last block with a smaller rate."
+    hints:
+      - "Which part has random weights at the start?"
+      - "What inputs did the backbone learn from?"
+      - "Fine-tune gently, late layers first."
+    explanation: |
+      Head first, the backbone's own preprocessing, then a gentle fine-tune of the last block.
+
+  - id: B24-L5-E6
+    type: spot_bug
+    difficulty: 4
+    prompt: |
+      Training loss is identical in every epoch, and the head's weights never change. Tap the line responsible, then fix it.
+    language: python
+    code: |
+      import torch
+      from torch import nn
+      from torchvision.models import ResNet18_Weights, resnet18
+
+      model = resnet18(weights=ResNet18_Weights.DEFAULT)
+      for param in model.parameters():
+          param.requires_grad = False
+      optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+      model.fc = nn.Linear(model.fc.in_features, 4)
+    bug_lines: [8]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: head_first
+          kind: requires_pattern
+          pattern: "(?s)model\\.fc\\s*=.*torch\\.optim\\.AdamW"
+          message: "Build the optimiser after replacing model.fc, so it holds the new head."
+        - id: trainable_only
+          kind: requires_pattern
+          pattern: "requires_grad\\s*\\)\\s*,\\s*lr"
+          message: "Pass only trainable parameters: (p for p in model.parameters() if p.requires_grad)."
+    fix_solution: |
+      import torch
+      from torch import nn
+      from torchvision.models import ResNet18_Weights, resnet18
+
+      model = resnet18(weights=ResNet18_Weights.DEFAULT)
+      for param in model.parameters():
+          param.requires_grad = False
+      model.fc = nn.Linear(model.fc.in_features, 4)
+      optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=1e-3)
+    wrong_answers:
+      - lines: [7]
+        feedback: "Freezing the backbone is right. The question is what the optimiser holds."
+      - lines: [9]
+        feedback: "The new head is built correctly. The optimiser was created before it existed."
+    hints:
+      - "Which parameters does the optimiser hold?"
+      - "Did the new head exist when the optimiser was built?"
+      - "Replace the head first, then build the optimiser."
+    explanation: |
+      The optimiser holds the old, frozen parameters, including the replaced 1,000-class head. The new head is not in it, so `step()` never updates it. Build the optimiser after replacing `model.fc`, from trainable parameters only.
+
+recap:
+  - front: "Transfer learning recipe"
+    back: "Load pretrained weights, freeze them, replace the head, build the optimiser afterwards from trainable parameters."
+  - front: "ResNet-18 head"
+    back: "model.fc is Linear(512, 1000). Replace it with nn.Linear(model.fc.in_features, n_classes)."
+  - front: "Preprocessing for a pretrained model"
+    back: "weights.transforms(): resize 256, centre crop 224, ImageNet mean [0.485, 0.456, 0.406] and std [0.229, 0.224, 0.225]."
+  - front: "Frozen batch norm in train mode"
+    back: "Its running statistics still update. Keep the frozen backbone in eval mode while the head trains."
+
+claims:
+  - claim: "torchvision 0.29: resnet18(weights=None) has 11,689,512 parameters and fc = Linear(512, 1000); after freezing, a new Linear(512, 3) head gives 1,539 trainable parameters named fc.weight and fc.bias; ResNet18_Weights.DEFAULT is IMAGENET1K_V1 and its transforms() resize to 256, crop 224 and normalise with mean [0.485, 0.456, 0.406] and std [0.229, 0.224, 0.225]; frozen batch norm updates running statistics in train mode and not in eval mode; an optimiser built before the head is replaced leaves the head unchanged; parameter groups take their own lr."
+    status: verified
+    source: "Run on PyTorch 2.15.0 and torchvision 0.29.2 (PyPI wheels, CPU) with weights=None, November 2026."
+  - claim: "resnet18(weights=ResNet18_Weights.DEFAULT) downloads the ImageNet weights from download.pytorch.org on first use; that the pretrained weights load and classify as documented."
+    status: unverified
+    source: "Weights URL read from ResNet18_Weights.DEFAULT.url. download.pytorch.org was blocked in the build session, so the weights were not loaded."

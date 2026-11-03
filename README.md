@@ -2,7 +2,7 @@
 
 A personal, offline-capable course with four tracks: Databricks pipeline engineering, Python for data science, Microsoft Fabric, and finding errors in code. It runs as a static site on GitHub Pages and installs on an iPhone home screen.
 
-Status: Phase 6 complete. All four tracks and three capstones are written: Track A (Databricks pipeline engineering) 33 lessons, Track B (Python for data science) 80, including PyTorch foundations for roadmap months 1 to 3 and prompting, RAG and LLM evaluation for months 13 to 15, Track C (Microsoft Fabric) 33, checked against Microsoft Learn, Track D (Finding errors in code) 26, and the Capstones track with 3 projects.
+Status: Phase 6 complete. All four tracks and three capstones are written: Track A (Databricks pipeline engineering) 33 lessons, Track B (Python for data science) 86, including PyTorch foundations for roadmap months 1 to 3, convolutional networks for months 4 to 6, and prompting, RAG and LLM evaluation for months 13 to 15, Track C (Microsoft Fabric) 33, checked against Microsoft Learn, Track D (Finding errors in code) 26, and the Capstones track with 3 projects.
 
 ## Install on your iPhone
 
@@ -43,6 +43,7 @@ The `deploy` job in `.github/workflows/ci.yml` publishes `site/` after every gat
 | `labs/testing/` | The B19 testing lab: a small package to test, and a reference suite with 100% branch coverage |
 | `labs/rag/` | The B21 RAG lab: methodology notes, 12 gold questions, a pipeline with seven functions to write, and a reference solution |
 | `labs/torch/` | The B23 PyTorch lab: synthetic survey data, preprocessing and training steps to write, a logistic regression baseline, and a reference solution |
+| `labs/cnn/` | The B24 CNN lab: scikit-learn's bundled digits, image and evaluation steps and a CNN to write, a dense network to compare with, and a reference solution |
 | `tests/` | Quality gates for every exercise, store unit tests, browser smoke test |
 | `reference/` | Your pipeline code and roadmap |
 
@@ -89,6 +90,10 @@ Module B21 ends with a laptop lab in `labs/rag/`: a retrieval-augmented generati
 ## PyTorch lab
 
 Module B23 ends with a laptop lab in `labs/torch/`: a small network on synthetic survey data, compared with logistic regression. `cd labs/torch`, `pip install -e .` (this installs PyTorch), then `pytest`. Fill in `src/survey_torch/prep.py` and `src/survey_torch/nn_steps.py` until the tests pass, then run `python -m survey_torch train`. The `dev` group has no PyTorch, so CI runs the lab's NumPy tests and skips the PyTorch ones. See `labs/torch/README.md`.
+
+## CNN lab
+
+Module B24 ends with a laptop lab in `labs/cnn/`: a small CNN on scikit-learn's bundled 8 by 8 digits, compared with a dense network. `cd labs/cnn`, `pip install -e .`, then `pytest`. Fill in `src/digits_cnn/vision.py` and `src/digits_cnn/models.py`, then run `python -m digits_cnn train`. As with the PyTorch lab, CI runs the NumPy tests and skips the PyTorch ones. See `labs/cnn/README.md`.
 
 ## Documents
 

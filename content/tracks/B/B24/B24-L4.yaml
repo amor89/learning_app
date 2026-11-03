@@ -1,0 +1,477 @@
+id: B24-L4
+title: Images as tensors, normalisation and augmentation
+
+concept: |
+  Image files arrive as unsigned 8-bit integers from 0 to 255, usually laid out `(H, W, C)`. Before a model sees them (PyTorch 2.15, torchvision 0.29):
+
+  1. Move channels first: `torch.from_numpy(img).permute(2, 0, 1)` gives `(C, H, W)` (lesson B24-L2).
+  2. Convert to float32 in [0, 1]: `.float() / 255`. In torchvision, `v2.ToImage()` then `v2.ToDtype(torch.float32, scale=True)` do steps 1 and 2 on an `(H, W, C)` uint8 array.
+  3. Normalise each channel with the training images' mean and standard deviation: `v2.Normalize(mean, std)` computes `(x - mean) / std` per channel. A pretrained model needs the statistics it was trained with (lesson B24-L5).
+
+  **Augmentation** makes small random changes to each training image every time it is loaded: a flip, a shift of a few pixels, a small rotation, a change of brightness. The model meets new variants every epoch, so it learns the object rather than the exact pixels.
+
+  ```python
+  train_tf = v2.Compose([v2.ToImage(), v2.RandomCrop(32, padding=4), v2.RandomHorizontalFlip(),
+                         v2.ToDtype(torch.float32, scale=True), v2.Normalize(MEAN, STD)])
+  eval_tf = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True), v2.Normalize(MEAN, STD)])
+  ```
+
+  `v2.RandomCrop(32, padding=4)` pads by 4 pixels and cuts a random 32 by 32 window: a shift of up to 4 pixels. `v2.RandomHorizontalFlip()` flips half the time (`p=0.5`).
+
+  Three rules:
+
+  - **Augment training images only.** Validation and test images get the fixed steps alone. With random changes, the same validation set gave different inputs on two calls, so its metric would change between runs.
+  - **Keep the label true.** A flipped photo of a shop still shows a shop. A flipped handwritten 2 is no longer a 2, and a 6 rotated half a turn reads as 9.
+  - **Transform in `__getitem__`**, so every epoch draws fresh changes.
+
+why_it_matters: |
+  A model of shelf photos scored 0.91 accuracy on validation one day and 0.88 the next, with no code change. The validation `Dataset` had been built with the training transform, so its images were randomly cropped and flipped on every evaluation. With the fixed transform, validation accuracy was the same on every run, and early stopping chose its best epoch on a stable number.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      tf = v2.Compose([v2.ToImage(), v2.RandomCrop(32, padding=4), v2.RandomVerticalFlip(), v2.ToDtype(torch.float32)])
+      train_rows = ImageRows(train_images, train_labels, transform=tf)
+      val_rows = ImageRows(val_images, val_labels, transform=tf)
+    annotations:
+      - find: "tf = v2.Compose([v2.ToImage(), v2.RandomCrop(32, padding=4), v2.RandomVerticalFlip(), v2.ToDtype(torch.float32)])"
+        note: "No scaling to [0, 1], no normalisation, and an upside-down flip that changes what many images show."
+      - find: "val_rows = ImageRows(val_images, val_labels, transform=tf)"
+        note: "Random changes on validation: the metric moves between runs."
+  strong:
+    code: |
+      import numpy as np
+      import torch
+      from torch.utils.data import Dataset
+      from torchvision.transforms import v2
+
+
+      def build_transforms(mean: list[float], std: list[float]) -> tuple[v2.Compose, v2.Compose]:
+          """Training transform with augmentation, and the fixed transform for evaluation.
+
+          Args:
+              mean: Per-channel mean of the training images, in [0, 1].
+              std: Per-channel standard deviation of the training images.
+
+          Returns:
+              (train_transform, eval_transform).
+          """
+          fixed = [v2.ToDtype(torch.float32, scale=True), v2.Normalize(mean, std)]
+          train_tf = v2.Compose([v2.ToImage(), v2.RandomCrop(32, padding=4), v2.RandomHorizontalFlip(), *fixed])
+          eval_tf = v2.Compose([v2.ToImage(), *fixed])
+          return train_tf, eval_tf
+
+
+      class ImageRows(Dataset[tuple[torch.Tensor, int]]):
+          """(H, W, C) uint8 images with integer labels, transformed on every access."""
+
+          def __init__(self, images: np.ndarray, labels: np.ndarray, transform: v2.Compose) -> None:
+              self.images, self.labels, self.transform = images, labels, transform
+
+          def __len__(self) -> int:
+              return len(self.labels)
+
+          def __getitem__(self, i: int) -> tuple[torch.Tensor, int]:
+              return self.transform(self.images[i]), int(self.labels[i])
+    annotations:
+      - find: "fixed = [v2.ToDtype(torch.float32, scale=True), v2.Normalize(mean, std)]"
+        note: "Scaling and normalisation, shared by both transforms so they cannot drift apart."
+      - find: "train_tf = v2.Compose([v2.ToImage(), v2.RandomCrop(32, padding=4), v2.RandomHorizontalFlip(), *fixed])"
+        note: "Small shifts and left-right flips: changes that keep a photo's label."
+      - find: "eval_tf = v2.Compose([v2.ToImage(), *fixed])"
+        note: "No randomness for validation and test."
+      - find: "return self.transform(self.images[i]), int(self.labels[i])"
+        note: "Transform on access, so each epoch sees new variants."
+  takeaway: |
+    Channels first, float32 in [0, 1], normalised with training statistics. Augment training images only, with changes that keep the label true.
+
+exercises:
+  - id: B24-L4-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Should the validation `Dataset` use the training transform, with `RandomCrop` and `RandomHorizontalFlip`?
+    options:
+      - {id: a, text: "No. Validation gets the fixed steps only, so its metric measures the same images on every run"}
+      - {id: b, text: "Yes. Validation should see the same variety as training"}
+      - {id: c, text: "Yes, but only for the final test set"}
+      - {id: d, text: "No, because augmentation slows evaluation down"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Augmentation adds variety for learning. A metric needs fixed inputs, or it changes between runs for no reason."}
+      - {id: r2, text: "Augmentation leaks the labels."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Then validation loss changes between calls on the same model, and early stopping chases noise."
+      - answer: c
+        feedback: "The test set needs fixed inputs most of all. It is the number you report."
+      - answer: d
+        feedback: "Speed is not the problem. A random input makes the metric itself random."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Augmentation does not leak labels. It makes the metric unstable."
+    hints:
+      - "What should a metric depend on?"
+      - "Would two evaluations of the same model agree?"
+      - "Fixed steps only."
+    explanation: |
+      Augmentation is for learning. Evaluation needs the same inputs every time, so the metric reflects the model alone.
+
+  - id: B24-L4-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.15)
+    code: |
+      import numpy as np
+      import torch
+
+      img = np.zeros((32, 48, 3), dtype=np.uint8)
+      t = torch.from_numpy(img).permute(2, 0, 1)
+      print(tuple(t.shape), t.dtype)
+    answer: |
+      (3, 32, 48) torch.uint8
+    wrong_answers:
+      - answer: "(3, 32, 48) torch.float32"
+        feedback: "permute only reorders dimensions. The dtype stays uint8 until you convert it."
+      - answer: "(3, 48, 32) torch.uint8"
+        feedback: "permute(2, 0, 1) puts old dimension 2 first, then 0 (height), then 1 (width)."
+    hints:
+      - "Old dimensions: 0 is height, 1 is width, 2 is channels."
+      - "New order: 2, 0, 1."
+      - "Does permute change the dtype?"
+    explanation: |
+      `permute(2, 0, 1)` gives (channels, height, width) = (3, 32, 48). The values stay uint8 until `.float() / 255` or `v2.ToDtype(..., scale=True)`.
+
+  - id: B24-L4-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the fixed evaluation steps: float32 in [0, 1], then per-channel normalisation.
+    template: |
+      eval_tf = v2.Compose([
+          v2.ToImage(),
+          v2.ToDtype(torch.float32, [[g1]]=True),
+          v2.[[g2]](MEAN, STD),
+      ])
+    gaps:
+      g1: {accepted: [scale]}
+      g2: {accepted: [Normalize]}
+    wrong_answers:
+      - answer: {g1: scale, g2: RandomCrop}
+        feedback: "Random steps do not belong in the evaluation transform. Normalize applies the training statistics."
+    hints:
+      - "Which argument divides uint8 values by 255?"
+      - "Which step computes (x - mean) / std?"
+      - "`scale` and `Normalize`."
+    explanation: |
+      `scale=True` maps 0 to 255 onto 0 to 1, and `v2.Normalize` subtracts the mean and divides by the standard deviation for each channel.
+
+  - id: B24-L4-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `channel_stats(images) -> tuple[np.ndarray, np.ndarray]`: the per-channel mean and standard deviation of training images, for `v2.Normalize`.
+
+      - `images` is a uint8 array of shape `(N, H, W, C)`. Scale to [0, 1] by dividing by 255 first.
+      - Return two float arrays of length `C`, taken over every image, row and column (`axis=(0, 1, 2)`).
+      - Raise `ValueError` when the array is not 4-D or holds no images.
+    starter: |
+      import numpy as np
+
+
+      def channel_stats(images):
+          return images.mean(), images.std()
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: channel_stats
+          typed: true
+          docstring: true
+          message: "Give channel_stats type hints and a docstring."
+      tests:
+        - id: per_channel
+          code: |
+            images = np.zeros((2, 2, 2, 3), dtype=np.uint8)
+            images[..., 0] = 255
+            images[0, ..., 1] = 255
+            mean, std = channel_stats(images)
+            assert np.allclose(mean, [1.0, 0.5, 0.0]), mean
+            assert np.allclose(std, [0.0, 0.5, 0.0]), std
+          message: "Average over images, rows and columns separately for each channel, after dividing by 255."
+        - id: scaled
+          code: |
+            images = np.full((3, 4, 4, 1), 51, dtype=np.uint8)
+            mean, std = channel_stats(images)
+            assert mean.shape == (1,) and np.allclose(mean, [0.2]), mean
+          message: "Divide by 255 first, so values lie in [0, 1]."
+        - id: guards
+          code: |
+            for images in [np.zeros((4, 4, 3), dtype=np.uint8), np.zeros((0, 4, 4, 3), dtype=np.uint8)]:
+                try:
+                    channel_stats(images)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for shape {images.shape}")
+          message: "Raise ValueError for an array that is not 4-D or holds no images."
+    solution: |
+      import numpy as np
+
+
+      def channel_stats(images: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+          """Per-channel mean and standard deviation of uint8 images, scaled to [0, 1].
+
+          Args:
+              images: Training images, shape (N, H, W, C), values 0 to 255.
+
+          Returns:
+              Mean and standard deviation, each of length C.
+
+          Raises:
+              ValueError: If the array is not 4-D or holds no images.
+          """
+          if images.ndim != 4 or len(images) == 0:
+              raise ValueError(f"expected (N, H, W, C) with N >= 1, got {images.shape}")
+          scaled = images.astype(np.float64) / 255
+          return scaled.mean(axis=(0, 1, 2)), scaled.std(axis=(0, 1, 2))
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def channel_stats(images: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+            """One mean over every channel together."""
+            if images.ndim != 4 or len(images) == 0:
+                raise ValueError("bad shape")
+            scaled = images.astype(np.float64) / 255
+            return np.full(images.shape[3], scaled.mean()), np.full(images.shape[3], scaled.std())
+      - |
+        import numpy as np
+
+
+        def channel_stats(images: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+            """Forgets to scale to [0, 1]."""
+            if images.ndim != 4 or len(images) == 0:
+                raise ValueError("bad shape")
+            values = images.astype(np.float64)
+            return values.mean(axis=(0, 1, 2)), values.std(axis=(0, 1, 2))
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def channel_stats(images: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+              """Forgets to scale to [0, 1]."""
+              if images.ndim != 4 or len(images) == 0:
+                  raise ValueError("bad shape")
+              values = images.astype(np.float64)
+              return values.mean(axis=(0, 1, 2)), values.std(axis=(0, 1, 2))
+        triggers: per_channel
+    hints:
+      - "Check `images.ndim` and `len(images)` first."
+      - "Divide a float copy by 255."
+      - "`.mean(axis=(0, 1, 2))` keeps one value per channel."
+    explanation: |
+      Reducing over images, rows and columns leaves one statistic per channel, on the same [0, 1] scale that `v2.ToDtype(..., scale=True)` produces.
+
+  - id: B24-L4-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `random_shift(image, max_shift, rng) -> np.ndarray`, a NumPy version of `v2.RandomCrop(size, padding=max_shift)` for a 2-D image.
+
+      - Pad the image with `max_shift` zeros on every side, using `np.pad`.
+      - Draw `top, left = rng.integers(0, 2 * max_shift + 1, size=2)`, once per call.
+      - Return the window `padded[top : top + h, left : left + w]`, the original size.
+      - Raise `ValueError` when `image` is not 2-D or `max_shift` is negative.
+    primer: |
+      `np.pad(a, n)` adds `n` zeros on every side of every dimension:
+
+      ```python
+      np.pad(np.array([[5]]), 1)    # array([[0, 0, 0], [0, 5, 0], [0, 0, 0]])
+      ```
+
+      `rng.integers(low, high, size=2)` draws two whole numbers from `low` up to, but not including, `high`.
+    starter: |
+      import numpy as np
+
+
+      def random_shift(image, max_shift, rng):
+          return image
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: random_shift
+          typed: true
+          docstring: true
+          message: "Give random_shift type hints and a docstring."
+      tests:
+        - id: seeded_window
+          code: |
+            x = np.arange(16.0).reshape(4, 4)
+            out = random_shift(x, 1, np.random.default_rng(0))
+            top, left = np.random.default_rng(0).integers(0, 3, size=2)
+            expected = np.pad(x, 1)[top : top + 4, left : left + 4]
+            assert out.shape == (4, 4) and np.array_equal(out, expected), out
+          message: "Pad by max_shift, draw top and left with one rng.integers(0, 2 * max_shift + 1, size=2), and cut the original size."
+        - id: zero_shift
+          code: |
+            x = np.arange(6.0).reshape(2, 3)
+            assert np.array_equal(random_shift(x, 0, np.random.default_rng(5)), x)
+          message: "max_shift 0 returns the image unchanged."
+        - id: guards
+          code: |
+            for image, shift in [(np.ones(4), 1), (np.ones((2, 2)), -1)]:
+                try:
+                    random_shift(image, shift, np.random.default_rng(0))
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {image.shape}, {shift}")
+          message: "Raise ValueError for a non-2-D image or a negative max_shift."
+    solution: |
+      import numpy as np
+
+
+      def random_shift(image: np.ndarray, max_shift: int, rng: np.random.Generator) -> np.ndarray:
+          """Shift an image by up to max_shift pixels, filling with zeros.
+
+          Args:
+              image: 2-D image.
+              max_shift: Largest shift in any direction.
+              rng: Seeded generator.
+
+          Returns:
+              An array with the image's shape.
+
+          Raises:
+              ValueError: If image is not 2-D or max_shift is negative.
+          """
+          if image.ndim != 2 or max_shift < 0:
+              raise ValueError(f"need a 2-D image and max_shift >= 0, got {image.shape}, {max_shift}")
+          h, w = image.shape
+          padded = np.pad(image, max_shift)
+          top, left = rng.integers(0, 2 * max_shift + 1, size=2)
+          return padded[top : top + h, left : left + w]
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def random_shift(image: np.ndarray, max_shift: int, rng: np.random.Generator) -> np.ndarray:
+            """Can only shift one way."""
+            if image.ndim != 2 or max_shift < 0:
+                raise ValueError("bad input")
+            h, w = image.shape
+            padded = np.pad(image, max_shift)
+            top, left = rng.integers(0, max_shift + 1, size=2)
+            return padded[top : top + h, left : left + w]
+      - |
+        import numpy as np
+
+
+        def random_shift(image: np.ndarray, max_shift: int, rng: np.random.Generator) -> np.ndarray:
+            """Returns the padded window, too large."""
+            if image.ndim != 2 or max_shift < 0:
+                raise ValueError("bad input")
+            h, w = image.shape
+            padded = np.pad(image, max_shift)
+            top, left = rng.integers(0, 2 * max_shift + 1, size=2)
+            return padded[top : top + h + max_shift, left : left + w + max_shift]
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def random_shift(image: np.ndarray, max_shift: int, rng: np.random.Generator) -> np.ndarray:
+              """Can only shift one way."""
+              if image.ndim != 2 or max_shift < 0:
+                  raise ValueError("bad input")
+              h, w = image.shape
+              padded = np.pad(image, max_shift)
+              top, left = rng.integers(0, max_shift + 1, size=2)
+              return padded[top : top + h, left : left + w]
+        triggers: seeded_window
+    hints:
+      - "`padded = np.pad(image, max_shift)`."
+      - "One draw: `rng.integers(0, 2 * max_shift + 1, size=2)`."
+      - "Cut `padded[top : top + h, left : left + w]`."
+    explanation: |
+      Padding by `max_shift` and cutting a window anywhere from offset 0 to `2 * max_shift` shifts the content by up to `max_shift` pixels in either direction, with zeros filling the gap.
+
+  - id: B24-L4-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      Validation accuracy differs between two evaluations of the same saved model. Tap the line responsible, then fix it.
+    code: |
+      import torch
+      from torchvision.transforms import v2
+
+      train_tf = v2.Compose([v2.ToImage(), v2.RandomCrop(32, padding=4), v2.ToDtype(torch.float32, scale=True)])
+      eval_tf = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])
+
+      train_rows = ImageRows(train_images, train_labels, transform=train_tf)
+      val_rows = ImageRows(val_images, val_labels, transform=train_tf)
+    bug_lines: [8]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: eval_for_val
+          kind: requires_pattern
+          pattern: "val_rows\\s*=\\s*ImageRows\\(\\s*val_images\\s*,\\s*val_labels\\s*,\\s*transform\\s*=\\s*eval_tf\\s*\\)"
+          message: "Give the validation rows the fixed transform: transform=eval_tf."
+        - id: train_keeps_aug
+          kind: requires_pattern
+          pattern: "train_rows\\s*=\\s*ImageRows\\(\\s*train_images\\s*,\\s*train_labels\\s*,\\s*transform\\s*=\\s*train_tf\\s*\\)"
+          message: "Keep augmentation for the training rows."
+    fix_solution: |
+      import torch
+      from torchvision.transforms import v2
+
+      train_tf = v2.Compose([v2.ToImage(), v2.RandomCrop(32, padding=4), v2.ToDtype(torch.float32, scale=True)])
+      eval_tf = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])
+
+      train_rows = ImageRows(train_images, train_labels, transform=train_tf)
+      val_rows = ImageRows(val_images, val_labels, transform=eval_tf)
+    wrong_answers:
+      - lines: [4]
+        feedback: "Random cropping is right for training. The problem is where else this transform is used."
+      - lines: [7]
+        feedback: "Training rows should be augmented. Look at the validation rows."
+    hints:
+      - "Which transforms are random?"
+      - "Which Dataset should never see them?"
+      - "transform=eval_tf for validation."
+    explanation: |
+      The validation rows use the random training transform, so each evaluation crops different windows. Validation uses `eval_tf`, which has no random steps.
+
+recap:
+  - front: "Image to model input"
+    back: "(H, W, C) uint8 to (C, H, W) float32 in [0, 1], then normalise per channel with training statistics."
+  - front: "torchvision v2 steps for a uint8 image"
+    back: "v2.ToImage(), v2.ToDtype(torch.float32, scale=True), v2.Normalize(mean, std)."
+  - front: "Where augmentation goes"
+    back: "Training transform only, applied in __getitem__ so each epoch draws new changes. Validation and test get the fixed steps."
+  - front: "Choosing augmentations"
+    back: "Only changes that keep the label true: shifts and left-right flips for photos, never flips or half-turns for digits."
+
+claims:
+  - claim: "torchvision 0.29 with PyTorch 2.15: v2.ToImage then v2.ToDtype(torch.float32, scale=True) turns an (H, W, C) uint8 array into a (C, H, W) float32 image in [0, 1]; the training pipeline with RandomCrop(32, padding=4) and RandomHorizontalFlip gives different outputs on two calls, the evaluation pipeline the same; RandomHorizontalFlip defaults to p=0.5; permute(2, 0, 1) keeps uint8."
+    status: verified
+    source: "Run on PyTorch 2.15.0 and torchvision 0.29.2 (PyPI wheels, CPU), November 2026."

@@ -50,6 +50,7 @@ Checked on 25 September 2026. Status key:
 | MLflow | 3.16.1 | scratch environment, Python 3.12 | Verified (local run). Not in the dev group: too large for CI, and not in Pyodide |
 | shap | 0.51.0 | dev environment | Verified (local run) |
 | PyTorch | 2.15.0 (B23 and `labs/torch`), 2.14.0 (B16) | scratch environment, Python 3.12, PyPI wheel run on CPU | Verified (local run). Not in the dev group or Pyodide. download.pytorch.org was blocked in the November 2026 build, so the PyPI wheel was used |
+| torchvision | 0.29.2 | scratch environment, Python 3.12, PyPI wheel run on CPU | Verified (local run) for module B24. Pretrained weights not downloaded: download.pytorch.org was blocked |
 | sentence-transformers | Not installed | none | Unverified. Its API in B15-L1 comes from the library documentation |
 | uv | 0.8.17 | build machine | Verified (local run) |
 | scikit-learn TfidfVectorizer | 1.9.1 (dev), 1.8.0 (parity) | `labs/rag` index | Verified (local run). Lab retrieval on 12 gold questions: recall at 3 1.000, MRR 0.903 at chunk size 80 |
@@ -195,6 +196,13 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 | PyTorch 2.15 optimisers and modules: SGD lr 0.1 on p^2 from 4 gives 2.048 after three steps; AdamW `weight_decay` default 0.01, SGD 0; `Linear(3, 2)` weight (2, 3); Sequential(10, 16, 1) has 193 parameters; a plain list registers 0 parameters; missing `super().__init__()` error; empty parameter list error. | Verified | Local, torch 2.15.0 |
 | PyTorch 2.15 losses and data: MSELoss on (3, 1) against (3,) is 1.3333 with a size warning; BCEWithLogitsLoss 0.3778 on logits [2, -1, 0], 0.5525 after an extra sigmoid; long targets error; float32 log(sigmoid(-100)) is -inf, the loss 100.0; DataLoader batches 4, 4, 2 and 4, 4 with `drop_last`. | Verified | Local, torch 2.15.0 |
 | `labs/torch` reference run (seed 0, 6,000 rows): network validation loss 0.2719, accuracy 0.8800, 45 epochs; logistic regression 0.3008 and 0.8725; same seed gives identical history. | Verified | Local, torch 2.15.0, scikit-learn 1.9.1 |
+
+| PyTorch 2.15 convolution: `nn.Conv2d` equals the NumPy sliding sum (cross-correlation, no flip); Conv2d(3, 16, 3) weight (16, 3, 3, 3), 448 parameters; output size (H + 2p - k) // s + 1 (30, 32, 16 and 14 on 32 by 32); `padding="same"` with a stride raises; an (N, H, W, C) input raises "expected input[...] to have 3 channels". | Verified | Local, torch 2.15.0 |
+| PyTorch 2.15 pooling and models: MaxPool2d(2) and AvgPool2d(2) values on the 4 by 4 example; AdaptiveAvgPool2d(1); the two-block digits CNN has 6,090 parameters, the 64-unit dense network 4,810; a wrongly sized Linear raises "mat1 and mat2 shapes cannot be multiplied (64x128 and 2048x10)". | Verified | Local, torch 2.15.0 |
+| torchvision 0.29 transforms: `v2.ToImage` then `v2.ToDtype(torch.float32, scale=True)` on (H, W, C) uint8 gives (C, H, W) float32 in [0, 1]; RandomCrop with padding and RandomHorizontalFlip (p 0.5 default) vary between calls. | Verified | Local, torchvision 0.29.2 |
+| torchvision 0.29 ResNet-18 with `weights=None`: 11,689,512 parameters, `fc` Linear(512, 1000); freezing plus a new 3-class head leaves 1,539 trainable; `ResNet18_Weights.DEFAULT` is IMAGENET1K_V1 with resize 256, crop 224 and ImageNet mean and std; frozen batch norm updates running statistics in train mode only; an optimiser built before the new head never updates it. | Verified | Local, torchvision 0.29.2, weights=None |
+| Loading the pretrained ResNet-18 weights from download.pytorch.org. | Unverified | Host blocked in the build session. B24-L5 marks this claim unverified |
+| `labs/cnn` reference run (seed 0, 360 validation digits): dense 0.0985 loss and 0.9778 accuracy, CNN 0.0374 and 0.9917; with one-pixel shift augmentation, dense 0.1906 and 0.9389, CNN 0.0495 and 0.9917. | Verified | Local, torch 2.15.0, scikit-learn 1.9.1 |
 
 ## Track D facts (checked September 2026)
 

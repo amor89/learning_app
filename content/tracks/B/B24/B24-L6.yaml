@@ -1,0 +1,495 @@
+id: B24-L6
+title: Evaluating image classifiers, per class and on honest splits
+
+concept: |
+  A single accuracy figure hides which classes fail. Evaluate an image classifier in four steps.
+
+  **1. Predict in eval mode.** Call `model.eval()`, wrap the loop in `torch.no_grad()` (lesson B16-L2), and take the class with the largest logit: `preds = logits.argmax(dim=1)` (PyTorch 2.15).
+
+  **2. Build a confusion matrix.** `sklearn.metrics.confusion_matrix(y_true, y_pred)` (scikit-learn 1.8) counts true classes in rows and predicted classes in columns. Each row's diagonal entry divided by the row total is that class's **recall**:
+
+  ```python
+  cm = confusion_matrix([0, 0, 1, 1, 2, 2], [0, 1, 1, 1, 2, 0])
+  # [[1, 1, 0], [0, 2, 0], [1, 0, 1]]
+  recall = cm.diagonal() / cm.sum(axis=1)     # [0.5, 1.0, 0.5]
+  ```
+
+  Guard the division: a class with no true images has a row total of 0. Large off-diagonal cells name the pairs the model confuses.
+
+  **3. Look at the mistakes.** Show the misclassified images with their true and predicted labels, the most confident errors first. Many turn out to be wrong labels, blurred photos or two classes that people also mix up.
+
+  **4. Check the split is honest.** Photos taken in bursts, the same shelf on two days, or augmented copies saved as files are near-duplicates. If one lands in training and its twin in validation, the model is graded on images it has nearly seen. Split by the unit that produces near-duplicates, such as the shelf, store or session (lesson B11-L1). `np.unique(groups)` lists the distinct groups, so you can shuffle groups, not photos. Then check data from a new source, such as another camera or season, apart from the rest.
+
+  Report accuracy with an interval (lesson B8-L2), and recall for every class, beside the confusion matrix.
+
+why_it_matters: |
+  A shelf classifier reported 0.97 validation accuracy. Each shelf had been photographed in bursts of five, and the split was by photo, so nearly every validation image had a twin in training. Split by shelf, accuracy fell to 0.84, and the confusion matrix showed one class, partly empty shelves, at a recall of 0.52. That number, not 0.97, decided what the team fixed next.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      order = rng.permutation(len(photos))
+      val, train = order[:400], order[400:]
+      accuracy = (model(X[val]).argmax(dim=1) == y[val]).float().mean()
+      print(f"accuracy: {accuracy:.2f}")
+    annotations:
+      - find: "order = rng.permutation(len(photos))"
+        note: "Split by photo: burst twins land on both sides."
+      - find: "accuracy = (model(X[val]).argmax(dim=1) == y[val]).float().mean()"
+        note: "Train mode, gradients tracked, and one number that hides every class."
+  strong:
+    code: |
+      import numpy as np
+      import torch
+      from sklearn.metrics import confusion_matrix
+      from torch import nn
+
+
+      def split_by_group(groups: np.ndarray, val_share: float, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+          """Training and validation row positions, with no group on both sides."""
+          shelves = rng.permutation(np.unique(groups))
+          n_val = round(len(shelves) * val_share)
+          in_val = np.isin(groups, shelves[:n_val])
+          return np.flatnonzero(~in_val), np.flatnonzero(in_val)
+
+
+      def predict(model: nn.Module, X: torch.Tensor) -> np.ndarray:
+          """Class predictions in eval mode, without gradients."""
+          model.eval()
+          with torch.no_grad():
+              return model(X).argmax(dim=1).numpy()
+
+
+      def per_class_recall(y_true: np.ndarray, y_pred: np.ndarray, n_classes: int) -> np.ndarray:
+          """Recall for each class. NaN where a class has no true examples."""
+          cm = confusion_matrix(y_true, y_pred, labels=list(range(n_classes)))
+          totals = cm.sum(axis=1)
+          return np.where(totals > 0, cm.diagonal() / np.maximum(totals, 1), np.nan)
+    annotations:
+      - find: "shelves = rng.permutation(np.unique(groups))"
+        note: "Shuffle shelves, not photos, so twins stay together."
+      - find: "return np.flatnonzero(~in_val), np.flatnonzero(in_val)"
+        note: "Row positions for each side. No shelf appears in both."
+      - find: "model.eval()"
+        note: "Dropout off and batch-norm statistics fixed."
+      - find: "return model(X).argmax(dim=1).numpy()"
+        note: "The class with the largest logit."
+      - find: "return np.where(totals > 0, cm.diagonal() / np.maximum(totals, 1), np.nan)"
+        note: "No division by zero, and a missing class shows as NaN, not as 0 or 1."
+  takeaway: |
+    Predict in eval mode, read recall per class from the confusion matrix, look at the errors, and split by the unit that makes near-duplicates.
+
+exercises:
+  - id: B24-L6-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A classifier reaches 0.95 accuracy. One of its five classes makes up 5% of the images. What do you check before trusting the result?
+    options:
+      - {id: a, text: "The confusion matrix and the recall of each class"}
+      - {id: b, text: "Nothing more: 0.95 is high"}
+      - {id: c, text: "The training loss curve"}
+      - {id: d, text: "Accuracy on the training set"}
+    answer: a
+    reasons:
+      - {id: r1, text: "A model can miss the small class entirely and still score 0.95. Recall per class shows it."}
+      - {id: r2, text: "Confusion matrices are the standard in image papers."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Always predicting the other classes can reach 0.95 with a recall of 0 for the small class."
+      - answer: c
+        feedback: "The loss curve shows how training went, not which classes fail on validation."
+      - answer: d
+        feedback: "Training accuracy measures memorisation, not performance on new images."
+      - answer: a|r2
+        feedback: "Right check, wrong reason. It is about finding classes that a high average hides."
+    hints:
+      - "What accuracy does a model reach if it never predicts the small class?"
+      - "Which numbers are per class?"
+      - "Recall from the confusion matrix."
+    explanation: |
+      Accuracy averages over images, so a small class can fail completely inside a high score. Per-class recall shows each class.
+
+  - id: B24-L6-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (scikit-learn 1.8)
+    code: |
+      from sklearn.metrics import confusion_matrix
+
+      cm = confusion_matrix([0, 0, 1, 1, 2, 2], [0, 1, 1, 1, 2, 0])
+      print(cm.tolist(), (cm.diagonal() / cm.sum(axis=1)).tolist())
+    answer: |
+      [[1, 1, 0], [0, 2, 0], [1, 0, 1]] [0.5, 1.0, 0.5]
+    wrong_answers:
+      - answer: "[[1, 0, 1], [1, 2, 0], [0, 0, 1]] [0.5, 1.0, 0.5]"
+        feedback: "Rows are true classes and columns predicted. That is the transpose."
+      - answer: "[[1, 1, 0], [0, 2, 0], [1, 0, 1]] [0.5, 0.6667, 1.0]"
+        feedback: "Dividing by column totals gives precision. Recall divides by row totals."
+    hints:
+      - "Row = true class, column = predicted class."
+      - "True 2 was predicted once as 2 and once as 0."
+      - "Recall: diagonal over row sums."
+    explanation: |
+      Class 0 has one hit of two, class 1 two of two, class 2 one of two. Dividing the diagonal by row totals gives recall.
+
+  - id: B24-L6-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Predict classes in eval mode without tracking gradients.
+    template: |
+      model.eval()
+      with torch.[[g1]]():
+          preds = model(X).[[g2]](dim=1)
+    gaps:
+      g1: {accepted: [no_grad, inference_mode]}
+      g2: {accepted: [argmax]}
+    wrong_answers:
+      - answer: {g1: no_grad, g2: max}
+        feedback: "max returns values and indices together. argmax returns the class index alone."
+    hints:
+      - "Which block turns off gradient tracking?"
+      - "Which method returns the position of the largest logit?"
+      - "`no_grad` and `argmax`."
+    explanation: |
+      `torch.no_grad()` skips the graph, and `argmax(dim=1)` returns the index of the largest logit in each row: the predicted class.
+
+  - id: B24-L6-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `confusion(y_true, y_pred, n_classes) -> np.ndarray` without scikit-learn: an `n_classes` by `n_classes` integer array with true classes in rows and predicted classes in columns.
+
+      - Raise `ValueError` when the arrays differ in length or hold a label outside `0` to `n_classes - 1`.
+    starter: |
+      import numpy as np
+
+
+      def confusion(y_true, y_pred, n_classes):
+          return np.zeros((n_classes, n_classes), dtype=int)
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: confusion
+          typed: true
+          docstring: true
+          message: "Give confusion type hints and a docstring."
+        - id: no_sklearn
+          kind: forbids_pattern
+          pattern: "sklearn"
+          message: "Build the counts yourself, without scikit-learn."
+      tests:
+        - id: counts
+          code: |
+            cm = confusion(np.array([0, 0, 1, 1, 2, 2]), np.array([0, 1, 1, 1, 2, 0]), 3)
+            assert cm.tolist() == [[1, 1, 0], [0, 2, 0], [1, 0, 1]], cm.tolist()
+          message: "Count each (true, predicted) pair, true classes in rows."
+        - id: unused_class
+          code: |
+            cm = confusion(np.array([0, 1]), np.array([1, 1]), 4)
+            assert cm.shape == (4, 4) and cm.sum() == 2 and cm[0, 1] == 1 and cm[1, 1] == 1, cm
+            assert np.issubdtype(cm.dtype, np.integer), cm.dtype
+          message: "Size the matrix from n_classes, with integer counts, even for unused classes."
+        - id: guards
+          code: |
+            for t, p, k in [(np.array([0, 1]), np.array([0]), 2), (np.array([0, 3]), np.array([0, 1]), 3), (np.array([0, -1]), np.array([0, 1]), 3)]:
+                try:
+                    confusion(t, p, k)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {t}, {p}, {k}")
+          message: "Raise ValueError for different lengths or labels outside 0 to n_classes - 1."
+    solution: |
+      import numpy as np
+
+
+      def confusion(y_true: np.ndarray, y_pred: np.ndarray, n_classes: int) -> np.ndarray:
+          """Confusion matrix: true classes in rows, predicted classes in columns.
+
+          Args:
+              y_true: True class indices.
+              y_pred: Predicted class indices.
+              n_classes: Number of classes.
+
+          Returns:
+              Integer counts, shape (n_classes, n_classes).
+
+          Raises:
+              ValueError: If the lengths differ or a label is out of range.
+          """
+          if len(y_true) != len(y_pred):
+              raise ValueError(f"{len(y_true)} true labels and {len(y_pred)} predictions")
+          labels = np.concatenate([y_true, y_pred])
+          if len(labels) and (labels.min() < 0 or labels.max() >= n_classes):
+              raise ValueError(f"labels must lie in 0 to {n_classes - 1}")
+          cm = np.zeros((n_classes, n_classes), dtype=np.int64)
+          for t, p in zip(y_true, y_pred):
+              cm[t, p] += 1
+          return cm
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def confusion(y_true: np.ndarray, y_pred: np.ndarray, n_classes: int) -> np.ndarray:
+            """Predicted classes in rows."""
+            if len(y_true) != len(y_pred):
+                raise ValueError("lengths differ")
+            labels = np.concatenate([y_true, y_pred])
+            if len(labels) and (labels.min() < 0 or labels.max() >= n_classes):
+                raise ValueError("label out of range")
+            cm = np.zeros((n_classes, n_classes), dtype=np.int64)
+            for t, p in zip(y_true, y_pred):
+                cm[p, t] += 1
+            return cm
+      - |
+        import numpy as np
+
+
+        def confusion(y_true: np.ndarray, y_pred: np.ndarray, n_classes: int) -> np.ndarray:
+            """Sizes the matrix from the labels seen."""
+            if len(y_true) != len(y_pred):
+                raise ValueError("lengths differ")
+            k = int(max(y_true.max(), y_pred.max())) + 1
+            cm = np.zeros((k, k), dtype=np.int64)
+            for t, p in zip(y_true, y_pred):
+                cm[t, p] += 1
+            return cm
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def confusion(y_true: np.ndarray, y_pred: np.ndarray, n_classes: int) -> np.ndarray:
+              """Predicted classes in rows."""
+              if len(y_true) != len(y_pred):
+                  raise ValueError("lengths differ")
+              labels = np.concatenate([y_true, y_pred])
+              if len(labels) and (labels.min() < 0 or labels.max() >= n_classes):
+                  raise ValueError("label out of range")
+              cm = np.zeros((n_classes, n_classes), dtype=np.int64)
+              for t, p in zip(y_true, y_pred):
+                  cm[p, t] += 1
+              return cm
+        triggers: counts
+    primer: |
+      `np.concatenate([a, b])` joins arrays end to end, so one `min()` and `max()` cover both:
+
+      ```python
+      np.concatenate([np.array([3, 1]), np.array([7])])    # array([3, 1, 7])
+      ```
+    hints:
+      - "Check the lengths, then the range of every label."
+      - "Start from `np.zeros((n_classes, n_classes), dtype=np.int64)`."
+      - "For each pair, `cm[t, p] += 1`."
+    explanation: |
+      Each (true, predicted) pair adds one to row `t`, column `p`. Sizing from `n_classes` keeps the matrix the same shape for every batch, even when a class is missing.
+
+  - id: B24-L6-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `recall_by_class(cm) -> np.ndarray` from a square confusion matrix (true classes in rows).
+
+      - Return the diagonal divided by the row totals, as floats.
+      - Return `np.nan` for a class whose row total is 0, without a division warning.
+      - Raise `ValueError` when `cm` is not square.
+    starter: |
+      import numpy as np
+
+
+      def recall_by_class(cm):
+          return cm.diagonal() / cm.sum(axis=1)
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: recall_by_class
+          typed: true
+          docstring: true
+          message: "Give recall_by_class type hints and a docstring."
+      tests:
+        - id: values
+          code: |
+            out = recall_by_class(np.array([[1, 1, 0], [0, 2, 0], [1, 0, 1]]))
+            assert np.allclose(out, [0.5, 1.0, 0.5]), out
+          message: "Divide the diagonal by the row totals."
+        - id: empty_class
+          code: |
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                out = recall_by_class(np.array([[2, 0], [0, 0]]))
+            assert out[0] == 1.0 and np.isnan(out[1]), out
+          message: "Return NaN for a class with no true examples, with no division warning."
+        - id: guards
+          code: |
+            try:
+                recall_by_class(np.ones((2, 3)))
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for a non-square matrix")
+          message: "Raise ValueError when the matrix is not square."
+    solution: |
+      import numpy as np
+
+
+      def recall_by_class(cm: np.ndarray) -> np.ndarray:
+          """Recall per class from a confusion matrix with true classes in rows.
+
+          Args:
+              cm: Square matrix of counts.
+
+          Returns:
+              Recall per class, NaN where a class has no true examples.
+
+          Raises:
+              ValueError: If cm is not square.
+          """
+          if cm.ndim != 2 or cm.shape[0] != cm.shape[1]:
+              raise ValueError(f"need a square matrix, got {cm.shape}")
+          totals = cm.sum(axis=1)
+          return np.where(totals > 0, cm.diagonal() / np.maximum(totals, 1), np.nan)
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def recall_by_class(cm: np.ndarray) -> np.ndarray:
+            """Column totals: that is precision."""
+            if cm.ndim != 2 or cm.shape[0] != cm.shape[1]:
+                raise ValueError("not square")
+            totals = cm.sum(axis=0)
+            return np.where(totals > 0, cm.diagonal() / np.maximum(totals, 1), np.nan)
+      - |
+        import numpy as np
+
+
+        def recall_by_class(cm: np.ndarray) -> np.ndarray:
+            """Reports 0 for an empty class."""
+            if cm.ndim != 2 or cm.shape[0] != cm.shape[1]:
+                raise ValueError("not square")
+            totals = cm.sum(axis=1)
+            return cm.diagonal() / np.maximum(totals, 1)
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def recall_by_class(cm: np.ndarray) -> np.ndarray:
+              """Column totals: that is precision."""
+              if cm.ndim != 2 or cm.shape[0] != cm.shape[1]:
+                  raise ValueError("not square")
+              totals = cm.sum(axis=0)
+              return np.where(totals > 0, cm.diagonal() / np.maximum(totals, 1), np.nan)
+        triggers: values
+    hints:
+      - "Check `cm.shape[0] == cm.shape[1]`."
+      - "Row totals: `cm.sum(axis=1)`."
+      - "Divide by `np.maximum(totals, 1)` inside `np.where(totals > 0, ..., np.nan)`."
+    explanation: |
+      Dividing by at least 1 avoids the warning, and `np.where` swaps in NaN for empty classes, so a missing class never reads as perfect or as zero.
+
+  - id: B24-L6-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [numpy]
+    prompt: |
+      Every shelf was photographed in a burst of five. Validation accuracy is far higher than on photos of new shelves. Tap the line responsible, then fix it.
+    primer: |
+      `np.unique(a)` returns the distinct values of `a`, sorted. `np.flatnonzero(mask)` returns the positions where a boolean array is `True`:
+
+      ```python
+      np.unique(np.array(["b", "a", "b"]))              # array(['a', 'b'])
+      np.flatnonzero(np.array([False, True, True]))     # array([1, 2])
+      ```
+    code: |
+      import numpy as np
+
+
+      def split_photos(shelf_ids, val_share, rng):
+          order = rng.permutation(len(shelf_ids))
+          n_val = round(len(shelf_ids) * val_share)
+          return order[n_val:], order[:n_val]
+    bug_lines: [5]
+    fix_checker:
+      kind: python
+      setup: |
+        import numpy as np
+      tests:
+        - id: no_shared_shelf
+          code: |
+            shelf_ids = np.repeat(np.arange(20), 5)
+            train, val = split_photos(shelf_ids, 0.2, np.random.default_rng(0))
+            assert not set(shelf_ids[train]) & set(shelf_ids[val]), "a shelf is on both sides"
+            assert sorted(np.concatenate([train, val]).tolist()) == list(range(100))
+            assert len(set(shelf_ids[val])) == 4, set(shelf_ids[val])
+          message: "Shuffle the distinct shelves, give a share of shelves to validation, and keep each shelf's photos together."
+    fix_solution: |
+      import numpy as np
+
+
+      def split_photos(shelf_ids, val_share, rng):
+          shelves = rng.permutation(np.unique(shelf_ids))
+          n_val = round(len(shelves) * val_share)
+          in_val = np.isin(shelf_ids, shelves[:n_val])
+          return np.flatnonzero(~in_val), np.flatnonzero(in_val)
+    wrong_answers:
+      - lines: [6]
+        feedback: "The share is fine. The split is cut along the wrong unit."
+      - lines: [7]
+        feedback: "Returning two sets of positions is right. They were drawn photo by photo."
+    hints:
+      - "What does the permutation shuffle: photos or shelves?"
+      - "Where do the other four photos of a validation shelf end up?"
+      - "Shuffle np.unique(shelf_ids) instead."
+    explanation: |
+      Shuffling photos sends most bursts to both sides, so the model is graded on near-copies of training photos. Shuffle the distinct shelves and keep each shelf's photos on one side.
+
+recap:
+  - front: "Class predictions from a classifier"
+    back: "model.eval(), torch.no_grad(), then logits.argmax(dim=1)."
+  - front: "Recall per class from a confusion matrix"
+    back: "Diagonal over row totals (rows are true classes). Guard empty rows: NaN, not 0."
+  - front: "Near-duplicate images"
+    back: "Bursts, repeat shots and saved augmentations. Split by shelf, store or session, never by photo."
+  - front: "What to report for an image classifier"
+    back: "Accuracy with an interval, recall for every class, the confusion matrix, and a look at the worst errors."
+
+claims:
+  - claim: "scikit-learn 1.8: confusion_matrix([0, 0, 1, 1, 2, 2], [0, 1, 1, 1, 2, 0]) is [[1, 1, 0], [0, 2, 0], [1, 0, 1]] with rows as true classes, and recall per class [0.5, 1.0, 0.5]; PyTorch 2.15 argmax(dim=1) returns class indices."
+    status: verified
+    source: "Run on scikit-learn 1.8.0 (Pyodide pins) and 1.9.1, PyTorch 2.15.0, November 2026."
+
+practical:
+  platform: laptop
+  title: Train a CNN on handwritten digits and compare it with a dense network
+  intro: |
+    Work in `labs/cnn/` in this repository. It uses scikit-learn's bundled 8 by 8 handwritten digits, so nothing downloads. You write the CNN steps from module B24: the channel dimension, a shift augmentation, the model, a confusion matrix and per-class recall. The training script trains your CNN and a dense network on the same split, with early stopping. You need PyTorch 2.15 on the laptop. When the CNN beats the dense network, push the lab to your own GitHub repository: it is the roadmap's CNN evidence for months 4 to 6.
+  steps:
+    - "Run `cd labs/cnn`, create a virtual environment, then `pip install -e .` and `pip install pytest`. Run `pytest`: most tests fail with NotImplementedError. Read `README.md` and every file in `src/digits_cnn/`."
+    - "In `src/digits_cnn/vision.py`, write `add_channel` (lessons B24-L2 and B24-L4) and `random_shift` (lesson B24-L4). Run `pytest tests/test_vision.py -k \"channel or shift\"`."
+    - "Write `confusion` and `recall_by_class` in the same file (lesson B24-L6)."
+    - "In `src/digits_cnn/models.py`, write `make_cnn` (lessons B24-L1 to B24-L3). Run `pytest`: every test passes."
+    - "Run `python -m digits_cnn train`. It prints validation accuracy for the dense network and the CNN, and the CNN's recall for each digit. Which digits does it confuse?"
+    - "Run `python -m digits_cnn train --augment`, which shifts training images by up to one pixel. Compare both models with and without it, and explain the result (lesson B24-L4)."
+    - "Write your README: the data, both models, their parameter counts, the comparison, the confusion matrix, and what augmentation changed. Push the folder to a new GitHub repository."

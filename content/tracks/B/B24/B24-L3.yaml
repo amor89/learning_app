@@ -1,0 +1,452 @@
+id: B24-L3
+title: Pooling, flattening and a complete small CNN
+
+concept: |
+  A CNN stacks convolution blocks, then a small classifier (PyTorch 2.15):
+
+  ```python
+  model = nn.Sequential(
+      nn.Conv2d(1, 16, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),     # 8x8 to 4x4
+      nn.Conv2d(16, 32, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),    # 4x4 to 2x2
+      nn.Flatten(),                                                    # (N, 32 * 2 * 2)
+      nn.Linear(32 * 2 * 2, 10),                                       # one logit per digit
+  )
+  ```
+
+  **Pooling** shrinks each feature map. `nn.MaxPool2d(2)` keeps the largest value in each 2 by 2 block, moving 2 pixels at a time. A 32 by 32 map becomes 16 by 16, and an odd 5 by 5 map becomes 2 by 2: the last row and column are dropped. On `[[1, 3, 2, 0], [4, 2, 1, 5], [0, 1, 3, 2], [2, 6, 1, 1]]` it gives `[[4, 5], [6, 3]]`. `nn.AvgPool2d(2)` averages each block instead. Pooling has no weights. It makes features tolerate small shifts and cuts the work for later layers.
+
+  The usual pattern: early layers find edges, later layers combine them into parts, and each block halves the map while it doubles the channels.
+
+  **Flatten, then size the dense layer.** `nn.Flatten()` turns `(N, C, H, W)` into `(N, C * H * W)`. The `nn.Linear` after it must expect exactly that many inputs. Work it out with the size rule from lesson B24-L2: 8 by 8 digits after two blocks are 32 channels of 2 by 2, so 128. A wrong count fails on the first batch with "mat1 and mat2 shapes cannot be multiplied (64x128 and 2048x10)".
+
+  **Global average pooling.** `nn.AdaptiveAvgPool2d(1)` averages each channel to one value, whatever the input size: `(8, 64, 7, 5)` becomes `(8, 64, 1, 1)`. Ending with it, then `nn.Flatten()` and `nn.Linear(64, classes)`, gives a model that accepts any image size.
+
+  The digits model above has 6,090 parameters. A dense network with one hidden layer of 64 units has 4,810. The lab compares the two on the same data.
+
+why_it_matters: |
+  A model built for 32 by 32 product photos was reused on 64 by 64 photos. The Linear layer after Flatten expected 4,096 inputs and received 16,384, and the job failed on its first batch in production. Ending the convolutions with `nn.AdaptiveAvgPool2d(1)` made the classifier's input 64 for any photo size, and one model served both sizes.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      model = nn.Sequential(
+          nn.Conv2d(1, 16, 3), nn.ReLU(),
+          nn.Conv2d(16, 32, 3), nn.ReLU(),
+          nn.Flatten(),
+          nn.Linear(2048, 10),
+      )
+    annotations:
+      - find: "nn.Conv2d(1, 16, 3), nn.ReLU(),"
+        note: "No padding and no pooling: the map only shrinks by 2 per layer, and the work stays high."
+      - find: "nn.Linear(2048, 10),"
+        note: "A number copied from somewhere. Nothing ties it to the image size."
+  strong:
+    code: |
+      from torch import nn
+
+
+      def make_cnn(channels: int, classes: int) -> nn.Sequential:
+          """Two conv blocks, global average pooling and a linear classifier.
+
+          Args:
+              channels: Input channels, 1 for greyscale.
+              classes: Number of classes, one logit each.
+
+          Returns:
+              A model that accepts images of any size of at least 4 by 4.
+          """
+          return nn.Sequential(
+              nn.Conv2d(channels, 16, kernel_size=3, padding=1),
+              nn.ReLU(),
+              nn.MaxPool2d(2),
+              nn.Conv2d(16, 32, kernel_size=3, padding=1),
+              nn.ReLU(),
+              nn.MaxPool2d(2),
+              nn.AdaptiveAvgPool2d(1),
+              nn.Flatten(),
+              nn.Linear(32, classes),
+          )
+    annotations:
+      - find: "nn.Conv2d(channels, 16, kernel_size=3, padding=1),"
+        note: "Padding keeps the size, so only the MaxPool2d(2) layers shrink it, halving height and width with no weights."
+      - find: "nn.AdaptiveAvgPool2d(1),"
+        note: "One value per channel, whatever the image size."
+      - find: "nn.Linear(32, classes),"
+        note: "Its input equals the last conv's channels, so it never needs recomputing."
+  takeaway: |
+    Conv, ReLU and pool blocks shrink the maps and grow the channels. Size the dense layer from the shape rule, or end with global average pooling so the size never matters.
+
+exercises:
+  - id: B24-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      What does `nn.MaxPool2d(2)` add to a CNN?
+    options:
+      - {id: a, text: "It halves height and width with no weights, and makes features tolerate small shifts"}
+      - {id: b, text: "It learns which pixels matter most"}
+      - {id: c, text: "It doubles the number of channels"}
+      - {id: d, text: "It replaces the activation function"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Keeping the largest value in each 2 by 2 block reports that a feature is present nearby, not its exact pixel, and quarters the work for later layers."}
+      - {id: r2, text: "Pooling removes noise from the input images."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Max pooling has no weights. It keeps the largest value by rule."
+      - answer: c
+        feedback: "Pooling works on each channel separately and keeps the channel count."
+      - answer: d
+        feedback: "Pooling comes after the activation. It does not replace it."
+      - answer: a|r2
+        feedback: "Right effect, wrong reason. It summarises feature maps, not the raw image."
+    hints:
+      - "Does max pooling have parameters?"
+      - "What happens to a feature that moves by one pixel within a block?"
+      - "Smaller maps, shift tolerance."
+    explanation: |
+      Max pooling summarises each block by its largest value: smaller maps, no weights, and some tolerance to small shifts.
+
+  - id: B24-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.15)
+    code: |
+      import torch
+      from torch import nn
+
+      m = torch.tensor([[1.0, 3.0, 2.0, 0.0],
+                        [4.0, 2.0, 1.0, 5.0],
+                        [0.0, 1.0, 3.0, 2.0],
+                        [2.0, 6.0, 1.0, 1.0]]).reshape(1, 1, 4, 4)
+      print(nn.MaxPool2d(2)(m)[0, 0].tolist(), nn.AvgPool2d(2)(m)[0, 0].tolist())
+    answer: |
+      [[4.0, 5.0], [6.0, 3.0]] [[2.5, 2.0], [2.25, 1.75]]
+    wrong_answers:
+      - answer: "[[4.0, 3.0, 5.0], [4.0, 3.0, 5.0], [6.0, 6.0, 3.0]] [[2.5, 2.0], [2.25, 1.75]]"
+        feedback: "MaxPool2d(2) moves 2 pixels at a time by default, so blocks do not overlap: a 2 by 2 result."
+      - answer: "[[4.0, 5.0], [6.0, 3.0]] [[4.0, 5.0], [6.0, 3.0]]"
+        feedback: "AvgPool2d averages each block: (1 + 3 + 4 + 2) / 4 = 2.5 for the first."
+    hints:
+      - "Split the 4 by 4 grid into four 2 by 2 blocks."
+      - "Max of each block, then mean of each block."
+      - "Top-left block: 1, 3, 4, 2."
+    explanation: |
+      The blocks are {1, 3, 4, 2}, {2, 0, 1, 5}, {0, 1, 2, 6} and {3, 2, 1, 1}. Their maxima are 4, 5, 6, 3, and their means 2.5, 2.0, 2.25, 1.75.
+
+  - id: B24-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete a block that halves the map, and the step before the classifier.
+    template: |
+      nn.Conv2d(16, 32, 3, padding=1), nn.ReLU(), nn.[[g1]](2),
+      nn.[[g2]](),
+      nn.Linear(32 * 2 * 2, 10),
+    gaps:
+      g1: {accepted: [MaxPool2d, AvgPool2d]}
+      g2: {accepted: [Flatten]}
+    wrong_answers:
+      - answer: {g1: MaxPool2d, g2: ReLU}
+        feedback: "Linear needs a (N, features) input. Flatten turns (N, C, H, W) into that."
+    hints:
+      - "Which layer halves height and width?"
+      - "Which layer turns (N, C, H, W) into (N, C * H * W)?"
+      - "`MaxPool2d` and `Flatten`."
+    explanation: |
+      Pooling halves the map, and `Flatten` lays out the 32 × 2 × 2 values as one row per image for the Linear layer.
+
+  - id: B24-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `max_pool2d(x, size=2) -> np.ndarray`: max pooling of a 2-D array with non-overlapping `size` by `size` blocks, as `nn.MaxPool2d(size)` does.
+
+      - The output has shape `(h // size, w // size)`. Leftover rows and columns are dropped.
+      - Raise `ValueError` when `x` is not 2-D, `size` is below 1, or `x` is smaller than one block.
+    starter: |
+      import numpy as np
+
+
+      def max_pool2d(x, size=2):
+          return x[::size, ::size]
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+
+        _M = np.array([[1.0, 3.0, 2.0, 0.0], [4.0, 2.0, 1.0, 5.0], [0.0, 1.0, 3.0, 2.0], [2.0, 6.0, 1.0, 1.0]])
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: max_pool2d
+          typed: true
+          docstring: true
+          message: "Give max_pool2d type hints and a docstring."
+      tests:
+        - id: values
+          code: |
+            assert np.array_equal(max_pool2d(_M), [[4.0, 5.0], [6.0, 3.0]]), max_pool2d(_M)
+          message: "Keep the largest value in each size by size block."
+        - id: odd_sizes
+          code: |
+            x = np.arange(35.0).reshape(5, 7)
+            out = max_pool2d(x)
+            assert out.shape == (2, 3), out.shape
+            assert np.array_equal(out, [[8.0, 10.0, 12.0], [22.0, 24.0, 26.0]]), out
+            assert np.array_equal(max_pool2d(x, 3), [[16.0, 19.0]]), max_pool2d(x, 3)
+          message: "Drop leftover rows and columns, and use size for both the block and the step."
+        - id: guards
+          code: |
+            for x, size in [(np.ones(4), 2), (np.ones((4, 4)), 0), (np.ones((1, 4)), 2)]:
+                try:
+                    max_pool2d(x, size)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {x.shape}, size={size}")
+          message: "Raise ValueError for non-2-D input, size below 1, or an input smaller than one block."
+    solution: |
+      import numpy as np
+
+
+      def max_pool2d(x: np.ndarray, size: int = 2) -> np.ndarray:
+          """Max pooling with non-overlapping size by size blocks.
+
+          Args:
+              x: 2-D feature map.
+              size: Block height and width, also the step.
+
+          Returns:
+              Array of shape (h // size, w // size).
+
+          Raises:
+              ValueError: If x is not 2-D, size is below 1, or x is smaller than one block.
+          """
+          if x.ndim != 2 or size < 1:
+              raise ValueError(f"need a 2-D array and size >= 1, got {x.shape} and {size}")
+          out_h, out_w = x.shape[0] // size, x.shape[1] // size
+          if out_h < 1 or out_w < 1:
+              raise ValueError(f"{x.shape} is smaller than one {size} by {size} block")
+          out = np.zeros((out_h, out_w))
+          for i in range(out_h):
+              for j in range(out_w):
+                  out[i, j] = x[i * size : (i + 1) * size, j * size : (j + 1) * size].max()
+          return out
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def max_pool2d(x: np.ndarray, size: int = 2) -> np.ndarray:
+            """Overlapping blocks, step 1."""
+            if x.ndim != 2 or size < 1:
+                raise ValueError("bad input")
+            out_h, out_w = x.shape[0] - size + 1, x.shape[1] - size + 1
+            if out_h < 1 or out_w < 1:
+                raise ValueError("too small")
+            out = np.zeros((out_h, out_w))
+            for i in range(out_h):
+                for j in range(out_w):
+                    out[i, j] = x[i : i + size, j : j + size].max()
+            return out
+      - |
+        import numpy as np
+
+
+        def max_pool2d(x: np.ndarray, size: int = 2) -> np.ndarray:
+            """Takes the top-left value instead of the maximum."""
+            if x.ndim != 2 or size < 1:
+                raise ValueError("bad input")
+            out_h, out_w = x.shape[0] // size, x.shape[1] // size
+            if out_h < 1 or out_w < 1:
+                raise ValueError("too small")
+            return x[: out_h * size : size, : out_w * size : size].astype(float)
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def max_pool2d(x: np.ndarray, size: int = 2) -> np.ndarray:
+              """Overlapping blocks, step 1."""
+              if x.ndim != 2 or size < 1:
+                  raise ValueError("bad input")
+              out_h, out_w = x.shape[0] - size + 1, x.shape[1] - size + 1
+              if out_h < 1 or out_w < 1:
+                  raise ValueError("too small")
+              out = np.zeros((out_h, out_w))
+              for i in range(out_h):
+                  for j in range(out_w):
+                      out[i, j] = x[i : i + size, j : j + size].max()
+              return out
+        triggers: values
+    hints:
+      - "Output size: `x.shape[0] // size` by `x.shape[1] // size`."
+      - "Block (i, j) starts at row `i * size` and column `j * size`."
+      - "Take `.max()` of each block."
+    explanation: |
+      Non-overlapping blocks step by `size`, so the output is `h // size` by `w // size`, and leftover rows and columns are dropped, as in `nn.MaxPool2d`.
+
+  - id: B24-L3-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `flatten_features(image_size: int, blocks: int, channels: int) -> int`: the input size of the Linear layer after `blocks` repeats of "3 by 3 conv with padding 1, ReLU, `MaxPool2d(2)`" on square images, where the last conv has `channels` filters.
+
+      - Each block keeps the size through the conv and halves it, rounding down, through the pool.
+      - Raise `ValueError` when `image_size` or `channels` is below 1, `blocks` is negative, or the map shrinks below 1.
+    starter: |
+      def flatten_features(image_size, blocks, channels):
+          return image_size * channels
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: flatten_features
+          typed: true
+          docstring: true
+          message: "Give flatten_features type hints and a docstring."
+      tests:
+        - id: sizes
+          code: |
+            assert flatten_features(8, 2, 32) == 128, flatten_features(8, 2, 32)
+            assert flatten_features(28, 2, 32) == 32 * 7 * 7, flatten_features(28, 2, 32)
+            assert flatten_features(32, 3, 64) == 64 * 4 * 4, flatten_features(32, 3, 64)
+            assert flatten_features(7, 1, 16) == 16 * 3 * 3, flatten_features(7, 1, 16)
+            assert flatten_features(8, 0, 1) == 64
+          message: "Halve the size once per block, rounding down, then multiply channels by size squared."
+        - id: guards
+          code: |
+            for args in [(0, 1, 16), (8, -1, 16), (8, 1, 0), (8, 4, 16)]:
+                try:
+                    flatten_features(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {args}")
+          message: "Raise ValueError for bad arguments or a map that shrinks below 1."
+    solution: |
+      def flatten_features(image_size: int, blocks: int, channels: int) -> int:
+          """Inputs to the Linear layer after conv, ReLU, MaxPool2d(2) blocks.
+
+          Args:
+              image_size: Height and width of the square input.
+              blocks: Number of blocks.
+              channels: Filters in the last conv layer.
+
+          Returns:
+              channels * size * size after the last pool.
+
+          Raises:
+              ValueError: If an argument is out of range or the map shrinks below 1.
+          """
+          if image_size < 1 or channels < 1 or blocks < 0:
+              raise ValueError(f"invalid arguments: {image_size}, {blocks}, {channels}")
+          size = image_size
+          for _ in range(blocks):
+              size //= 2
+              if size < 1:
+                  raise ValueError(f"{blocks} blocks shrink a {image_size} image below 1 pixel")
+          return channels * size * size
+    seeded_bugs:
+      - |
+        def flatten_features(image_size: int, blocks: int, channels: int) -> int:
+            """Forgets to square the size."""
+            if image_size < 1 or channels < 1 or blocks < 0:
+                raise ValueError("invalid")
+            size = image_size // 2**blocks
+            if size < 1:
+                raise ValueError("too small")
+            return channels * size
+      - |
+        def flatten_features(image_size: int, blocks: int, channels: int) -> int:
+            """Rounds up when halving."""
+            if image_size < 1 or channels < 1 or blocks < 0:
+                raise ValueError("invalid")
+            size = image_size
+            for _ in range(blocks):
+                size = (size + 1) // 2
+            return channels * size * size
+    wrong_answers:
+      - answer: |
+          def flatten_features(image_size: int, blocks: int, channels: int) -> int:
+              """Rounds up when halving."""
+              if image_size < 1 or channels < 1 or blocks < 0:
+                  raise ValueError("invalid")
+              size = image_size
+              for _ in range(blocks):
+                  size = (size + 1) // 2
+              return channels * size * size
+        triggers: sizes
+    hints:
+      - "Padded 3 by 3 convs keep the size. Only the pools change it."
+      - "Halve with `//= 2` once per block, and check it stays at least 1."
+      - "Return `channels * size * size`."
+    explanation: |
+      Pooling rounds down, so 7 becomes 3. The Linear layer needs channels × height × width inputs.
+
+  - id: B24-L3-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      The first batch of 8 by 8 digits fails with "mat1 and mat2 shapes cannot be multiplied (64x128 and 2048x10)". Tap the line responsible, then fix it.
+    code: |
+      from torch import nn
+
+      model = nn.Sequential(
+          nn.Conv2d(1, 16, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+          nn.Conv2d(16, 32, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+          nn.Flatten(),
+          nn.Linear(32 * 8 * 8, 10),
+      )
+    bug_lines: [7]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: right_size
+          kind: requires_pattern
+          pattern: "nn\\.Linear\\(\\s*(32\\s*\\*\\s*2\\s*\\*\\s*2|128)\\s*,\\s*10\\s*\\)"
+          message: "After two pools, 8 by 8 becomes 2 by 2: nn.Linear(32 * 2 * 2, 10)."
+    fix_solution: |
+      from torch import nn
+
+      model = nn.Sequential(
+          nn.Conv2d(1, 16, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+          nn.Conv2d(16, 32, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+          nn.Flatten(),
+          nn.Linear(32 * 2 * 2, 10),
+      )
+    wrong_answers:
+      - lines: [6]
+        feedback: "Flatten is right. It produces 128 values per image, as the error says."
+      - lines: [5]
+        feedback: "The second block is fine. Its pool halves 4 by 4 to 2 by 2."
+    hints:
+      - "The error says each image flattens to 128 values."
+      - "What size are the maps after two MaxPool2d(2) layers on 8 by 8?"
+      - "32 channels of 2 by 2."
+    explanation: |
+      Two pools shrink 8 by 8 to 2 by 2, so Flatten gives 32 × 2 × 2 = 128 values. The Linear layer was sized as if no pooling happened.
+
+recap:
+  - front: "What MaxPool2d(2) does"
+    back: "Largest value per non-overlapping 2 by 2 block. Halves height and width, rounding down. No weights."
+  - front: "Linear size after Flatten"
+    back: "channels * H * W of the last feature map. Work it out with the size rule, layer by layer."
+  - front: "Make a CNN accept any image size"
+    back: "End the convolutions with nn.AdaptiveAvgPool2d(1), then Flatten and Linear(channels, classes)."
+  - front: "Typical CNN block"
+    back: "Conv2d (padding to keep the size), ReLU, MaxPool2d(2). Each block halves the map and grows the channels."
+
+claims:
+  - claim: "PyTorch 2.15: MaxPool2d(2) on the 4 by 4 example gives [[4, 5], [6, 3]] and AvgPool2d(2) [[2.5, 2.0], [2.25, 1.75]]; 5 by 5 pools to 2 by 2; AdaptiveAvgPool2d(1) maps (8, 64, 7, 5) to (8, 64, 1, 1); the two-block digits CNN has 6,090 parameters and the 64-unit dense network 4,810; a Linear(2048, 10) after two pools on 8 by 8 raises 'mat1 and mat2 shapes cannot be multiplied (64x128 and 2048x10)'."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), November 2026."
