@@ -1,0 +1,434 @@
+id: B26-L3
+title: LoRA, fine-tuning with a low-rank update
+
+concept: |
+  Full fine-tuning changes every weight and stores a full copy per task. **LoRA** (low-rank adaptation) freezes a layer's weight `W`, shape `(d_out, d_in)`, and learns a small change made of two matrices: `A`, shape `(r, d_in)`, and `B`, shape `(d_out, r)`, with a small rank `r`:
+
+  ```python
+  y = x @ W.T + (alpha / r) * (x @ A.T @ B.T)
+  ```
+
+  The product `B @ A` has the shape of `W` but at most rank `r`. `alpha / r` scales the update, so you can change `r` without retuning the learning rate.
+
+  - **Few values to train.** A 768 by 768 layer holds 589,824 weights. With `r = 8`, `A` and `B` hold `8 * (768 + 768) = 12,288`, about 2%.
+  - **B starts at zero.** `A` starts random and `B` at zero, so `B @ A` is zero and the adapted model starts identical to the pretrained one. peft 0.21 does this by default.
+  - **Merge for prediction.** After training, fold the update in: `W_merged = W + (alpha / r) * B @ A`. The merged layer is an ordinary linear layer with no extra cost. Keep `A` and `B` apart instead, and one frozen base model serves many tasks, each with its own small adapter.
+  - **Where to put it.** A common choice is the attention query and value projections.
+
+  In the B26 lab, LoRA with `r = 4` on queries and values, plus a new head, trained 1,123 of 26,979 values. On 60 labels it reached 0.967 mean accuracy over three seeds, against 0.992 for full fine-tuning. Its seeds also spread wider, from 0.929 to 0.990. On 600 labels the gap closed to 0.995 against 0.998.
+
+  LoRA does not make the forward pass cheaper during training: the frozen weight still runs. It saves the memory for gradients and optimiser state of the frozen weights, and the storage of one full model copy per task.
+
+why_it_matters: |
+  A team fine-tuned one text encoder for each of 12 survey clients, each a full copy of 110 million weights. Storage and loading time grew with every client. Switching to LoRA adapters kept one frozen base model and 12 small adapter files, and each client's accuracy stayed within a point of its fully fine-tuned model.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      A = rng.normal(size=(r, d_in))
+      B = rng.normal(size=(d_out, r))
+      y = x @ W.T + alpha * (x @ A.T @ B.T)
+    annotations:
+      - find: "B = rng.normal(size=(d_out, r))"
+        note: "B random: the adapted layer differs from the pretrained one before any training."
+      - find: "y = x @ W.T + alpha * (x @ A.T @ B.T)"
+        note: "No division by r, so changing r changes the size of the update."
+  strong:
+    code: |
+      import numpy as np
+
+
+      def lora_init(d_in: int, d_out: int, r: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
+          """A random, B zero, so the update starts at zero.
+
+          Raises:
+              ValueError: If r is below 1 or larger than d_in or d_out.
+          """
+          if not 1 <= r <= min(d_in, d_out):
+              raise ValueError(f"r must be in 1..{min(d_in, d_out)}, got {r}")
+          rng = np.random.default_rng(seed)
+          return rng.normal(0.0, 1.0 / np.sqrt(d_in), size=(r, d_in)), np.zeros((d_out, r))
+
+
+      def lora_forward(x: np.ndarray, W: np.ndarray, A: np.ndarray, B: np.ndarray, alpha: float) -> np.ndarray:
+          """Frozen layer plus the scaled low-rank update, for x of shape (n, d_in)."""
+          r = A.shape[0]
+          return x @ W.T + (alpha / r) * (x @ A.T @ B.T)
+
+
+      def merge_lora(W: np.ndarray, A: np.ndarray, B: np.ndarray, alpha: float) -> np.ndarray:
+          """One weight matrix equal to the frozen layer plus its update."""
+          return W + (alpha / A.shape[0]) * B @ A
+    annotations:
+      - find: "return rng.normal(0.0, 1.0 / np.sqrt(d_in), size=(r, d_in)), np.zeros((d_out, r))"
+        note: "A random and B zero: B @ A starts at zero, so the model starts as pretrained."
+      - find: "return x @ W.T + (alpha / r) * (x @ A.T @ B.T)"
+        note: "x @ A.T @ B.T never builds the d_out by d_in product, only (n, r) then (n, d_out)."
+      - find: "return W + (alpha / A.shape[0]) * B @ A"
+        note: "Merging uses the same alpha / r scale, so merged and unmerged outputs match."
+  takeaway: |
+    LoRA freezes W and trains A and B with B at zero, scales the update by alpha / r, and merges into one matrix after training.
+
+exercises:
+  - id: B26-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Why does LoRA start `B` at zero?
+    options:
+      - {id: a, text: "So B @ A is zero and the adapted model starts identical to the pretrained one"}
+      - {id: b, text: "So the update has rank zero for the whole of training"}
+      - {id: c, text: "To halve the number of trainable values"}
+      - {id: d, text: "So that A receives no gradient"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Training then starts from the pretrained model's behaviour and moves away only as far as the data asks."}
+      - {id: r2, text: "Zero matrices take no memory."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "B changes from the first step, so the update gains up to rank r as training goes on."
+      - answer: c
+        feedback: "B is still trained. Its starting value does not change how many values train."
+      - answer: d
+        feedback: "A gets no gradient at the first step, while B is zero. After B moves, both train."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. A zero matrix takes as much memory as any other. The point is the starting behaviour."
+    hints:
+      - "What is B @ A when B is zero?"
+      - "What does the adapted layer compute then?"
+      - "Compare it with the pretrained layer."
+    explanation: |
+      With `B` at zero the update is zero, so the first forward pass equals the pretrained model's. Training starts from known-good behaviour.
+
+  - id: B26-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      import numpy as np
+
+      d_in, d_out, r = 6, 4, 2
+      W = np.ones((d_out, d_in))
+      A = np.full((r, d_in), 0.5)
+      B = np.zeros((d_out, r))
+      x = np.ones(d_in)
+      print(A.size + B.size, W.size, (x @ W.T + x @ A.T @ B.T == x @ W.T).all())
+    answer: |
+      20 24 True
+    wrong_answers:
+      - answer: "20 24 False"
+        feedback: "B is zero, so the update adds nothing and the outputs match."
+      - answer: "48 24 True"
+        feedback: "A is 2 by 6 and B is 4 by 2: 12 plus 8 values."
+    hints:
+      - "A has r * d_in values, B has d_out * r."
+      - "W has d_out * d_in."
+      - "What does a zero B add?"
+    explanation: |
+      `A` and `B` hold 12 and 8 values, 20 in all, against 24 in `W`. At these tiny sizes LoRA barely saves anything. At 768 by 768 with `r = 8` it trains 2%. With `B` at zero the outputs match.
+
+  - id: B26-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Merge a trained LoRA update into the frozen weight.
+    template: |
+      r = A.shape[0]
+      W_merged = W + (alpha / [[g1]]) * [[g2]] @ A
+    gaps:
+      g1: {accepted: [r]}
+      g2: {accepted: [B]}
+    wrong_answers:
+      - answer: {g1: r, g2: A.T}
+        feedback: "A.T @ A has shape (d_in, d_in). The update B @ A has W's shape, (d_out, d_in)."
+    hints:
+      - "The scale is alpha over the rank."
+      - "Which product has W's shape?"
+      - "`r` and `B`."
+    explanation: |
+      `B @ A` is `(d_out, r)` times `(r, d_in)`, the shape of `W`. Scaling by `alpha / r` matches the forward pass, so the merged layer gives the same outputs.
+
+  - id: B26-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `lora_forward(x, W, A, B, alpha) -> np.ndarray`.
+
+      - `x` is `(n, d_in)`, `W` is `(d_out, d_in)`, `A` is `(r, d_in)` and `B` is `(d_out, r)`.
+      - Return `x @ W.T + (alpha / r) * (x @ A.T @ B.T)`, with `r` the number of rows of `A`.
+      - Raise `ValueError` if `A` and `W` differ in width, or `B` is not `(d_out, r)`.
+    starter: |
+      import numpy as np
+
+
+      def lora_forward(x, W, A, B, alpha):
+          return x @ W.T
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+
+        _rng = np.random.default_rng(0)
+        _x, _W = _rng.normal(size=(3, 6)), _rng.normal(size=(4, 6))
+        _A, _B = _rng.normal(size=(2, 6)), _rng.normal(size=(4, 2))
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: lora_forward
+          typed: true
+          docstring: true
+          message: "Give lora_forward type hints and a docstring."
+      tests:
+        - id: zero_b
+          code: |
+            out = lora_forward(_x, _W, _A, np.zeros((4, 2)), 8.0)
+            assert out.shape == (3, 4) and np.allclose(out, _x @ _W.T), out
+          message: "With B at zero, the output equals the frozen layer's, x @ W.T."
+        - id: scaled
+          code: |
+            out = lora_forward(_x, _W, _A, _B, 4.0)
+            assert np.allclose(out, _x @ _W.T + 2.0 * _x @ _A.T @ _B.T), out
+          message: "Scale the update by alpha / r, where r is A's number of rows."
+        - id: guards
+          code: |
+            for A, B in [(_A[:, :5], _B), (_A, _B[:1])]:
+                try:
+                    lora_forward(_x, _W, A, B, 4.0)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for A {A.shape}, B {B.shape}")
+          message: "Raise ValueError when A's width differs from W's, or B is not (d_out, r)."
+    solution: |
+      import numpy as np
+
+
+      def lora_forward(x: np.ndarray, W: np.ndarray, A: np.ndarray, B: np.ndarray, alpha: float) -> np.ndarray:
+          """Frozen layer plus the scaled low-rank update.
+
+          Args:
+              x: Inputs, shape (n, d_in).
+              W: Frozen weight, shape (d_out, d_in).
+              A: Down projection, shape (r, d_in).
+              B: Up projection, shape (d_out, r).
+              alpha: Scale numerator; the update is multiplied by alpha / r.
+
+          Returns:
+              Outputs, shape (n, d_out).
+
+          Raises:
+              ValueError: If A's width differs from W's or B is not (d_out, r).
+          """
+          r = A.shape[0]
+          if A.shape[1] != W.shape[1] or B.shape != (W.shape[0], r):
+              raise ValueError(f"shapes do not fit: W {W.shape}, A {A.shape}, B {B.shape}")
+          return x @ W.T + (alpha / r) * (x @ A.T @ B.T)
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def lora_forward(x: np.ndarray, W: np.ndarray, A: np.ndarray, B: np.ndarray, alpha: float) -> np.ndarray:
+            """Forgets to divide alpha by r."""
+            r = A.shape[0]
+            if A.shape[1] != W.shape[1] or B.shape != (W.shape[0], r):
+                raise ValueError("shapes do not fit")
+            return x @ W.T + alpha * (x @ A.T @ B.T)
+      - |
+        import numpy as np
+
+
+        def lora_forward(x: np.ndarray, W: np.ndarray, A: np.ndarray, B: np.ndarray, alpha: float) -> np.ndarray:
+            """No shape checks."""
+            r = A.shape[0]
+            return x @ W.T + (alpha / r) * (x @ A.T @ B.T)
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def lora_forward(x: np.ndarray, W: np.ndarray, A: np.ndarray, B: np.ndarray, alpha: float) -> np.ndarray:
+              """Forgets to divide alpha by r."""
+              r = A.shape[0]
+              if A.shape[1] != W.shape[1] or B.shape != (W.shape[0], r):
+                  raise ValueError("shapes do not fit")
+              return x @ W.T + alpha * (x @ A.T @ B.T)
+        triggers: scaled
+    hints:
+      - "`r = A.shape[0]`."
+      - "Check `A.shape[1] == W.shape[1]` and `B.shape == (W.shape[0], r)`."
+      - "Add `(alpha / r) * (x @ A.T @ B.T)` to `x @ W.T`."
+    explanation: |
+      The frozen path is `x @ W.T`. The update goes down to `r` values with `A`, back up to `d_out` with `B`, and is scaled by `alpha / r`. The shape checks catch a transposed `B`, which a square layer would otherwise accept.
+
+  - id: B26-L3-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `merge_lora(W, A, B, alpha) -> np.ndarray`, the weight of one plain layer that gives the same outputs as the frozen layer plus its LoRA update.
+
+      - Return `W + (alpha / r) * B @ A` as a new array, with `r` the number of rows of `A`.
+      - Leave `W` unchanged.
+    starter: |
+      import numpy as np
+
+
+      def merge_lora(W, A, B, alpha):
+          return W
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+
+        _rng = np.random.default_rng(1)
+        _W, _A, _B = _rng.normal(size=(4, 6)), _rng.normal(size=(2, 6)), _rng.normal(size=(4, 2))
+        _x = _rng.normal(size=(5, 6))
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: merge_lora
+          typed: true
+          docstring: true
+          message: "Give merge_lora type hints and a docstring."
+      tests:
+        - id: w_unchanged
+          code: |
+            before = _W.copy()
+            merge_lora(_W, _A, _B, 4.0)
+            assert np.array_equal(_W, before)
+          message: "Return a new array. Do not add the update into W in place."
+        - id: same_outputs
+          code: |
+            merged = merge_lora(_W, _A, _B, 4.0)
+            expected = _x @ _W.T + 2.0 * (_x @ _A.T @ _B.T)
+            assert merged.shape == (4, 6) and np.allclose(_x @ merged.T, expected), merged
+          message: "x @ merged.T must equal x @ W.T + (alpha / r) * x @ A.T @ B.T."
+    solution: |
+      import numpy as np
+
+
+      def merge_lora(W: np.ndarray, A: np.ndarray, B: np.ndarray, alpha: float) -> np.ndarray:
+          """One weight matrix equal to the frozen layer plus its LoRA update.
+
+          Args:
+              W: Frozen weight, shape (d_out, d_in).
+              A: Shape (r, d_in).
+              B: Shape (d_out, r).
+              alpha: Scale numerator.
+
+          Returns:
+              A new array of W's shape.
+          """
+          r = A.shape[0]
+          return W + (alpha / r) * B @ A
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def merge_lora(W: np.ndarray, A: np.ndarray, B: np.ndarray, alpha: float) -> np.ndarray:
+            """Merges without the scale."""
+            return W + B @ A
+      - |
+        import numpy as np
+
+
+        def merge_lora(W: np.ndarray, A: np.ndarray, B: np.ndarray, alpha: float) -> np.ndarray:
+            """Adds into W in place."""
+            r = A.shape[0]
+            W += (alpha / r) * B @ A
+            return W
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def merge_lora(W: np.ndarray, A: np.ndarray, B: np.ndarray, alpha: float) -> np.ndarray:
+              """Adds into W in place."""
+              r = A.shape[0]
+              W += (alpha / r) * B @ A
+              return W
+        triggers: w_unchanged
+    hints:
+      - "`r = A.shape[0]`."
+      - "`B @ A` has W's shape."
+      - "`W + (alpha / r) * B @ A` makes a new array; `+=` would not."
+    explanation: |
+      Merging adds the scaled update to a copy of `W`. Changing `W` in place would destroy the frozen weight that other adapters share.
+
+  - id: B26-L3-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [numpy]
+    prompt: |
+      After merging, the model's predictions no longer match the unmerged adapter's. The run used `r = 4` and `alpha = 8`. Tap the line responsible, then fix it.
+    code: |
+      import numpy as np
+
+
+      def merged_weight(W, A, B, alpha):
+          r = A.shape[0]
+          scaling = alpha * r
+          update = B @ A
+          return W + scaling * update
+    bug_lines: [6]
+    fix_checker:
+      kind: python
+      setup: |
+        import numpy as np
+      tests:
+        - id: matches_forward
+          code: |
+            rng = np.random.default_rng(2)
+            W, A, B = rng.normal(size=(5, 6)), rng.normal(size=(4, 6)), rng.normal(size=(5, 4))
+            x = rng.normal(size=(3, 6))
+            expected = x @ W.T + 2.0 * (x @ A.T @ B.T)
+            assert np.allclose(x @ merged_weight(W, A, B, 8.0).T, expected)
+          message: "The merge must use the forward pass's scale, alpha / r."
+    fix_solution: |
+      import numpy as np
+
+
+      def merged_weight(W, A, B, alpha):
+          r = A.shape[0]
+          scaling = alpha / r
+          update = B @ A
+          return W + scaling * update
+    wrong_answers:
+      - lines: [7]
+        feedback: "B @ A has W's shape and is the right product. Look at how it is scaled."
+      - lines: [5]
+        feedback: "r is the number of rows of A, which is right."
+    hints:
+      - "What scale does the forward pass use?"
+      - "With r = 4 and alpha = 8, what should the scale be?"
+      - "2, not 32."
+    explanation: |
+      The forward pass scales the update by `alpha / r`, here 2. Line 6 multiplies instead, giving 32, so the merged layer applies an update 16 times too large.
+
+recap:
+  - front: "LoRA output"
+    back: "y = x @ W.T + (alpha / r) * x @ A.T @ B.T, with W frozen, A (r, d_in), B (d_out, r)."
+  - front: "LoRA starting point"
+    back: "A random, B zero, so the update is zero and training starts from the pretrained model."
+  - front: "LoRA size"
+    back: "r * (d_in + d_out) values per layer: 12,288 instead of 589,824 for 768 by 768 at r = 8."
+  - front: "Merging"
+    back: "W + (alpha / r) * B @ A as a new matrix: one plain layer, no extra cost at prediction."
+
+claims:
+  - claim: "peft 0.21.2: LoraConfig defaults r=8, lora_alpha=8, lora_dropout=0.0, init_lora_weights=True; the wrapped Linear has lora_A (r, d_in) and lora_B (d_out, r) with lora_B all zero, scaling lora_alpha / r (2.0 for r 8, alpha 16); outputs match the base model before training; merge_and_unload returns the base class with plain Linear layers and the same outputs."
+    status: verified
+    source: "Run on peft 0.21.2 with transformers 5.22.1 and PyTorch 2.15.0, on a BERT model built from a config with random weights, November 2026."
+  - claim: "B26 lab: LoRA with r 4 and alpha 8 on queries and values plus a new head trained 1,123 of 26,979 values; mean validation accuracy over seeds 0 to 2 was 0.967 (0.990, 0.982, 0.929) on 60 labels against 0.992 for full fine-tuning, and 0.995 against 0.998 on 600 labels."
+    status: verified
+    source: "labs/finetune reference run, PyTorch 2.15.0, November 2026."

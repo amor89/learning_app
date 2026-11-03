@@ -49,9 +49,11 @@ Checked on 25 September 2026. Status key:
 | Hypothesis | 6.168.1 | dev environment only; not in Pyodide | Verified (local run) |
 | MLflow | 3.16.1 | scratch environment, Python 3.12 | Verified (local run). Not in the dev group: too large for CI, and not in Pyodide |
 | shap | 0.51.0 | dev environment | Verified (local run) |
-| PyTorch | 2.15.0 (B23 to B25 and their labs), 2.14.0 (B16) | scratch environment, Python 3.12, PyPI wheel run on CPU | Verified (local run). Not in the dev group or Pyodide. download.pytorch.org was blocked in the November 2026 build, so the PyPI wheel was used |
+| PyTorch | 2.15.0 (B23 to B26 and their labs), 2.14.0 (B16) | scratch environment, Python 3.12, PyPI wheel run on CPU | Verified (local run). Not in the dev group or Pyodide. download.pytorch.org was blocked in the November 2026 build, so the PyPI wheel was used |
 | torchvision | 0.29.2 | scratch environment, Python 3.12, PyPI wheel run on CPU | Verified (local run) for module B24. Pretrained weights not downloaded: download.pytorch.org was blocked |
 | sentence-transformers | Not installed | none | Unverified. Its API in B15-L1 comes from the library documentation |
+| transformers | 5.22.1 | scratch environment, Python 3.12, PyPI wheel run on CPU | Verified (local run) for module B26, with models built from a config and a local vocabulary. No hub download: huggingface.co was blocked |
+| peft | 0.21.2 | scratch environment, Python 3.12, PyPI wheel | Verified (local run) for module B26 |
 | uv | 0.8.17 | build machine | Verified (local run) |
 | scikit-learn TfidfVectorizer | 1.9.1 (dev), 1.8.0 (parity) | `labs/rag` index | Verified (local run). Lab retrieval on 12 gold questions: recall at 3 1.000, MRR 0.903 at chunk size 80 |
 | mutmut | 3.8.1 | not installed | Search only (PyPI listing). B19-L8 names it as an example of mutation testing and teaches no commands |
@@ -210,6 +212,13 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 | PyTorch 2.15 multi-head attention and blocks: `nn.MultiheadAttention(8, h)` has 288 parameters for h = 2 and 4, 1,050,624 for d = 512; indivisible heads raise "embed_dim must be divisible by num_heads"; without positions a permuted input permutes the output; `nn.LayerNorm(4)` on [1, 2, 3, 4] gives [-1.3416, -0.4472, 0.4472, 1.3416]; `TransformerEncoderLayer` defaults dim_feedforward 2048, dropout 0.1, relu, batch_first False, norm_first False, layer_norm_eps 1e-5, 68,752 parameters at d_model 16. | Verified | Local, torch 2.15.0 |
 | Sinusoidal positions PE(pos, 2i) = sin(pos / 10000^(2i/d)), PE(pos, 2i+1) = cos(...) come from Vaswani and others, Attention Is All You Need (2017). | Search only | Search results citing arXiv 1706.03762. arxiv.org blocked by the build network. Values for d = 4 computed locally |
 | `labs/transformer` reference run (seed 0, 4,000 training and 1,000 validation sequences, 25,826 parameters): validation accuracy 0.9990 with positions, 0.5390 without; final training loss 0.000 and 0.641. | Verified | Local, torch 2.15.0, NumPy 2.5.4 |
+
+| PyTorch 2.15 checkpoints: `load_state_dict(strict=False)` returns `missing_keys` and `unexpected_keys`; a checkpoint with a `model.` prefix loads nothing and raises nothing; a size mismatch raises even with `strict=False`; `torch.load` refuses pickled classes by default ("Weights only load failed"). | Verified | Local, torch 2.15.0 |
+| Schedules: `LambdaLR(optimizer, lr_lambda, last_epoch=-1)`; `scheduler.step()` before `optimizer.step()` warns; transformers 5.22 `get_linear_schedule_with_warmup` gives 0, 0.00025 ... 0.001 ... 0 for 4 warm-up steps of 10; stepping per epoch leaves 3e-05 after 3 of 100 warm-up steps. `TrainingArguments`: learning_rate 5e-05, warmup_steps 0 (count or share below 1), lr_scheduler_type linear; no warmup_ratio or evaluation_strategy. | Verified | Local, torch 2.15.0, transformers 5.22.1 |
+| peft 0.21 LoRA: LoraConfig defaults r 8, lora_alpha 8, lora_dropout 0.0; lora_B starts at zero, scaling alpha / r; outputs equal the base model at start; merge_and_unload keeps outputs; with task_type SEQ_CLS 4,291 trainable values on a small BERT, 4,096 without (classifier frozen); an unknown target raises NoMatchingPeftModuleError. | Verified | Local, peft 0.21.2, transformers 5.22.1, BERT from a config |
+| transformers 5.22 classification and tagging: load report lists the new classifier as MISSING and the pooler as UNEXPECTED for token classification; `from_pretrained` returns eval mode; problem_type from labels (long: single-label, float with 3 labels: multi-label, 1 label: regression); `word_ids()` gives [None, 0, 1, 2, 3, 3, None] for a split word; CrossEntropyLoss ignore_index -100. | Verified | Local, transformers 5.22.1, local vocabulary |
+| Behaviour of named Hub checkpoints (download size, vocabulary, accuracy). | Unverified | huggingface.co blocked in the build session. B26 names no checkpoint |
+| `labs/finetune` reference run (pretrain seed 0, 20,000 sequences; fine-tune on 60 labels, seeds 0 to 2): mean validation accuracy scratch 0.759, frozen encoder with head 0.601, full 0.992, LoRA 0.967 (1,123 of 26,979 values); on 600 labels 0.963, 0.893, 0.998 and 0.995. | Verified | Local, torch 2.15.0, NumPy 2.5.4 |
 
 ## Track D facts (checked September 2026)
 

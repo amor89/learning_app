@@ -1,0 +1,441 @@
+id: B26-L2
+title: Learning rates for fine-tuning, warm-up and decay
+
+concept: |
+  Fine-tuning uses a smaller learning rate than training from scratch, because the weights already work. Hugging Face's `TrainingArguments` defaults to `learning_rate=5e-5` (transformers 5.22).
+
+  The first steps are the riskiest. The new head is random, so its gradients are large and noisy, and AdamW's running averages start from few samples. A full-size step at that point can undo what pretraining learned. **Warm-up** starts the rate at 0 and raises it in a straight line over the first steps. **Linear decay** then lowers it to 0 by the last step:
+
+  ```python
+  def warmup_linear(step, warmup_steps, total_steps):
+      if step < warmup_steps:
+          return step / warmup_steps
+      return max(0.0, (total_steps - step) / (total_steps - warmup_steps))
+  ```
+
+  The function returns a factor. The rate at each step is the base rate times the factor. With 4 warm-up steps out of 10 and a base rate of 0.001, the rates are 0, 0.00025, 0.0005, 0.00075, 0.001, then down by 0.000167 a step to 0.
+
+  In PyTorch 2.15, `torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)` multiplies the base rate by `lr_lambda(step)`, and `scheduler.get_last_lr()` shows the current rate. transformers 5.22 builds the same schedule with `get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps)`.
+
+  Two rules make it work:
+
+  - **Count steps, not epochs.** `num_training_steps` is batches per epoch times epochs. With 60 examples in batches of 16, that is 4 batches, so 60 epochs make 240 steps.
+  - **Step the scheduler after the optimiser, once per batch.** Call `scheduler.step()` before `optimizer.step()` and PyTorch warns. Call it once per epoch and a 100-step warm-up lasts 100 epochs.
+
+  In `TrainingArguments`, `warmup_steps` takes a count, or a share of all steps when given a float below 1. transformers 5 removed the older `warmup_ratio`.
+
+why_it_matters: |
+  A team fine-tuned a text classifier for 3 epochs of 100 batches, and validation accuracy barely moved from the untrained model. The schedule had 100 warm-up steps, but `scheduler.step()` ran once per epoch. After 3 epochs the schedule had taken 3 steps, so the rate was 3% of its target. Moving the call into the batch loop fixed it.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=100, num_training_steps=1000)
+      for epoch in range(10):
+          for xb, yb in loader:
+              loss = loss_fn(model(xb), yb)
+              optimizer.zero_grad()
+              loss.backward()
+              optimizer.step()
+          scheduler.step()
+    annotations:
+      - find: "scheduler.step()"
+        note: "Once per epoch: after 10 epochs the schedule has taken 10 of its 1,000 steps and is still warming up."
+      - find: "scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=100, num_training_steps=1000)"
+        note: "1,000 is a guess, not len(loader) * epochs."
+  strong:
+    code: |
+      import torch
+
+
+      def warmup_linear(step: int, warmup_steps: int, total_steps: int) -> float:
+          """Learning-rate factor: linear warm-up from 0 to 1, then linear decay to 0.
+
+          Args:
+              step: Optimiser steps taken so far, from 0.
+              warmup_steps: Steps to rise from 0 to 1. Zero means start at 1.
+              total_steps: Step at which the factor reaches 0.
+
+          Returns:
+              The factor in [0, 1].
+
+          Raises:
+              ValueError: If warmup_steps is negative or not below total_steps.
+          """
+          if warmup_steps < 0 or warmup_steps >= total_steps:
+              raise ValueError(f"need 0 <= warmup_steps < total_steps, got {warmup_steps}, {total_steps}")
+          if step < warmup_steps:
+              return step / warmup_steps
+          return max(0.0, (total_steps - step) / (total_steps - warmup_steps))
+
+
+      def make_scheduler(
+          optimizer: torch.optim.Optimizer, batches_per_epoch: int, epochs: int, warmup_share: float
+      ) -> torch.optim.lr_scheduler.LambdaLR:
+          """A per-batch schedule: warm-up over a share of all steps, then linear decay."""
+          total = batches_per_epoch * epochs
+          warmup = int(warmup_share * total)
+          return torch.optim.lr_scheduler.LambdaLR(optimizer, lambda step: warmup_linear(step, warmup, total))
+    annotations:
+      - find: "return step / warmup_steps"
+        note: "Warm-up: 0 at step 0, 1 at the end of warm-up."
+      - find: "return max(0.0, (total_steps - step) / (total_steps - warmup_steps))"
+        note: "Decay: 1 at the end of warm-up, 0 at the last step, never negative."
+      - find: "total = batches_per_epoch * epochs"
+        note: "Steps are batches, so the schedule needs the batch count."
+      - find: "return torch.optim.lr_scheduler.LambdaLR(optimizer, lambda step: warmup_linear(step, warmup, total))"
+        note: "LambdaLR multiplies the base rate by the factor. Call scheduler.step() after optimizer.step() in the batch loop."
+  takeaway: |
+    Warm up from 0, decay to 0, count steps as batches times epochs, and step the scheduler after the optimiser every batch.
+
+exercises:
+  - id: B26-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Why does fine-tuning warm the learning rate up from 0 over the first steps?
+    options:
+      - {id: a, text: "Early gradients from the random head are large and noisy, and full-size steps then can damage the pretrained weights"}
+      - {id: b, text: "The tokenizer needs time to build its vocabulary"}
+      - {id: c, text: "A rate of 0 makes the first epoch faster"}
+      - {id: d, text: "Warm-up replaces the need for a validation set"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Small first steps let the head and the optimiser's averages settle before the weights move much."}
+      - {id: r2, text: "Pretrained weights cannot change until the rate passes 1e-5."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The tokenizer comes ready with the pretrained model. Warm-up is about the size of weight updates."
+      - answer: c
+        feedback: "Steps take the same time at any rate. A rate near 0 moves the weights less."
+      - answer: d
+        feedback: "Warm-up changes training only. You still need validation data to choose and check the model."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. There is no threshold. Any rate above 0 moves the weights, which is why the first steps are kept small."
+    hints:
+      - "What is random at the start of fine-tuning?"
+      - "What happens to good weights after a large, noisy step?"
+      - "Keep the first steps small."
+    explanation: |
+      The new head starts at random and AdamW's estimates start from few samples, so the first gradients are unreliable. Warm-up keeps those steps small until training settles.
+
+  - id: B26-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      def warmup_linear(step, warmup_steps, total_steps):
+          if step < warmup_steps:
+              return step / warmup_steps
+          return max(0.0, (total_steps - step) / (total_steps - warmup_steps))
+
+
+      print([round(warmup_linear(s, 2, 8), 2) for s in range(0, 9, 2)])
+    answer: |
+      [0.0, 1.0, 0.67, 0.33, 0.0]
+    wrong_answers:
+      - answer: "[0.0, 0.25, 0.5, 0.75, 1.0]"
+        feedback: "That is warm-up all the way. Warm-up ends at step 2, then the factor decays."
+      - answer: "[0.0, 1.0, 0.75, 0.5, 0.25]"
+        feedback: "Decay runs over the 6 steps from 2 to 8, so it falls by 1/6 a step and reaches 0 at step 8."
+    hints:
+      - "Steps 0, 2, 4, 6, 8."
+      - "Warm-up ends at step 2."
+      - "From step 2, divide the steps left by 6."
+    explanation: |
+      At step 2 warm-up is complete, so the factor is 1. After that it is `(8 - step) / 6`: 4/6, 2/6 and 0.
+
+  - id: B26-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Size the schedule in steps and step it in the right place.
+    template: |
+      total_steps = len(loader) * [[g1]]
+      for epoch in range(epochs):
+          for xb, yb in loader:
+              loss = loss_fn(model(xb), yb)
+              optimizer.zero_grad()
+              loss.backward()
+              optimizer.step()
+              scheduler.[[g2]]()
+    gaps:
+      g1: {accepted: [epochs]}
+      g2: {accepted: [step]}
+    wrong_answers:
+      - answer: {g1: "1", g2: step}
+        feedback: "That sizes the schedule for one epoch, so the rate hits 0 after the first epoch."
+    hints:
+      - "How many batches does the whole run take?"
+      - "The scheduler moves one step per batch."
+      - "`epochs` and `step`."
+    explanation: |
+      `len(loader)` is the number of batches per epoch, so times `epochs` gives every optimiser step. `scheduler.step()` follows `optimizer.step()` inside the batch loop.
+
+  - id: B26-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `warmup_linear(step, warmup_steps, total_steps) -> float`.
+
+      - For `step < warmup_steps`, return `step / warmup_steps`.
+      - After that, return `(total_steps - step) / (total_steps - warmup_steps)`, never below 0.
+      - Raise `ValueError` unless `0 <= warmup_steps < total_steps`.
+    starter: |
+      def warmup_linear(step, warmup_steps, total_steps):
+          return 1.0
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: warmup_linear
+          typed: true
+          docstring: true
+          message: "Give warmup_linear type hints and a docstring."
+      tests:
+        - id: warmup
+          code: |
+            got = [warmup_linear(s, 4, 10) for s in range(5)]
+            assert got == [0.0, 0.25, 0.5, 0.75, 1.0], got
+          message: "Rise from 0 to 1 in a straight line over the warm-up steps."
+        - id: decay
+          code: |
+            assert abs(warmup_linear(7, 4, 10) - 0.5) < 1e-9, warmup_linear(7, 4, 10)
+            assert warmup_linear(10, 4, 10) == 0.0
+            assert warmup_linear(13, 4, 10) == 0.0, warmup_linear(13, 4, 10)
+          message: "Decay from 1 to 0 between the end of warm-up and total_steps, and stay at 0 after."
+        - id: no_warmup
+          code: |
+            assert warmup_linear(0, 0, 10) == 1.0, warmup_linear(0, 0, 10)
+          message: "With no warm-up, start at 1."
+        - id: guards
+          code: |
+            for w, t in [(10, 10), (-1, 10)]:
+                try:
+                    warmup_linear(0, w, t)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for warmup_steps={w}, total_steps={t}")
+          message: "Raise ValueError unless 0 <= warmup_steps < total_steps."
+    solution: |
+      def warmup_linear(step: int, warmup_steps: int, total_steps: int) -> float:
+          """Learning-rate factor: linear warm-up from 0 to 1, then linear decay to 0.
+
+          Args:
+              step: Optimiser steps taken so far, from 0.
+              warmup_steps: Steps to rise from 0 to 1.
+              total_steps: Step at which the factor reaches 0.
+
+          Returns:
+              The factor in [0, 1].
+
+          Raises:
+              ValueError: If warmup_steps is negative or not below total_steps.
+          """
+          if warmup_steps < 0 or warmup_steps >= total_steps:
+              raise ValueError(f"need 0 <= warmup_steps < total_steps, got {warmup_steps}, {total_steps}")
+          if step < warmup_steps:
+              return step / warmup_steps
+          return max(0.0, (total_steps - step) / (total_steps - warmup_steps))
+    seeded_bugs:
+      - |
+        def warmup_linear(step: int, warmup_steps: int, total_steps: int) -> float:
+            """Decays over all steps instead of the steps after warm-up."""
+            if warmup_steps < 0 or warmup_steps >= total_steps:
+                raise ValueError("bad steps")
+            if step < warmup_steps:
+                return step / warmup_steps
+            return max(0.0, (total_steps - step) / total_steps)
+      - |
+        def warmup_linear(step: int, warmup_steps: int, total_steps: int) -> float:
+            """Goes negative after the last step."""
+            if warmup_steps < 0 or warmup_steps >= total_steps:
+                raise ValueError("bad steps")
+            if step < warmup_steps:
+                return step / warmup_steps
+            return (total_steps - step) / (total_steps - warmup_steps)
+    wrong_answers:
+      - answer: |
+          def warmup_linear(step: int, warmup_steps: int, total_steps: int) -> float:
+              """Goes negative after the last step."""
+              if warmup_steps < 0 or warmup_steps >= total_steps:
+                  raise ValueError("bad steps")
+              if step < warmup_steps:
+                  return step / warmup_steps
+              return (total_steps - step) / (total_steps - warmup_steps)
+        triggers: decay
+    hints:
+      - "Check the arguments first."
+      - "Below warm-up: `step / warmup_steps`."
+      - "Then `max(0.0, (total_steps - step) / (total_steps - warmup_steps))`."
+    explanation: |
+      The two straight lines meet at 1 at the end of warm-up. `max(0.0, ...)` keeps the factor at 0 if training runs past `total_steps`, where a negative rate would push the weights uphill.
+
+  - id: B26-L2-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `schedule_steps(n_examples, batch_size, epochs, warmup_share) -> tuple[int, int]` returning `(total_steps, warmup_steps)`.
+
+      - Batches per epoch round up: 60 examples in batches of 16 make 4 batches.
+      - `total_steps` is batches per epoch times epochs. `warmup_steps` is `int(warmup_share * total_steps)`.
+      - Raise `ValueError` if `n_examples`, `batch_size` or `epochs` is below 1, or `warmup_share` is outside 0 to 1, 1 excluded.
+    primer: |
+      `math.ceil` rounds up to the next whole number:
+
+      ```python
+      import math
+      math.ceil(7 / 2)     # 4
+      math.ceil(6 / 2)     # 3
+      ```
+    starter: |
+      def schedule_steps(n_examples, batch_size, epochs, warmup_share):
+          return n_examples // batch_size * epochs, 0
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: schedule_steps
+          typed: true
+          docstring: true
+          message: "Give schedule_steps type hints and a docstring."
+      tests:
+        - id: rounds_up
+          code: |
+            assert schedule_steps(60, 16, 60, 0.1) == (240, 24), schedule_steps(60, 16, 60, 0.1)
+          message: "Round batches per epoch up: a last, smaller batch is still a step."
+        - id: exact
+          code: |
+            assert schedule_steps(64, 16, 3, 0.0) == (12, 0), schedule_steps(64, 16, 3, 0.0)
+          message: "When the batch size divides evenly, there is no extra batch."
+        - id: guards
+          code: |
+            for args in [(0, 16, 3, 0.1), (60, 0, 3, 0.1), (60, 16, 0, 0.1), (60, 16, 3, 1.0), (60, 16, 3, -0.1)]:
+                try:
+                    schedule_steps(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {args}")
+          message: "Raise ValueError for counts below 1 or a warm-up share outside [0, 1)."
+    solution: |
+      import math
+
+
+      def schedule_steps(n_examples: int, batch_size: int, epochs: int, warmup_share: float) -> tuple[int, int]:
+          """Total optimiser steps and warm-up steps for a run.
+
+          Args:
+              n_examples: Training examples.
+              batch_size: Examples per batch; the last batch may be smaller.
+              epochs: Passes over the data.
+              warmup_share: Share of all steps spent warming up, in [0, 1).
+
+          Returns:
+              (total_steps, warmup_steps).
+
+          Raises:
+              ValueError: If a count is below 1 or warmup_share is outside [0, 1).
+          """
+          if min(n_examples, batch_size, epochs) < 1:
+              raise ValueError("n_examples, batch_size and epochs must be at least 1")
+          if not 0.0 <= warmup_share < 1.0:
+              raise ValueError(f"warmup_share must be in [0, 1), got {warmup_share}")
+          total = math.ceil(n_examples / batch_size) * epochs
+          return total, int(warmup_share * total)
+    seeded_bugs:
+      - |
+        def schedule_steps(n_examples: int, batch_size: int, epochs: int, warmup_share: float) -> tuple[int, int]:
+            """Rounds batches down, losing the last partial batch."""
+            if min(n_examples, batch_size, epochs) < 1:
+                raise ValueError("counts must be at least 1")
+            if not 0.0 <= warmup_share < 1.0:
+                raise ValueError("bad share")
+            total = n_examples // batch_size * epochs
+            return total, int(warmup_share * total)
+      - |
+        import math
+
+
+        def schedule_steps(n_examples: int, batch_size: int, epochs: int, warmup_share: float) -> tuple[int, int]:
+            """Counts epochs, not batches."""
+            if min(n_examples, batch_size, epochs) < 1:
+                raise ValueError("counts must be at least 1")
+            if not 0.0 <= warmup_share < 1.0:
+                raise ValueError("bad share")
+            return epochs, int(warmup_share * epochs)
+    wrong_answers:
+      - answer: |
+          def schedule_steps(n_examples: int, batch_size: int, epochs: int, warmup_share: float) -> tuple[int, int]:
+              """Rounds batches down, losing the last partial batch."""
+              if min(n_examples, batch_size, epochs) < 1:
+                  raise ValueError("counts must be at least 1")
+              if not 0.0 <= warmup_share < 1.0:
+                  raise ValueError("bad share")
+              total = n_examples // batch_size * epochs
+              return total, int(warmup_share * total)
+        triggers: rounds_up
+    hints:
+      - "Guard the counts and the share first."
+      - "`math.ceil(n_examples / batch_size)` batches per epoch."
+      - "Multiply by epochs, then take `int(warmup_share * total)`."
+    explanation: |
+      A DataLoader without `drop_last` yields a final, smaller batch, and the optimiser steps on it too. Rounding down leaves the schedule short, so the rate reaches 0 before training ends.
+
+  - id: B26-L2-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      The learning rate is still rising when this run ends after 5 epochs of 50 batches. Tap the line responsible.
+    code: |
+      total = len(loader) * epochs
+      scheduler = get_linear_schedule_with_warmup(optimizer, int(0.1 * total), total)
+      for epoch in range(epochs):
+          model.train()
+          for xb, yb in loader:
+              loss = loss_fn(model(xb), yb)
+              optimizer.zero_grad()
+              loss.backward()
+              optimizer.step()
+          scheduler.step()
+    bug_lines: [10]
+    wrong_answers:
+      - lines: [1]
+        feedback: "250 steps is the right total for 5 epochs of 50 batches. The scheduler never gets there."
+      - lines: [2]
+        feedback: "A 10% warm-up of 25 steps is sensible. How often does the schedule move?"
+      - lines: [9]
+        feedback: "The optimiser steps once per batch, as it should."
+    hints:
+      - "How many times does scheduler.step() run in total?"
+      - "The schedule expects 250 steps."
+      - "Look at the indentation of the last line."
+    explanation: |
+      `scheduler.step()` sits in the epoch loop, so it runs 5 times in a schedule sized for 250 steps, and the 25-step warm-up never finishes. Indent it into the batch loop, after `optimizer.step()`.
+
+recap:
+  - front: "Warm-up"
+    back: "Raise the rate from 0 in a straight line over the first steps, so early noisy gradients do not damage pretrained weights."
+  - front: "Linear decay"
+    back: "From the end of warm-up, lower the rate in a straight line to 0 at the last step: (total - step) / (total - warmup)."
+  - front: "Steps"
+    back: "Batches per epoch, rounded up, times epochs. Call scheduler.step() after optimizer.step() once per batch."
+  - front: "transformers 5.22"
+    back: "get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps); TrainingArguments learning_rate 5e-5, warmup_steps a count or a share below 1."
+
+claims:
+  - claim: "PyTorch 2.15: LambdaLR(optimizer, lr_lambda, last_epoch=-1) sets the rate to the base rate times lr_lambda(step), from step 0 at construction; calling scheduler.step() before optimizer.step() warns 'Detected call of `lr_scheduler.step()` before `optimizer.step()`'."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), November 2026."
+  - claim: "transformers 5.22.1: get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps, last_epoch=-1) gives 0, 0.00025, 0.0005, 0.00075, 0.001, 0.000833 ... 0 for 4 warm-up steps of 10 at base rate 0.001; stepping it once per epoch for 3 epochs of 100 batches with 100 warm-up steps leaves the rate at 3e-05. TrainingArguments defaults: learning_rate 5e-05, weight_decay 0.0, num_train_epochs 3.0, warmup_steps 0 (int, or float below 1 as a share), lr_scheduler_type linear; warmup_ratio and evaluation_strategy are not parameters."
+    status: verified
+    source: "transformers 5.22.1 run locally and TrainingArguments signature and docstring inspected, November 2026."

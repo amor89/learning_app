@@ -1,0 +1,451 @@
+id: B26-L4
+title: Fine-tuning a text classifier with Hugging Face
+
+concept: |
+  Hugging Face transformers loads a pretrained model and its tokenizer by name. In transformers 5.22:
+
+  ```python
+  tokenizer = AutoTokenizer.from_pretrained(name)
+  model = AutoModelForSequenceClassification.from_pretrained(
+      name, num_labels=3, id2label=id2label, label2id=label2id)
+  batch = tokenizer(texts, padding=True, truncation=True, max_length=128, return_tensors="pt")
+  out = model(**batch, labels=labels)       # out.loss, out.logits
+  ```
+
+  - **The load report.** Loading prints a table. `classifier.weight` and `classifier.bias` marked MISSING are the new head, initialised at random. That is expected. A missing encoder key is not (lesson B26-L1).
+  - **The batch.** `input_ids` holds token IDs, `attention_mask` holds 1 for real tokens and 0 for padding, and BERT-style models add `token_type_ids`. Pass them all with `**batch`.
+  - **The loss follows the labels.** The model sets `config.problem_type` from the first labels it sees. Integer labels give cross-entropy. Float labels with `num_labels` above 1 give a multi-label loss, sigmoid per class. `num_labels=1` gives mean squared error. One-hot float labels silently train a multi-label model.
+  - **Train mode.** `from_pretrained` returns the model in eval mode. Call `model.train()` before training, so dropout is on.
+
+  For LoRA, peft 0.21 wraps the model:
+
+  ```python
+  config = LoraConfig(task_type=TaskType.SEQ_CLS, r=8, lora_alpha=16, target_modules=["query", "value"])
+  model = get_peft_model(model, config)
+  model.print_trainable_parameters()
+  ```
+
+  `task_type=TaskType.SEQ_CLS` keeps the new classifier trainable. Leave it out and the classifier stays frozen at its random start. On a small BERT, that trained 4,096 values instead of 4,291, and the missing 195 were the whole head. Target names depend on the architecture. BERT calls its projections `query` and `value`, and a name the model lacks raises `NoMatchingPeftModuleError`.
+
+why_it_matters: |
+  A team fine-tuned a LoRA classifier for complaint categories and got accuracy no better than always predicting the largest category. The training loss fell a little and stalled. Their `LoraConfig` had no `task_type`, so the randomly initialised head never trained, and the adapters could only bend the encoder towards a random projection. Adding `task_type=TaskType.SEQ_CLS` fixed it on the next run.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      model = AutoModelForSequenceClassification.from_pretrained(name, num_labels=3)
+      model = get_peft_model(model, LoraConfig(target_modules=["query", "value"]))
+      labels = torch.nn.functional.one_hot(torch.tensor(y), 3).float()
+      out = model(**batch, labels=labels)
+    annotations:
+      - find: "model = get_peft_model(model, LoraConfig(target_modules=[\"query\", \"value\"]))"
+        note: "No task_type: the new classifier is frozen at random."
+      - find: "labels = torch.nn.functional.one_hot(torch.tensor(y), 3).float()"
+        note: "Float labels switch the loss to multi-label, sigmoid per class, for a task with one label per text."
+      - find: "model = AutoModelForSequenceClassification.from_pretrained(name, num_labels=3)"
+        note: "No id2label: predictions come back as LABEL_0, LABEL_1, LABEL_2."
+  strong:
+    code: |
+      import torch
+      from peft import LoraConfig, TaskType, get_peft_model
+      from transformers import AutoModelForSequenceClassification
+
+
+      def build_classifier(name: str, labels: list[str], r: int = 8) -> torch.nn.Module:
+          """A pretrained encoder with a new head and LoRA on queries and values.
+
+          Args:
+              name: Hugging Face model name or local folder.
+              labels: Class names, in ID order.
+              r: LoRA rank.
+
+          Returns:
+              The peft model in train mode.
+          """
+          id2label = dict(enumerate(labels))
+          label2id = {label: i for i, label in id2label.items()}
+          model = AutoModelForSequenceClassification.from_pretrained(
+              name, num_labels=len(labels), id2label=id2label, label2id=label2id
+          )
+          config = LoraConfig(
+              task_type=TaskType.SEQ_CLS, r=r, lora_alpha=2 * r, target_modules=["query", "value"]
+          )
+          peft_model = get_peft_model(model, config)
+          peft_model.train()
+          return peft_model
+
+
+      def training_loss(model: torch.nn.Module, batch: dict[str, torch.Tensor], labels: torch.Tensor) -> torch.Tensor:
+          """Cross-entropy loss for one batch. labels must be integer class IDs."""
+          if labels.dtype != torch.long:
+              raise TypeError(f"labels must be torch.long class IDs, got {labels.dtype}")
+          return model(**batch, labels=labels).loss
+    annotations:
+      - find: "id2label = dict(enumerate(labels))"
+        note: "Names travel with the saved model, so predictions read as class names."
+      - find: "task_type=TaskType.SEQ_CLS, r=r, lora_alpha=2 * r, target_modules=[\"query\", \"value\"]"
+        note: "SEQ_CLS keeps the new head trainable. BERT names its projections query and value."
+      - find: "peft_model.train()"
+        note: "from_pretrained returns eval mode. Training needs dropout on."
+      - find: "if labels.dtype != torch.long:"
+        note: "Integer labels give cross-entropy. Floats would switch to a multi-label loss with no error."
+  takeaway: |
+    Pass num_labels and the label maps, read the load report, use integer labels, call model.train(), and give LoraConfig a task_type.
+
+exercises:
+  - id: B26-L4-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Loading a pretrained encoder with `AutoModelForSequenceClassification.from_pretrained(name, num_labels=4)` reports `classifier.weight` and `classifier.bias` as MISSING. What does it mean?
+    options:
+      - {id: a, text: "The new 4-class head starts at random, as expected. Fine-tuning trains it"}
+      - {id: b, text: "The download failed and the model is unusable"}
+      - {id: c, text: "num_labels must match the pretraining task, so set it to 2"}
+      - {id: d, text: "The encoder weights are also random"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The checkpoint was saved without a 4-class head, so the head has nothing to load from."}
+      - {id: r2, text: "Hugging Face always resets heads to stop overfitting."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The encoder loaded. Only the head, which the checkpoint never had, is missing."
+      - answer: c
+        feedback: "num_labels is your task's number of classes. The head is new whatever the number."
+      - answer: d
+        feedback: "Only the keys listed are missing. Encoder keys are not in the list, so they loaded."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Nothing is reset. The checkpoint has no head of this shape to load."
+    hints:
+      - "Did the pretrained checkpoint have a 4-class head?"
+      - "Which keys are listed?"
+      - "A new head starts at random."
+    explanation: |
+      A pretrained encoder has no head for your 4 classes, so the head is created at random and reported as missing. That is the part fine-tuning must train first.
+
+  - id: B26-L4-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    primer: |
+      `BertConfig` describes a BERT model's size, and `BertForSequenceClassification(config)` builds one with random weights and no download. A tiny one for tests:
+
+      ```python
+      config = BertConfig(vocab_size=50, hidden_size=16, num_hidden_layers=1, num_attention_heads=2, intermediate_size=32)
+      model = BertForSequenceClassification(config)
+      ```
+    code: |
+      import torch
+      from transformers import BertConfig, BertForSequenceClassification
+
+      config = BertConfig(vocab_size=30, hidden_size=32, num_hidden_layers=1,
+                          num_attention_heads=4, intermediate_size=64, num_labels=3)
+      model = BertForSequenceClassification(config)
+      out = model(input_ids=torch.tensor([[2, 5, 6, 3]]), labels=torch.tensor([[0.0, 1.0, 0.0]]))
+      print(model.config.problem_type, tuple(out.logits.shape))
+    answer: |
+      multi_label_classification (1, 3)
+    wrong_answers:
+      - answer: "single_label_classification (1, 3)"
+        feedback: "The labels are floats and num_labels is 3, so the model picks the multi-label loss."
+      - answer: "multi_label_classification (1, 4, 3)"
+        feedback: "Sequence classification gives one row of logits per text, not per token."
+    hints:
+      - "What type are the labels?"
+      - "Float labels with num_labels above 1 give which problem type?"
+      - "One text, three classes."
+    explanation: |
+      The model sets `problem_type` from the first labels it sees. Floats with 3 labels mean multi-label, so it trains with a sigmoid per class. Pass integer class IDs, such as `torch.tensor([1])`, for one label per text.
+
+  - id: B26-L4-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Tokenise a batch of texts of different lengths into PyTorch tensors the model accepts.
+    template: |
+      batch = tokenizer(texts, padding=[[g1]], truncation=True, max_length=128, return_tensors="[[g2]]")
+    gaps:
+      g1: {accepted: ["True"]}
+      g2: {accepted: [pt]}
+    wrong_answers:
+      - answer: {g1: "False", g2: pt}
+        feedback: "Without padding, texts of different lengths cannot stack into one tensor."
+      - answer: {g1: "True", g2: np}
+        feedback: "\"np\" gives NumPy arrays. The PyTorch model needs \"pt\"."
+    hints:
+      - "Texts differ in length."
+      - "Which framework is the model in?"
+      - "`True` and `pt`."
+    explanation: |
+      `padding=True` pads to the longest text in the batch and sets `attention_mask` to 0 there. `return_tensors="pt"` returns PyTorch tensors.
+
+  - id: B26-L4-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `label_maps(labels) -> tuple[dict[int, str], dict[str, int]]` for `from_pretrained(..., id2label=..., label2id=...)`.
+
+      - Use the distinct labels, sorted, so IDs do not depend on row order.
+      - Return `(id2label, label2id)`, with IDs from 0.
+      - Raise `ValueError` if there are fewer than 2 distinct labels.
+    primer: |
+      `enumerate` pairs each item with its position, and `dict` turns those pairs into a dictionary:
+
+      ```python
+      dict(enumerate(["x", "y"]))          # {0: 'x', 1: 'y'}
+      ```
+    starter: |
+      def label_maps(labels):
+          return {}, {}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: label_maps
+          typed: true
+          docstring: true
+          message: "Give label_maps type hints and a docstring."
+      tests:
+        - id: sorted_ids
+          code: |
+            id2label, label2id = label_maps(["price", "delivery", "price", "staff"])
+            assert id2label == {0: "delivery", 1: "price", 2: "staff"}, id2label
+            assert label2id == {"delivery": 0, "price": 1, "staff": 2}, label2id
+          message: "Number the distinct labels in sorted order, from 0."
+        - id: order_free
+          code: |
+            assert label_maps(["b", "a"]) == label_maps(["a", "b", "a"])
+          message: "IDs must not depend on the order of the rows."
+        - id: guard
+          code: |
+            for labels in [[], ["only", "only"]]:
+                try:
+                    label_maps(labels)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {labels}")
+          message: "Raise ValueError for fewer than 2 distinct labels."
+    solution: |
+      def label_maps(labels: list[str]) -> tuple[dict[int, str], dict[str, int]]:
+          """ID-to-label and label-to-ID maps for a classifier head.
+
+          Args:
+              labels: One label per row, repeats allowed.
+
+          Returns:
+              (id2label, label2id), numbering the sorted distinct labels from 0.
+
+          Raises:
+              ValueError: If there are fewer than 2 distinct labels.
+          """
+          names = sorted(set(labels))
+          if len(names) < 2:
+              raise ValueError(f"need at least 2 distinct labels, got {names}")
+          id2label = dict(enumerate(names))
+          return id2label, {name: i for i, name in id2label.items()}
+    seeded_bugs:
+      - |
+        def label_maps(labels: list[str]) -> tuple[dict[int, str], dict[str, int]]:
+            """Numbers labels in order of first appearance."""
+            names = list(dict.fromkeys(labels))
+            if len(names) < 2:
+                raise ValueError("need at least 2 labels")
+            id2label = dict(enumerate(names))
+            return id2label, {name: i for i, name in id2label.items()}
+      - |
+        def label_maps(labels: list[str]) -> tuple[dict[int, str], dict[str, int]]:
+            """No guard."""
+            id2label = dict(enumerate(sorted(set(labels))))
+            return id2label, {name: i for i, name in id2label.items()}
+    wrong_answers:
+      - answer: |
+          def label_maps(labels: list[str]) -> tuple[dict[int, str], dict[str, int]]:
+              """Numbers labels in order of first appearance."""
+              names = list(dict.fromkeys(labels))
+              if len(names) < 2:
+                  raise ValueError("need at least 2 labels")
+              id2label = dict(enumerate(names))
+              return id2label, {name: i for i, name in id2label.items()}
+        triggers: sorted_ids
+    hints:
+      - "`sorted(set(labels))`."
+      - "Raise if fewer than 2 remain."
+      - "`dict(enumerate(names))`, then invert it."
+    explanation: |
+      Sorting fixes the IDs, so a model trained on one extract and scored on another reads class 1 as the same label. A single class cannot train a classifier, so the guard stops it early.
+
+  - id: B26-L4-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `pad_batch(seqs, pad_id, max_length) -> tuple[list[list[int]], list[list[int]]]`, what `padding=True, truncation=True` does to token IDs.
+
+      - Cut each sequence to at most `max_length` IDs.
+      - Pad every sequence at the end with `pad_id` to the longest length after cutting.
+      - Return `(input_ids, attention_mask)`, with mask 1 for real IDs and 0 for padding.
+      - Raise `ValueError` if `seqs` is empty or `max_length` is below 1.
+    starter: |
+      def pad_batch(seqs, pad_id, max_length):
+          return seqs, [[1] * len(s) for s in seqs]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: pad_batch
+          typed: true
+          docstring: true
+          message: "Give pad_batch type hints and a docstring."
+      tests:
+        - id: pads
+          code: |
+            ids, mask = pad_batch([[2, 5, 6, 3], [2, 9, 3]], 0, 128)
+            assert ids == [[2, 5, 6, 3], [2, 9, 3, 0]], ids
+            assert mask == [[1, 1, 1, 1], [1, 1, 1, 0]], mask
+          message: "Pad at the end to the longest sequence, with mask 0 on padding."
+        - id: truncates
+          code: |
+            ids, mask = pad_batch([[1, 2, 3, 4, 5], [7]], 0, 3)
+            assert ids == [[1, 2, 3], [7, 0, 0]], ids
+            assert mask == [[1, 1, 1], [1, 0, 0]], mask
+          message: "Cut to max_length first, then pad to the longest cut length."
+        - id: inputs_unchanged
+          code: |
+            seqs = [[1, 2], [3]]
+            pad_batch(seqs, 0, 8)
+            assert seqs == [[1, 2], [3]], seqs
+          message: "Build new lists. Do not pad the caller's lists in place."
+        - id: guards
+          code: |
+            for args in [([], 0, 8), ([[1]], 0, 0)]:
+                try:
+                    pad_batch(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {args}")
+          message: "Raise ValueError for no sequences or max_length below 1."
+    solution: |
+      def pad_batch(
+          seqs: list[list[int]], pad_id: int, max_length: int
+      ) -> tuple[list[list[int]], list[list[int]]]:
+          """Truncate and right-pad token IDs, with an attention mask.
+
+          Args:
+              seqs: Token IDs per text.
+              pad_id: ID used for padding.
+              max_length: Longest allowed sequence.
+
+          Returns:
+              (input_ids, attention_mask), all rows of equal length.
+
+          Raises:
+              ValueError: If seqs is empty or max_length is below 1.
+          """
+          if not seqs or max_length < 1:
+              raise ValueError("need at least one sequence and max_length of at least 1")
+          cut = [s[:max_length] for s in seqs]
+          width = max(len(s) for s in cut)
+          ids = [s + [pad_id] * (width - len(s)) for s in cut]
+          mask = [[1] * len(s) + [0] * (width - len(s)) for s in cut]
+          return ids, mask
+    seeded_bugs:
+      - |
+        def pad_batch(
+            seqs: list[list[int]], pad_id: int, max_length: int
+        ) -> tuple[list[list[int]], list[list[int]]]:
+            """Pads to max_length instead of the longest sequence, and never cuts."""
+            if not seqs or max_length < 1:
+                raise ValueError("bad input")
+            ids = [s + [pad_id] * (max_length - len(s)) for s in seqs]
+            mask = [[1] * len(s) + [0] * (max_length - len(s)) for s in seqs]
+            return ids, mask
+      - |
+        def pad_batch(
+            seqs: list[list[int]], pad_id: int, max_length: int
+        ) -> tuple[list[list[int]], list[list[int]]]:
+            """Cuts and pads the caller's lists in place."""
+            if not seqs or max_length < 1:
+                raise ValueError("bad input")
+            for s in seqs:
+                del s[max_length:]
+            width = max(len(s) for s in seqs)
+            mask = [[1] * len(s) + [0] * (width - len(s)) for s in seqs]
+            for s in seqs:
+                s.extend([pad_id] * (width - len(s)))
+            return seqs, mask
+    wrong_answers:
+      - answer: |
+          def pad_batch(
+              seqs: list[list[int]], pad_id: int, max_length: int
+          ) -> tuple[list[list[int]], list[list[int]]]:
+              """Pads to max_length instead of the longest sequence, and never cuts."""
+              if not seqs or max_length < 1:
+                  raise ValueError("bad input")
+              ids = [s + [pad_id] * (max_length - len(s)) for s in seqs]
+              mask = [[1] * len(s) + [0] * (max_length - len(s)) for s in seqs]
+              return ids, mask
+        triggers: pads
+    hints:
+      - "Cut first: `s[:max_length]`."
+      - "The width is the longest cut sequence."
+      - "Pad with `[pad_id] * (width - len(s))` and build the mask the same way."
+    explanation: |
+      Truncation runs first, then padding to the longest remaining sequence, so no row is wider than needed. The mask tells attention which positions are real.
+
+  - id: B26-L4-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      After fine-tuning, `model.classifier`'s weights are exactly as they were at the start, and accuracy is near chance. Tap the line responsible.
+    code: |
+      from peft import LoraConfig, get_peft_model
+      from transformers import AutoModelForSequenceClassification
+
+
+      def build(name, n_classes):
+          model = AutoModelForSequenceClassification.from_pretrained(name, num_labels=n_classes)
+          config = LoraConfig(r=8, lora_alpha=16, target_modules=["query", "value"])
+          model = get_peft_model(model, config)
+          model.train()
+          return model
+    bug_lines: [7]
+    wrong_answers:
+      - lines: [6]
+        feedback: "Loading with num_labels creates a new head, as it should. The head then needs to be trainable."
+      - lines: [8]
+        feedback: "get_peft_model applies the config it is given. The config is what lacks something."
+      - lines: [9]
+        feedback: "Train mode is right. It turns dropout on but does not decide what trains."
+    hints:
+      - "Which parameters does peft leave trainable?"
+      - "What tells peft that this is sequence classification?"
+      - "task_type."
+    explanation: |
+      Without `task_type=TaskType.SEQ_CLS`, peft freezes everything except the LoRA matrices, including the new classifier. The head stays at its random start, so the model cannot map features to classes. Add the task type.
+
+recap:
+  - front: "Loading a classifier (transformers 5.22)"
+    back: "AutoModelForSequenceClassification.from_pretrained(name, num_labels=..., id2label=..., label2id=...). The new head shows as MISSING in the load report."
+  - front: "Labels decide the loss"
+    back: "Integer IDs: cross-entropy. Floats with num_labels > 1: multi-label sigmoid. num_labels=1: mean squared error."
+  - front: "Tokenizer call"
+    back: "tokenizer(texts, padding=True, truncation=True, max_length=..., return_tensors=\"pt\") gives input_ids and attention_mask."
+  - front: "peft LoRA for classification (0.21)"
+    back: "LoraConfig(task_type=TaskType.SEQ_CLS, target_modules=[\"query\", \"value\"], ...). Without task_type the new head stays frozen."
+
+claims:
+  - claim: "transformers 5.22.1: from_pretrained on a saved BertModel with num_labels=3 prints a load report listing classifier.weight and classifier.bias as MISSING and returns the model in eval mode; problem_type is None until the first labelled call, then single_label_classification for long labels (NllLoss), multi_label_classification for float labels with num_labels 3 (BCEWithLogits), regression for num_labels=1 (MSE); the tokenizer with padding=True returns input_ids, token_type_ids and attention_mask with 0 at padding."
+    status: verified
+    source: "Run locally on transformers 5.22.1 and PyTorch 2.15.0 with a BERT built from a config and a local vocabulary, November 2026. No hub download: huggingface.co was blocked."
+  - claim: "peft 0.21.2: get_peft_model with LoraConfig(r=8, lora_alpha=16, target_modules=['query', 'value'], task_type=TaskType.SEQ_CLS) on a 2-layer, 64-wide BERT with 3 labels trains 4,291 values, the classifier included via modules_to_save; without task_type it trains 4,096 and the classifier is frozen; print_trainable_parameters prints 'trainable params: 4,291 || all params: 110,534 || trainable%: 3.8821'; target_modules=['q_proj'] raises NoMatchingPeftModuleError."
+    status: verified
+    source: "Run locally on peft 0.21.2, transformers 5.22.1 and PyTorch 2.15.0, November 2026."
