@@ -1,0 +1,518 @@
+id: B27-L5
+title: Monitoring a served model for drift
+
+concept: |
+  A deployed model gets worse quietly. True labels often arrive weeks later, if at all, so watch what you can see now:
+
+  - **Inputs**: the distribution of each feature, such as answer length.
+  - **Outputs**: the share of each predicted class, and the model's confidence.
+  - **Service**: request count, error rate and latency. Report the 95th percentile, not the mean, because a few slow requests hide in an average.
+
+  Log one structured record per request: model version, number of texts, mean confidence and latency. Leave the texts out: open answers can hold personal data.
+
+  **Population stability index (PSI)** compares a feature's distribution now with a reference, such as the training data. Cut the reference into bins at its quantiles, so each holds about the same share. Count the share of reference values `e` and current values `a` in each bin:
+
+  ```python
+  psi = sum((a - e) * ln(a / e))      # over bins
+  ```
+
+  Identical shares give 0. Raise any share below a small floor, such as 0.0001, before the logarithm, or an empty bin gives infinity. With two bins, reference shares 0.5 and 0.5 against current shares 0.25 and 0.75 give 0.2747.
+
+  A common rule of thumb reads below 0.1 as stable, 0.1 to 0.25 as a moderate shift, and above 0.25 as a large one. It dates from credit scoring and has no statistical basis. PSI also depends on the number of bins and the sample sizes. Keep the bin edges fixed, and tune the thresholds against your own past incidents.
+
+  In the B27 lab, a later batch with longer answers and more delivery complaints gave a PSI of 4.708 on answer length and 0.687 on confidence. A fresh batch from the training distribution gave 0.008.
+
+  Drift is a reason to look, not proof the model is wrong. Confirm with labelled samples before you retrain (lesson B27-L6).
+
+why_it_matters: |
+  A retailer's complaint classifier kept its accuracy on the test set while customer service reported more misrouted complaints. A new mobile app had changed how customers wrote: shorter answers and words the model had never seen. A weekly PSI check on answer length and confidence would have flagged the change in its first week, two months before the complaints did.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      LOGGER.info(f"predicted {labels} for {request.texts}")
+      shift = abs(np.mean(current) - np.mean(reference)) > 0.1
+    annotations:
+      - find: "LOGGER.info(f\"predicted {labels} for {request.texts}\")"
+        note: "Free text that is hard to analyse, and it stores respondents' answers in the logs."
+      - find: "shift = abs(np.mean(current) - np.mean(reference)) > 0.1"
+        note: "A mean misses changes in spread and shape, and 0.1 means nothing without units."
+  strong:
+    code: |
+      import numpy as np
+
+      EPS = 1e-4
+
+
+      def psi(expected: np.ndarray, actual: np.ndarray, bins: int = 10) -> float:
+          """Population stability index of actual against expected, on expected's quantile bins.
+
+          Raises:
+              ValueError: If bins is below 2 or either array is empty.
+          """
+          if bins < 2:
+              raise ValueError(f"bins must be at least 2, got {bins}")
+          if len(expected) == 0 or len(actual) == 0:
+              raise ValueError("expected and actual must not be empty")
+          inner = np.unique(np.quantile(expected, np.linspace(0, 1, bins + 1))[1:-1])
+          n_bins = len(inner) + 1
+          e = np.bincount(np.searchsorted(inner, expected, side="right"), minlength=n_bins) / len(expected)
+          a = np.bincount(np.searchsorted(inner, actual, side="right"), minlength=n_bins) / len(actual)
+          e, a = np.clip(e, EPS, None), np.clip(a, EPS, None)
+          return float(np.sum((a - e) * np.log(a / e)))
+    annotations:
+      - find: "inner = np.unique(np.quantile(expected, np.linspace(0, 1, bins + 1))[1:-1])"
+        note: "Inner edges from the reference only. unique drops repeated edges from tied values."
+      - find: "e = np.bincount(np.searchsorted(inner, expected, side=\"right\"), minlength=n_bins) / len(expected)"
+        note: "searchsorted gives each value's bin; the outer bins are open, so no value falls outside."
+      - find: "e, a = np.clip(e, EPS, None), np.clip(a, EPS, None)"
+        note: "An empty bin would make ln(a / e) infinite."
+  takeaway: |
+    Log structured records without raw text, compare inputs and outputs with a fixed-bin PSI, treat 0.1 and 0.25 as starting points, and confirm drift with labels.
+
+exercises:
+  - id: B27-L5-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Labels for your served model arrive three months late. What can you monitor this week?
+    options:
+      - {id: a, text: "Input feature distributions, predicted class shares, confidence, error rate and latency"}
+      - {id: b, text: "Nothing: without labels, monitoring is impossible"}
+      - {id: c, text: "Accuracy on the original test set"}
+      - {id: d, text: "The training loss"}
+    answer: a
+    reasons:
+      - {id: r1, text: "These need no labels and change as soon as the incoming data changes."}
+      - {id: r2, text: "They measure accuracy directly."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Inputs, outputs and the service itself are all visible now and often move before accuracy does."
+      - answer: c
+        feedback: "The test set does not change, so its accuracy cannot reveal drift in new data."
+      - answer: d
+        feedback: "Training loss describes the past training run, not today's traffic."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. They are early signs, not accuracy. Confirm with labels when they arrive."
+    hints:
+      - "What do you see on every request?"
+      - "Which signals need no true label?"
+      - "Inputs, outputs, service."
+    explanation: |
+      Drift in inputs or outputs is visible at once and often precedes a fall in accuracy. It tells you where to look while labels are on their way.
+
+  - id: B27-L5-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    code: |
+      import math
+
+      e = [0.5, 0.5]
+      a = [0.25, 0.75]
+      psi = sum((ai - ei) * math.log(ai / ei) for ai, ei in zip(a, e))
+      print(round(psi, 4))
+    answer: |
+      0.2747
+    wrong_answers:
+      - answer: "0.0"
+        feedback: "The shares differ, so each term is positive. PSI is 0 only when they match."
+      - answer: "0.5"
+        feedback: "That is the sum of absolute differences. PSI weights each difference by the log of the ratio."
+    hints:
+      - "First term: (0.25 - 0.5) * ln(0.5)."
+      - "Both terms are positive."
+      - "0.1733 + 0.1014."
+    explanation: |
+      Each term `(a - e) * ln(a / e)` is positive whenever a and e differ, because both factors share a sign. 0.2747 sits above the common 0.25 alert line.
+
+  - id: B27-L5-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the last two lines of the PSI calculation.
+    template: |
+      e, a = np.clip(e, EPS, None), np.clip(a, [[g1]], None)
+      return float(np.sum((a - e) * np.[[g2]](a / e)))
+    gaps:
+      g1: {accepted: [EPS]}
+      g2: {accepted: [log]}
+    wrong_answers:
+      - answer: {g1: "0", g2: log}
+        feedback: "A floor of 0 leaves empty bins at 0, and log(0 / e) is minus infinity."
+    hints:
+      - "Both shares need the same floor."
+      - "PSI uses the natural logarithm of the ratio."
+      - "`EPS` and `log`."
+    explanation: |
+      Raising every share to at least `EPS` keeps the ratio finite. `np.log` is the natural logarithm the formula uses.
+
+  - id: B27-L5-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `psi(expected, actual, bins=10) -> float`.
+
+      - Inner bin edges: `np.quantile(expected, np.linspace(0, 1, bins + 1))[1:-1]`, with repeats removed by `np.unique`.
+      - Shares per bin for each array, using `np.searchsorted(inner, values, side="right")` and `np.bincount(..., minlength=len(inner) + 1)`.
+      - Raise every share below `1e-4` to `1e-4`, then return `sum((a - e) * ln(a / e))` as a float.
+      - Raise `ValueError` if `bins` is below 2 or either array is empty.
+    primer: |
+      `np.searchsorted(edges, values, side="right")` gives, for each value, how many edges are at or below it, which is its bin number. `np.bincount` then counts each bin number:
+
+      ```python
+      edges = np.array([10.0, 20.0])
+      idx = np.searchsorted(edges, np.array([5.0, 10.0, 15.0, 25.0]), side="right")   # [0, 1, 1, 2]
+      np.bincount(idx, minlength=3)                                                   # [1, 2, 1]
+      ```
+    starter: |
+      import numpy as np
+
+
+      def psi(expected, actual, bins=10):
+          return 0.0
+    checker:
+      kind: python
+      setup: |
+        import math
+
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: psi
+          typed: true
+          docstring: true
+          message: "Give psi type hints and a docstring."
+      tests:
+        - id: same
+          code: |
+            values = np.random.default_rng(0).normal(size=2_000)
+            assert abs(psi(values, values)) < 1e-9, psi(values, values)
+          message: "Identical distributions give 0."
+        - id: two_bins
+          code: |
+            got = psi(np.array([1.0, 2.0, 3.0, 4.0]), np.array([1.0, 3.5, 4.0, 4.0]), bins=2)
+            want = (0.25 - 0.5) * math.log(0.5) + (0.75 - 0.5) * math.log(1.5)
+            assert abs(got - want) < 1e-9, (got, want)
+          message: "Use the quantile edges of expected and the formula sum((a - e) * ln(a / e))."
+        - id: empty_bin
+          code: |
+            rng = np.random.default_rng(1)
+            got = psi(rng.normal(size=1_000), np.full(50, 99.0))
+            assert math.isfinite(got) and got > 1.0, got
+          message: "Floor the shares at 1e-4, so empty bins do not give infinity."
+        - id: guards
+          code: |
+            for args in [(np.array([1.0]), np.array([1.0]), 1), (np.array([]), np.array([1.0]), 10)]:
+                try:
+                    psi(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {args}")
+          message: "Raise ValueError for bins below 2 or an empty array."
+    solution: |
+      import numpy as np
+
+      EPS = 1e-4
+
+
+      def psi(expected: np.ndarray, actual: np.ndarray, bins: int = 10) -> float:
+          """Population stability index of actual against expected.
+
+          Args:
+              expected: Reference values.
+              actual: Values to check.
+              bins: Number of quantile bins, at least 2.
+
+          Returns:
+              The PSI, 0 when the shares match.
+
+          Raises:
+              ValueError: If bins is below 2 or either array is empty.
+          """
+          if bins < 2:
+              raise ValueError(f"bins must be at least 2, got {bins}")
+          if len(expected) == 0 or len(actual) == 0:
+              raise ValueError("expected and actual must not be empty")
+          inner = np.unique(np.quantile(expected, np.linspace(0, 1, bins + 1))[1:-1])
+          n_bins = len(inner) + 1
+          e = np.bincount(np.searchsorted(inner, expected, side="right"), minlength=n_bins) / len(expected)
+          a = np.bincount(np.searchsorted(inner, actual, side="right"), minlength=n_bins) / len(actual)
+          e, a = np.clip(e, EPS, None), np.clip(a, EPS, None)
+          return float(np.sum((a - e) * np.log(a / e)))
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def psi(expected: np.ndarray, actual: np.ndarray, bins: int = 10) -> float:
+            """No floor: an empty bin gives infinity."""
+            if bins < 2:
+                raise ValueError("bins")
+            if len(expected) == 0 or len(actual) == 0:
+                raise ValueError("empty")
+            inner = np.unique(np.quantile(expected, np.linspace(0, 1, bins + 1))[1:-1])
+            n_bins = len(inner) + 1
+            e = np.bincount(np.searchsorted(inner, expected, side="right"), minlength=n_bins) / len(expected)
+            a = np.bincount(np.searchsorted(inner, actual, side="right"), minlength=n_bins) / len(actual)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                return float(np.sum((a - e) * np.log(a / e)))
+      - |
+        import numpy as np
+
+
+        def psi(expected: np.ndarray, actual: np.ndarray, bins: int = 10) -> float:
+            """Bins actual on its own quantiles, so PSI stays near 0."""
+            if bins < 2:
+                raise ValueError("bins")
+            if len(expected) == 0 or len(actual) == 0:
+                raise ValueError("empty")
+            q = np.linspace(0, 1, bins + 1)
+            e_inner = np.unique(np.quantile(expected, q)[1:-1])
+            a_inner = np.unique(np.quantile(actual, q)[1:-1])
+            e = np.bincount(np.searchsorted(e_inner, expected, side="right"), minlength=len(e_inner) + 1) / len(expected)
+            a = np.bincount(np.searchsorted(a_inner, actual, side="right"), minlength=len(a_inner) + 1) / len(actual)
+            n = min(len(e), len(a))
+            e, a = np.clip(e[:n], 1e-4, None), np.clip(a[:n], 1e-4, None)
+            return float(np.sum((a - e) * np.log(a / e)))
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def psi(expected: np.ndarray, actual: np.ndarray, bins: int = 10) -> float:
+              """No floor: an empty bin gives infinity."""
+              if bins < 2:
+                  raise ValueError("bins")
+              if len(expected) == 0 or len(actual) == 0:
+                  raise ValueError("empty")
+              inner = np.unique(np.quantile(expected, np.linspace(0, 1, bins + 1))[1:-1])
+              n_bins = len(inner) + 1
+              e = np.bincount(np.searchsorted(inner, expected, side="right"), minlength=n_bins) / len(expected)
+              a = np.bincount(np.searchsorted(inner, actual, side="right"), minlength=n_bins) / len(actual)
+              with np.errstate(divide="ignore", invalid="ignore"):
+                  return float(np.sum((a - e) * np.log(a / e)))
+        triggers: empty_bin
+    hints:
+      - "Edges come from expected only."
+      - "Shares: bincount of the bin numbers, divided by the array's length."
+      - "`np.clip(share, 1e-4, None)` before the log."
+    explanation: |
+      Both arrays must share the reference's bins, or each would look evenly spread and PSI would stay near 0. The floor keeps empty bins finite.
+
+  - id: B27-L5-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Each request logs a record such as `{"n_texts": 4, "mean_confidence": 0.91, "latency_ms": 12.5}`. Write `summarise(records) -> dict` for a monitoring report.
+
+      - `requests`: the number of records. `texts`: the total of `n_texts`.
+      - `p95_latency_ms`: `float(np.percentile(latencies, 95))`, rounded to 2 places.
+      - `mean_confidence`: the mean confidence per text, weighting each record by its `n_texts`, rounded to 4 places.
+      - Raise `ValueError` if there are no records or no texts.
+    starter: |
+      import numpy as np
+
+
+      def summarise(records):
+          return {"requests": len(records)}
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: summarise
+          typed: true
+          docstring: true
+          message: "Give summarise type hints and a docstring."
+      tests:
+        - id: weighted
+          code: |
+            records = [
+                {"n_texts": 1, "mean_confidence": 0.5, "latency_ms": 10.0},
+                {"n_texts": 3, "mean_confidence": 0.9, "latency_ms": 20.0},
+            ]
+            got = summarise(records)
+            assert got["requests"] == 2 and got["texts"] == 4, got
+            assert got["mean_confidence"] == 0.8, got
+          message: "Weight each record's confidence by its n_texts: (0.5 * 1 + 0.9 * 3) / 4 = 0.8."
+        - id: p95
+          code: |
+            records = [{"n_texts": 1, "mean_confidence": 0.9, "latency_ms": float(ms)} for ms in range(1, 101)]
+            got = summarise(records)
+            assert got["p95_latency_ms"] == 95.05, got
+          message: "Report the 95th percentile latency with np.percentile, rounded to 2 places."
+        - id: guards
+          code: |
+            for bad in [[], [{"n_texts": 0, "mean_confidence": 0.0, "latency_ms": 1.0}]]:
+                try:
+                    summarise(bad)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {bad}")
+          message: "Raise ValueError when there are no records or no texts."
+    solution: |
+      import numpy as np
+
+
+      def summarise(records: list[dict[str, float]]) -> dict[str, float]:
+          """Request count, text count, p95 latency and text-weighted mean confidence.
+
+          Args:
+              records: One prediction log record per request.
+
+          Returns:
+              {"requests", "texts", "p95_latency_ms", "mean_confidence"}.
+
+          Raises:
+              ValueError: If there are no records or no texts.
+          """
+          if not records:
+              raise ValueError("no records")
+          texts = sum(int(r["n_texts"]) for r in records)
+          if texts == 0:
+              raise ValueError("no texts in the records")
+          weighted = sum(r["mean_confidence"] * r["n_texts"] for r in records) / texts
+          p95 = float(np.percentile([r["latency_ms"] for r in records], 95))
+          return {
+              "requests": len(records),
+              "texts": texts,
+              "p95_latency_ms": round(p95, 2),
+              "mean_confidence": round(weighted, 4),
+          }
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def summarise(records: list[dict[str, float]]) -> dict[str, float]:
+            """Averages confidence per request, not per text."""
+            if not records:
+                raise ValueError("no records")
+            texts = sum(int(r["n_texts"]) for r in records)
+            if texts == 0:
+                raise ValueError("no texts")
+            mean = sum(r["mean_confidence"] for r in records) / len(records)
+            p95 = float(np.percentile([r["latency_ms"] for r in records], 95))
+            return {"requests": len(records), "texts": texts, "p95_latency_ms": round(p95, 2), "mean_confidence": round(mean, 4)}
+      - |
+        import numpy as np
+
+
+        def summarise(records: list[dict[str, float]]) -> dict[str, float]:
+            """Reports mean latency as p95."""
+            if not records:
+                raise ValueError("no records")
+            texts = sum(int(r["n_texts"]) for r in records)
+            if texts == 0:
+                raise ValueError("no texts")
+            weighted = sum(r["mean_confidence"] * r["n_texts"] for r in records) / texts
+            mean_ms = float(np.mean([r["latency_ms"] for r in records]))
+            return {"requests": len(records), "texts": texts, "p95_latency_ms": round(mean_ms, 2), "mean_confidence": round(weighted, 4)}
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def summarise(records: list[dict[str, float]]) -> dict[str, float]:
+              """Averages confidence per request, not per text."""
+              if not records:
+                  raise ValueError("no records")
+              texts = sum(int(r["n_texts"]) for r in records)
+              if texts == 0:
+                  raise ValueError("no texts")
+              mean = sum(r["mean_confidence"] for r in records) / len(records)
+              p95 = float(np.percentile([r["latency_ms"] for r in records], 95))
+              return {"requests": len(records), "texts": texts, "p95_latency_ms": round(p95, 2), "mean_confidence": round(mean, 4)}
+        triggers: weighted
+    hints:
+      - "Guard the empty cases before dividing."
+      - "Weighted mean: sum of confidence times n_texts, over total texts."
+      - "`np.percentile(latencies, 95)`."
+    explanation: |
+      A request with 50 texts says more about confidence than a request with 1, so weight by texts. The 95th percentile shows the slow tail that a mean hides.
+
+  - id: B27-L5-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [numpy]
+    prompt: |
+      This drift check reports a PSI near 0 even when the current data has clearly moved. Tap the lines responsible, then fix them.
+    code: |
+      import numpy as np
+
+
+      def psi(expected, actual, bins=10):
+          q = np.linspace(0, 1, bins + 1)
+          e_inner = np.quantile(expected, q)[1:-1]
+          a_inner = np.quantile(actual, q)[1:-1]
+          e = np.bincount(np.searchsorted(e_inner, expected, side="right"), minlength=bins) / len(expected)
+          a = np.bincount(np.searchsorted(a_inner, actual, side="right"), minlength=bins) / len(actual)
+          e, a = np.clip(e, 1e-4, None), np.clip(a, 1e-4, None)
+          return float(np.sum((a - e) * np.log(a / e)))
+    bug_lines: [7, 9]
+    fix_checker:
+      kind: python
+      setup: |
+        import numpy as np
+      tests:
+        - id: detects_shift
+          code: |
+            rng = np.random.default_rng(3)
+            base = rng.normal(size=5_000)
+            assert psi(base, rng.normal(1.0, 1.0, 5_000)) > 0.25
+            assert psi(base, rng.normal(size=5_000)) < 0.1
+          message: "Bin both arrays on expected's edges, so a moved distribution fills the bins unevenly."
+    fix_solution: |
+      import numpy as np
+
+
+      def psi(expected, actual, bins=10):
+          q = np.linspace(0, 1, bins + 1)
+          e_inner = np.quantile(expected, q)[1:-1]
+          e = np.bincount(np.searchsorted(e_inner, expected, side="right"), minlength=bins) / len(expected)
+          a = np.bincount(np.searchsorted(e_inner, actual, side="right"), minlength=bins) / len(actual)
+          e, a = np.clip(e, 1e-4, None), np.clip(a, 1e-4, None)
+          return float(np.sum((a - e) * np.log(a / e)))
+    wrong_answers:
+      - lines: [10]
+        feedback: "The floor is right. The shares were already wrong before it."
+      - lines: [6, 8]
+        feedback: "Binning expected on its own quantiles is right. The current data must use the same edges."
+    hints:
+      - "Where do actual's bin edges come from?"
+      - "On its own quantiles, how are actual's values spread across bins?"
+      - "Use expected's edges for both."
+    explanation: |
+      Lines 7 and 9 bin `actual` on its own quantiles, so each bin holds about a tenth of it, whatever its shape. Both arrays must use the reference's edges for the shares to show a shift.
+
+recap:
+  - front: "What to monitor without labels"
+    back: "Input distributions, predicted class shares, confidence, error rate and p95 latency."
+  - front: "PSI"
+    back: "sum((a - e) * ln(a / e)) over the reference's quantile bins, with shares floored at a small value."
+  - front: "PSI bands"
+    back: "Below 0.1 stable, 0.1 to 0.25 moderate, above 0.25 large: a rule of thumb from credit scoring. Tune it to your data."
+  - front: "Prediction logs"
+    back: "One structured record per request with version, counts, confidence and latency. Never the respondent's text."
+
+claims:
+  - claim: "The PSI bands 0.1 and 0.25 are an industry rule of thumb (Lewis, 1994) without statistical derivation; PSI's distribution depends on the number of bins and the sample sizes."
+    status: search-only
+    source: "Search results including the Journal of Risk Model Validation paper on PSI's statistical properties and arXiv 2303.01227, November 2026."
+  - claim: "B27 lab: PSI of answer length 4.708 and of confidence 0.687 on a shifted batch of 1,000 answers, and 0.008 for confidence on an unshifted batch, using 10 quantile bins and a 1e-4 floor."
+    status: verified
+    source: "labs/serving reference run, NumPy 2.5.4 and scikit-learn 1.9.1, November 2026."

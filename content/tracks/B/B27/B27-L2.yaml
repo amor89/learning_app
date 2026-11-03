@@ -1,0 +1,471 @@
+id: B27-L2
+title: Serving a model with FastAPI
+
+concept: |
+  A prediction service is a small web API. FastAPI builds one from Python functions and pydantic models. In FastAPI 0.162 with pydantic 2.14:
+
+  ```python
+  class PredictRequest(BaseModel):
+      texts: list[Annotated[str, Field(min_length=1, max_length=2_000)]] = Field(min_length=1)
+
+  @app.post("/predict", response_model=PredictResponse)
+  def predict(request: PredictRequest) -> PredictResponse: ...
+  ```
+
+  **The schema is the contract.** FastAPI checks every request against `PredictRequest` before your function runs. A missing field, an empty list or an empty string gets status 422 with a `detail` list naming the problem, such as `too_short` at `("body", "texts")`. Your function only sees valid input. `response_model` checks what goes back.
+
+  **Load the model once, at start-up.** Loading inside the endpoint repeats the work on every request. Loading at import time runs on import, including in tests. Use a lifespan function, which runs when the server starts:
+
+  ```python
+  @asynccontextmanager
+  async def lifespan(app: FastAPI):
+      app.state.model, app.state.meta = loader()
+      yield
+  ```
+
+  Pass `loader` into an app factory, `create_app(loader)`, so tests hand in a fake model and production hands in the real one.
+
+  **Health and status codes.** `GET /health` answers 200 once the model has loaded and 503 before, so the platform sends traffic only to a ready copy. Return 413 when a request holds more texts than you allow.
+
+  **Testing.** `TestClient(app)` from `fastapi.testclient` calls the app without a server. It needs httpx, and Starlette 1.10 prefers the `httpx2` package and warns with `httpx`. Use it as `with TestClient(app) as client:`. Without `with`, the lifespan never runs: in a check, `/health` returned 503.
+
+why_it_matters: |
+  A team's first prediction service loaded a 300 MB model inside the endpoint. Each request took over a second, and memory climbed under load until the service restarted. Moving the load into a lifespan function brought requests down to milliseconds. A test with `TestClient` used as a context manager now proves that the model loads once.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      app = FastAPI()
+      model = joblib.load("model/model.joblib")
+
+      @app.post("/predict")
+      def predict(payload: dict):
+          return {"labels": model.predict(payload["texts"]).tolist()}
+    annotations:
+      - find: "model = joblib.load(\"model/model.joblib\")"
+        note: "Loads at import time: importing the module in a test needs the real model file."
+      - find: "def predict(payload: dict):"
+        note: "A plain dict skips validation. A missing key becomes a 500 error instead of a clear 422."
+  strong:
+    code: |
+      from collections.abc import AsyncIterator
+      from contextlib import asynccontextmanager
+
+      from fastapi import FastAPI, HTTPException
+
+
+      def create_app(loader: Loader, max_batch: int = 100) -> FastAPI:
+          """Build the API. The model loads once, at start-up."""
+
+          @asynccontextmanager
+          async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+              app.state.model, app.state.meta = loader()
+              yield
+
+          app = FastAPI(title="Survey topics", lifespan=lifespan)
+
+          @app.get("/health")
+          def health() -> dict[str, str]:
+              if getattr(app.state, "model", None) is None:
+                  raise HTTPException(status_code=503, detail="model not loaded")
+              return {"status": "ok", "model_version": app.state.meta.version}
+
+          @app.post("/predict", response_model=PredictResponse)
+          def predict(request: PredictRequest) -> PredictResponse:
+              if len(request.texts) > max_batch:
+                  raise HTTPException(status_code=413, detail=f"at most {max_batch} texts per request")
+              probs = app.state.model.predict_proba(request.texts)
+              predictions = [
+                  Prediction(label=str(app.state.model.classes_[row.argmax()]), confidence=round(float(row.max()), 4))
+                  for row in probs
+              ]
+              return PredictResponse(predictions=predictions, model_name=app.state.meta.name, model_version=app.state.meta.version)
+
+          return app
+    annotations:
+      - find: "app.state.model, app.state.meta = loader()"
+        note: "Runs once when the server starts. Tests pass a fake loader."
+      - find: "raise HTTPException(status_code=503, detail=\"model not loaded\")"
+        note: "Not ready yet: the platform keeps traffic away."
+      - find: "def predict(request: PredictRequest) -> PredictResponse:"
+        note: "FastAPI validates against PredictRequest first and answers 422 for bad input."
+      - find: "raise HTTPException(status_code=413, detail=f\"at most {max_batch} texts per request\")"
+        note: "A limit you choose, checked in code: 413 means the request is too large."
+  takeaway: |
+    Let pydantic schemas validate requests, load the model once in a lifespan function inside an app factory, and test with TestClient as a context manager.
+
+exercises:
+  - id: B27-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Why does the service load its model in a lifespan function instead of inside the `/predict` function?
+    options:
+      - {id: a, text: "It loads once when the server starts, instead of on every request"}
+      - {id: b, text: "FastAPI forbids file access inside endpoints"}
+      - {id: c, text: "The lifespan function validates the model's schema"}
+      - {id: d, text: "It makes the model load at import time"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Loading is slow and uses memory; doing it per request multiplies both by the number of requests."}
+      - {id: r2, text: "Lifespan functions run on a faster thread."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Endpoints may read files. The cost is doing it again for every request."
+      - answer: c
+        feedback: "Schemas validate requests. The lifespan function only runs start-up and shut-down code."
+      - answer: d
+        feedback: "The opposite: the lifespan runs when the server starts, not when the module is imported."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. It is about running once, not about a faster thread."
+    hints:
+      - "How often does the endpoint run?"
+      - "How often does start-up run?"
+      - "Loading is the slow part."
+    explanation: |
+      The lifespan code before `yield` runs once at start-up. Every request then uses the loaded model from `app.state`.
+
+  - id: B27-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print?
+    primer: |
+      `Annotated[str, Field(min_length=1)]` attaches a rule to a type, here to each item of a list. `Model.model_validate(data)` checks a dictionary, and a failure raises `ValidationError`, whose `errors()` lists each problem with a `type` and a `loc`:
+
+      ```python
+      class Tag(BaseModel):
+          name: Annotated[str, Field(min_length=2)]
+
+      Tag.model_validate({"name": "x"})     # ValidationError: string_too_short at ('name',)
+      ```
+    code: |
+      from typing import Annotated
+
+      from pydantic import BaseModel, Field, ValidationError
+
+
+      class PredictRequest(BaseModel):
+          texts: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1, max_length=3)
+
+
+      for payload in [{"texts": ["late"]}, {"texts": []}, {"texts": ["a", ""]}]:
+          try:
+              PredictRequest.model_validate(payload)
+              print("ok")
+          except ValidationError as e:
+              err = e.errors()[0]
+              print(err["type"], err["loc"])
+    answer: |
+      ok
+      too_short ('texts',)
+      string_too_short ('texts', 1)
+    wrong_answers:
+      - answer: "ok\ntoo_short ('texts',)\nok"
+        feedback: "Each item must have at least 1 character, so the empty string at position 1 fails."
+      - answer: "ok\nok\nstring_too_short ('texts', 1)"
+        feedback: "The list itself needs at least 1 item, so an empty list fails."
+    hints:
+      - "Two rules: one on the list, one on each item."
+      - "An empty list breaks the list rule."
+      - "loc includes the item's position."
+    explanation: |
+      The list rule rejects `[]` as `too_short`. The item rule rejects the empty string at index 1 as `string_too_short`, and `loc` points at it. FastAPI returns these same errors in a 422 response.
+
+  - id: B27-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Declare the prediction route, and report that the model has not loaded yet.
+    template: |
+      @app.[[g1]]("/predict", response_model=PredictResponse)
+      def predict(request: PredictRequest) -> PredictResponse: ...
+
+      @app.get("/health")
+      def health() -> dict[str, str]:
+          if getattr(app.state, "model", None) is None:
+              raise HTTPException(status_code=[[g2]], detail="model not loaded")
+          return {"status": "ok"}
+    gaps:
+      g1: {accepted: [post]}
+      g2: {accepted: ["503"]}
+    wrong_answers:
+      - answer: {g1: get, g2: "503"}
+        feedback: "Predictions take a JSON body, which needs POST."
+      - answer: {g1: post, g2: "500"}
+        feedback: "500 says the server failed. 503 says it is not ready yet, which tells the platform to wait."
+    hints:
+      - "Which method sends a JSON body?"
+      - "Which status means the service is unavailable for now?"
+      - "`post` and `503`."
+    explanation: |
+      A prediction request carries a body, so it is a POST. 503 Service Unavailable tells a load balancer or health probe to wait and try again.
+
+  - id: B27-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `request_status(texts, max_batch) -> int`, the status the API gives a request body's `texts` value before predicting.
+
+      - 422 unless `texts` is a non-empty list whose items are all non-empty strings.
+      - 413 if it holds more than `max_batch` items.
+      - 200 otherwise.
+    primer: |
+      `isinstance(value, kind)` checks a value's type, and `all` is true when every item passes:
+
+      ```python
+      isinstance("a", str), isinstance(["a"], list)       # (True, True)
+      all(isinstance(x, int) for x in [1, 2, "3"])         # False
+      ```
+    starter: |
+      def request_status(texts, max_batch):
+          return 200
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: request_status
+          typed: true
+          docstring: true
+          message: "Give request_status type hints and a docstring."
+      tests:
+        - id: valid
+          code: |
+            assert request_status(["late parcel", "rude staff"], 3) == 200
+          message: "A list of 1 to max_batch non-empty strings is valid."
+        - id: invalid
+          code: |
+            for bad in [[], [""], ["ok", 5], "late", None]:
+                assert request_status(bad, 3) == 422, (bad, request_status(bad, 3))
+          message: "Return 422 for an empty list, an empty string, a non-string item, or a value that is not a list."
+        - id: too_many
+          code: |
+            assert request_status(["a", "b", "c", "d"], 3) == 413
+            assert request_status(["a", "b", "c"], 3) == 200
+          message: "Return 413 above max_batch, and 200 at exactly max_batch."
+    solution: |
+      def request_status(texts: object, max_batch: int) -> int:
+          """HTTP status for a request's texts value, before any prediction.
+
+          Args:
+              texts: The "texts" value from the request body.
+              max_batch: Most texts one request may hold.
+
+          Returns:
+              422 for invalid input, 413 for too many texts, else 200.
+          """
+          if not isinstance(texts, list) or not texts:
+              return 422
+          if not all(isinstance(t, str) and t for t in texts):
+              return 422
+          if len(texts) > max_batch:
+              return 413
+          return 200
+    seeded_bugs:
+      - |
+        def request_status(texts: object, max_batch: int) -> int:
+            """Accepts a bare string as a list of characters."""
+            if not texts:
+                return 422
+            if not all(isinstance(t, str) and t for t in texts):
+                return 422
+            if len(texts) > max_batch:
+                return 413
+            return 200
+      - |
+        def request_status(texts: object, max_batch: int) -> int:
+            """Off by one: rejects exactly max_batch."""
+            if not isinstance(texts, list) or not texts:
+                return 422
+            if not all(isinstance(t, str) and t for t in texts):
+                return 422
+            if len(texts) >= max_batch:
+                return 413
+            return 200
+    wrong_answers:
+      - answer: |
+          def request_status(texts: object, max_batch: int) -> int:
+              """Off by one: rejects exactly max_batch."""
+              if not isinstance(texts, list) or not texts:
+                  return 422
+              if not all(isinstance(t, str) and t for t in texts):
+                  return 422
+              if len(texts) >= max_batch:
+                  return 413
+              return 200
+        triggers: too_many
+    hints:
+      - "Check that texts is a non-empty list first."
+      - "Then check every item is a non-empty string."
+      - "Only then compare the length with max_batch, using `>`."
+    explanation: |
+      Validation comes before the size limit, as in FastAPI: a malformed body is 422 whatever its size. A bare string is iterable, so without the `isinstance` check `"late"` would pass as four one-letter texts.
+
+  - id: B27-L2-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `to_predictions(probs, classes) -> list[dict]`, the response body for a batch.
+
+      - `probs` has one row per text and one column per class, in the order of `classes`.
+      - For each row return `{"label": <class with the highest probability>, "confidence": <that probability rounded to 4 places>}`.
+      - Raise `ValueError` if the number of columns differs from `len(classes)`.
+    starter: |
+      import numpy as np
+
+
+      def to_predictions(probs, classes):
+          return [{"label": classes[0], "confidence": 1.0} for _ in probs]
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: to_predictions
+          typed: true
+          docstring: true
+          message: "Give to_predictions type hints and a docstring."
+      tests:
+        - id: labels
+          code: |
+            probs = np.array([[0.1, 0.7, 0.2], [0.2, 0.1, 0.7]])
+            got = to_predictions(probs, ["price", "delivery", "staff"])
+            assert got == [{"label": "delivery", "confidence": 0.7}, {"label": "staff", "confidence": 0.7}], got
+          message: "Take the class with the highest probability in each row."
+        - id: rounding
+          code: |
+            got = to_predictions(np.array([[0.123456, 0.876544]]), ["a", "b"])
+            assert got == [{"label": "b", "confidence": 0.8765}], got
+            assert type(got[0]["confidence"]) is float
+          message: "Round the confidence to 4 places and return a plain float."
+        - id: guard
+          code: |
+            try:
+                to_predictions(np.array([[0.5, 0.5]]), ["a", "b", "c"])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError when columns and classes differ")
+          message: "Raise ValueError when the columns do not match the classes."
+    solution: |
+      import numpy as np
+
+
+      def to_predictions(probs: np.ndarray, classes: list[str]) -> list[dict[str, str | float]]:
+          """Label and confidence for each row of class probabilities.
+
+          Args:
+              probs: Shape (n_texts, n_classes).
+              classes: Class names in column order.
+
+          Returns:
+              One {"label", "confidence"} dict per row.
+
+          Raises:
+              ValueError: If the number of columns differs from len(classes).
+          """
+          if probs.ndim != 2 or probs.shape[1] != len(classes):
+              raise ValueError(f"probs has shape {probs.shape} but there are {len(classes)} classes")
+          best = probs.argmax(axis=1)
+          return [
+              {"label": classes[int(i)], "confidence": round(float(row[i]), 4)}
+              for i, row in zip(best, probs)
+          ]
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def to_predictions(probs: np.ndarray, classes: list[str]) -> list[dict[str, str | float]]:
+            """Takes the argmax over the wrong axis."""
+            if probs.ndim != 2 or probs.shape[1] != len(classes):
+                raise ValueError("shape mismatch")
+            best = probs.argmax(axis=0)
+            return [{"label": classes[int(i)], "confidence": round(float(row[i]), 4)} for i, row in zip(best, probs)]
+      - |
+        import numpy as np
+
+
+        def to_predictions(probs: np.ndarray, classes: list[str]) -> list[dict[str, str | float]]:
+            """Returns NumPy floats, unrounded."""
+            if probs.ndim != 2 or probs.shape[1] != len(classes):
+                raise ValueError("shape mismatch")
+            best = probs.argmax(axis=1)
+            return [{"label": classes[int(i)], "confidence": row[i]} for i, row in zip(best, probs)]
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def to_predictions(probs: np.ndarray, classes: list[str]) -> list[dict[str, str | float]]:
+              """Takes the argmax over the wrong axis."""
+              if probs.ndim != 2 or probs.shape[1] != len(classes):
+                  raise ValueError("shape mismatch")
+              best = probs.argmax(axis=0)
+              return [{"label": classes[int(i)], "confidence": round(float(row[i]), 4)} for i, row in zip(best, probs)]
+        triggers: labels
+    hints:
+      - "Check `probs.shape[1] == len(classes)`."
+      - "`probs.argmax(axis=1)` gives the best column per row."
+      - "`round(float(row[i]), 4)`."
+    explanation: |
+      `argmax(axis=1)` picks a column per row. `float(...)` turns a NumPy number into a plain float, which JSON and pydantic handle directly, and rounding keeps responses short.
+
+  - id: B27-L2-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      Each request to this service takes about 900 ms, almost all spent before the model predicts. Tap the line responsible.
+    code: |
+      import joblib
+      from fastapi import FastAPI
+
+      app = FastAPI()
+
+
+      @app.post("/predict", response_model=PredictResponse)
+      def predict(request: PredictRequest) -> PredictResponse:
+          model = joblib.load("model/model.joblib")
+          probs = model.predict_proba(request.texts)
+          return build_response(probs, model.classes_)
+    bug_lines: [9]
+    wrong_answers:
+      - lines: [10]
+        feedback: "Predicting is the part that has to run per request. The time goes before it."
+      - lines: [7]
+        feedback: "The route and its schemas are right. Look at what runs inside the function."
+    hints:
+      - "What runs on every request?"
+      - "Which step only needs to happen once?"
+      - "Move it into a lifespan function."
+    explanation: |
+      Line 9 reads the model from disk for every request. Load it once in a lifespan function and keep it on `app.state`.
+
+recap:
+  - front: "Request schema (FastAPI 0.162, pydantic 2.14)"
+    back: "A pydantic model with Field rules. Invalid input gets 422 with a detail list before your function runs."
+  - front: "Loading the model"
+    back: "Once, in a lifespan function that stores it on app.state. Not per request, not at import time."
+  - front: "Status codes"
+    back: "503 from /health until the model loads, 422 for invalid input, 413 for too many texts."
+  - front: "TestClient"
+    back: "with TestClient(app) as client: runs the lifespan. Without with, start-up never runs."
+
+claims:
+  - claim: "FastAPI 0.162.0 with pydantic 2.14.2 and Starlette 1.10.0: an empty list for a Field(min_length=1) list returns 422 with type too_short; a missing field returns missing at ('body', 'texts'); a string for a list returns list_type; GET on a POST route returns 405; /openapi.json and /docs are served; TestClient without a with block does not run the lifespan (/health returned 503), with a with block it does; starlette.testclient warns 'Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.'"
+    status: verified
+    source: "Run locally on FastAPI 0.162.0, pydantic 2.14.2, Starlette 1.10.0 and httpx 0.28.1, November 2026."
+  - claim: "The httpx2 package that Starlette 1.10 recommends for TestClient."
+    status: unverified
+    source: "Named in Starlette 1.10.0's source and FastAPI 0.162.0's extras; not installed or tested in the build session."

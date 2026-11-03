@@ -1,0 +1,430 @@
+id: B27-L3
+title: Packaging a model service as a container image
+
+concept: |
+  A container image holds your code, its dependencies and the model, so the service runs the same on your laptop and in the cloud. Build it from a `Dockerfile`:
+
+  ```text
+  FROM python:3.12-slim
+  WORKDIR /app
+  COPY requirements-serve.txt .
+  RUN pip install --no-cache-dir -r requirements-serve.txt
+  COPY src/ src/
+  COPY model/ model/
+  RUN useradd --create-home appuser
+  USER appuser
+  EXPOSE 8000
+  CMD ["uvicorn", "serve_lab.app:build", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+  ```
+
+  - **Pin exact versions** in the requirements file, such as `scikit-learn==1.9.1`. A model saved with one scikit-learn version may not load, or may predict differently, with another. Install only what serving needs: the lab's image left MLflow out.
+  - **Order for the cache.** Docker reuses each step until its inputs change. Copy the requirements and install them before copying code, so a code change does not reinstall every package.
+  - **Bind to 0.0.0.0.** Uvicorn 0.54 binds to 127.0.0.1 by default, which accepts connections only from inside the container. `EXPOSE` documents the port but does not change the bind address.
+  - **Run as a non-root user**, so a flaw in the service cannot change the image's files.
+  - **Settings from environment variables**, checked when the app starts: `MODEL_DIR`, `MAX_BATCH`. Secrets never go in the image. The platform injects them at run time (lesson B27-L4).
+  - **Load only model files you built.** `joblib.load` and `pickle` run code stored in the file.
+
+  `uvicorn serve_lab.app:build --factory` calls `build()` when the server starts, so importing the module loads nothing. Add a `.dockerignore` so virtual environments and test data stay out.
+
+  In the B27 lab, Docker 29.9 built this image at 561 MB. It answered `/predict` as `appuser` and logged one JSON line per request.
+
+why_it_matters: |
+  A team's model service worked on the developer's laptop and returned different predictions in production. The requirements file listed `scikit-learn` with no version, so the production build installed a newer release than the one that saved the model. Pinning the version that trained the model, and installing from the same file in both places, made the predictions match.
+
+worked_example:
+  language: text
+  weak:
+    code: |
+      FROM python:3.12
+      COPY . .
+      RUN pip install fastapi uvicorn scikit-learn
+      CMD ["uvicorn", "serve_lab.app:build", "--factory"]
+    annotations:
+      - find: "COPY . ."
+        note: "Copies everything before installing, so every code change reinstalls all packages. It also copies .venv and test data."
+      - find: "RUN pip install fastapi uvicorn scikit-learn"
+        note: "No versions: next month's build installs different releases."
+      - find: "CMD [\"uvicorn\", \"serve_lab.app:build\", \"--factory\"]"
+        note: "Default host 127.0.0.1: unreachable from outside the container. Also runs as root."
+  strong:
+    code: |
+      FROM python:3.12-slim
+      ENV PYTHONUNBUFFERED=1 MODEL_DIR=/app/model
+      WORKDIR /app
+      COPY requirements-serve.txt .
+      RUN pip install --no-cache-dir -r requirements-serve.txt
+      COPY src/ src/
+      COPY model/ model/
+      ENV PYTHONPATH=/app/src
+      RUN useradd --create-home appuser
+      USER appuser
+      EXPOSE 8000
+      CMD ["uvicorn", "serve_lab.app:build", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    annotations:
+      - find: "RUN pip install --no-cache-dir -r requirements-serve.txt"
+        note: "Pinned versions, installed before the code, so this layer is reused until the requirements change."
+      - find: "ENV PYTHONUNBUFFERED=1 MODEL_DIR=/app/model"
+        note: "Logs appear at once; the app reads MODEL_DIR at start-up."
+      - find: "USER appuser"
+        note: "The service runs without root rights."
+      - find: "CMD [\"uvicorn\", \"serve_lab.app:build\", \"--factory\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]"
+        note: "Listens on every interface, so the published port reaches it."
+  takeaway: |
+    Pin serving dependencies, install them before copying code, bind to 0.0.0.0, run as a non-root user, and read settings from the environment at start-up.
+
+exercises:
+  - id: B27-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      The container logs `Uvicorn running on http://127.0.0.1:8000`, but `curl localhost:8000/health` from your laptop gets no answer, even with `-p 8000:8000`. Why?
+    options:
+      - {id: a, text: "127.0.0.1 inside the container accepts connections only from inside the container. Start uvicorn with --host 0.0.0.0"}
+      - {id: b, text: "The Dockerfile has no EXPOSE line"}
+      - {id: c, text: "Port 8000 is reserved by Docker"}
+      - {id: d, text: "The model has not finished loading"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The published port forwards to the container's network interface, where nothing is listening."}
+      - {id: r2, text: "EXPOSE opens the port in the container's firewall."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "EXPOSE documents the port. It does not change where uvicorn listens."
+      - answer: c
+        feedback: "8000 is an ordinary port. The bind address is the problem."
+      - answer: d
+        feedback: "A loading model would answer /health with 503. Here nothing answers at all."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. EXPOSE does not open anything. Traffic arrives on the container's interface, and nothing listens there."
+    hints:
+      - "Which address does the log show?"
+      - "Who can reach a loopback address?"
+      - "--host 0.0.0.0."
+    explanation: |
+      Uvicorn's default host is 127.0.0.1, the container's own loopback. Docker forwards the published port to the container's network interface, so uvicorn must listen on 0.0.0.0.
+
+  - id: B27-L3-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      Settings arrive as strings from the environment. What does this print?
+    code: |
+      def parse_max_batch(raw):
+          if not raw.isdigit() or not 1 <= int(raw) <= 1000:
+              raise ValueError(f"MAX_BATCH must be 1 to 1000, got {raw!r}")
+          return int(raw)
+
+
+      for raw in ["100", "0", "50.5", " 20"]:
+          try:
+              print(parse_max_batch(raw))
+          except ValueError:
+              print("rejected", repr(raw))
+    answer: |
+      100
+      rejected '0'
+      rejected '50.5'
+      rejected ' 20'
+    wrong_answers:
+      - answer: "100\nrejected '0'\n50\n20"
+        feedback: "isdigit is False for '50.5' and for ' 20', because '.' and the space are not digits."
+      - answer: "100\n0\nrejected '50.5'\nrejected ' 20'"
+        feedback: "0 is a digit string, but it fails the range check of 1 to 1000."
+    hints:
+      - "Which strings are only digits?"
+      - "Is 0 in the range?"
+      - "A leading space is not a digit."
+    explanation: |
+      Only "100" is all digits and in range. Rejecting bad settings at start-up stops the container before it serves anything, with a message naming the variable.
+
+  - id: B27-L3-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the Dockerfile steps so a code change rebuilds as little as possible and the service runs without root.
+    items:
+      - {id: from, text: "FROM python:3.12-slim"}
+      - {id: reqs, text: "COPY requirements-serve.txt ."}
+      - {id: pip, text: "RUN pip install --no-cache-dir -r requirements-serve.txt"}
+      - {id: code, text: "COPY src/ src/ and COPY model/ model/"}
+      - {id: user, text: "RUN useradd --create-home appuser, then USER appuser"}
+      - {id: cmd, text: "CMD [\"uvicorn\", ..., \"--host\", \"0.0.0.0\"]"}
+    answer: [from, reqs, pip, code, user, cmd]
+    wrong_answers:
+      - answer: [from, code, reqs, pip, user, cmd]
+        feedback: "Copying code first means every code change invalidates the install step, so all packages reinstall."
+      - answer: [from, user, reqs, pip, code, cmd]
+        feedback: "Switching user first makes pip install as a user without rights to the system site-packages. Install as root, then switch."
+    hints:
+      - "What changes least often?"
+      - "Install packages while still root."
+      - "CMD comes last."
+    explanation: |
+      Base image, requirements, install, then code and model, then a non-root user and the start command. Docker reuses every step before the first changed input.
+
+  - id: B27-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `parse_requirements(lines) -> dict[str, str]` for a serving requirements file.
+
+      - Skip blank lines and lines starting with `#`, after stripping spaces.
+      - Every other line must be `name==version`. Return `{name: version}`.
+      - Raise `ValueError` naming the first line that is not pinned with `==`.
+    starter: |
+      def parse_requirements(lines):
+          return {}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: parse_requirements
+          typed: true
+          docstring: true
+          message: "Give parse_requirements type hints and a docstring."
+      tests:
+        - id: pinned
+          code: |
+            lines = ["# serving", "fastapi==0.162.0", "", "  scikit-learn==1.9.1  "]
+            got = parse_requirements(lines)
+            assert got == {"fastapi": "0.162.0", "scikit-learn": "1.9.1"}, got
+          message: "Skip comments and blank lines, strip spaces, and split each pin on ==."
+        - id: unpinned
+          code: |
+            for bad in ["numpy", "numpy>=2", "numpy==", "==2.5.4"]:
+                try:
+                    parse_requirements(["fastapi==0.162.0", bad])
+                except ValueError as e:
+                    assert bad in str(e), str(e)
+                    continue
+                raise AssertionError(f"no ValueError for {bad!r}")
+          message: "Raise ValueError, naming the line, for anything not pinned as name==version."
+    solution: |
+      def parse_requirements(lines: list[str]) -> dict[str, str]:
+          """Exact pins from a requirements file.
+
+          Args:
+              lines: The file's lines.
+
+          Returns:
+              Package name to pinned version.
+
+          Raises:
+              ValueError: If a line is not of the form name==version.
+          """
+          pins: dict[str, str] = {}
+          for raw in lines:
+              line = raw.strip()
+              if not line or line.startswith("#"):
+                  continue
+              name, sep, version = line.partition("==")
+              if not sep or not name or not version:
+                  raise ValueError(f"not pinned with ==: {line!r}")
+              pins[name] = version
+          return pins
+    seeded_bugs:
+      - |
+        def parse_requirements(lines: list[str]) -> dict[str, str]:
+            """Accepts ranges such as >=."""
+            pins: dict[str, str] = {}
+            for raw in lines:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                for sep in ("==", ">="):
+                    if sep in line:
+                        name, version = line.split(sep, 1)
+                        pins[name] = version
+                        break
+                else:
+                    raise ValueError(f"not pinned: {line!r}")
+            return pins
+      - |
+        def parse_requirements(lines: list[str]) -> dict[str, str]:
+            """Does not strip spaces."""
+            pins: dict[str, str] = {}
+            for line in lines:
+                if not line or line.startswith("#"):
+                    continue
+                name, sep, version = line.partition("==")
+                if not sep or not name or not version:
+                    raise ValueError(f"not pinned with ==: {line!r}")
+                pins[name] = version
+            return pins
+    wrong_answers:
+      - answer: |
+          def parse_requirements(lines: list[str]) -> dict[str, str]:
+              """Does not strip spaces."""
+              pins: dict[str, str] = {}
+              for line in lines:
+                  if not line or line.startswith("#"):
+                      continue
+                  name, sep, version = line.partition("==")
+                  if not sep or not name or not version:
+                      raise ValueError(f"not pinned with ==: {line!r}")
+                  pins[name] = version
+              return pins
+        triggers: pinned
+    hints:
+      - "Strip each line first."
+      - "`line.partition(\"==\")` returns name, separator and version."
+      - "An empty separator, name or version means the line is not a pin."
+    explanation: |
+      A check like this in CI keeps the serving image reproducible: any range or bare name fails the build before it reaches production.
+
+  - id: B27-L3-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `load_settings(env) -> dict` from a dictionary of environment variables.
+
+      - `model_dir`: `env["MODEL_DIR"]`, default `"model"`.
+      - `max_batch`: `env["MAX_BATCH"]` as an int, default 100. It must be all digits and from 1 to 1,000, else raise `ValueError` naming `MAX_BATCH`.
+      - Raise `ValueError` if `model_dir` is empty.
+    starter: |
+      def load_settings(env):
+          return {"model_dir": env["MODEL_DIR"], "max_batch": int(env["MAX_BATCH"])}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: load_settings
+          typed: true
+          docstring: true
+          message: "Give load_settings type hints and a docstring."
+      tests:
+        - id: defaults
+          code: |
+            assert load_settings({}) == {"model_dir": "model", "max_batch": 100}, load_settings({})
+          message: "Use the defaults when a variable is not set."
+        - id: values
+          code: |
+            got = load_settings({"MODEL_DIR": "/app/model", "MAX_BATCH": "20"})
+            assert got == {"model_dir": "/app/model", "max_batch": 20}, got
+          message: "Read both variables and convert MAX_BATCH to an int."
+        - id: bad_batch
+          code: |
+            for raw in ["0", "1001", "ten", "5.5", ""]:
+                try:
+                    load_settings({"MAX_BATCH": raw})
+                except ValueError as e:
+                    assert "MAX_BATCH" in str(e), str(e)
+                    continue
+                raise AssertionError(f"no ValueError for MAX_BATCH={raw!r}")
+          message: "Reject MAX_BATCH unless it is a whole number from 1 to 1000, and name the variable."
+        - id: empty_dir
+          code: |
+            try:
+                load_settings({"MODEL_DIR": ""})
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for an empty MODEL_DIR")
+          message: "Raise ValueError for an empty MODEL_DIR."
+    solution: |
+      def load_settings(env: dict[str, str]) -> dict[str, str | int]:
+          """Service settings from environment variables, checked at start-up.
+
+          Args:
+              env: Environment variables, such as dict(os.environ).
+
+          Returns:
+              {"model_dir": str, "max_batch": int}.
+
+          Raises:
+              ValueError: If MODEL_DIR is empty or MAX_BATCH is not a whole number from 1 to 1000.
+          """
+          model_dir = env.get("MODEL_DIR", "model")
+          if not model_dir:
+              raise ValueError("MODEL_DIR must not be empty")
+          raw = env.get("MAX_BATCH", "100")
+          if not raw.isdigit() or not 1 <= int(raw) <= 1_000:
+              raise ValueError(f"MAX_BATCH must be a whole number from 1 to 1000, got {raw!r}")
+          return {"model_dir": model_dir, "max_batch": int(raw)}
+    seeded_bugs:
+      - |
+        def load_settings(env: dict[str, str]) -> dict[str, str | int]:
+            """No range check."""
+            model_dir = env.get("MODEL_DIR", "model")
+            if not model_dir:
+                raise ValueError("MODEL_DIR must not be empty")
+            raw = env.get("MAX_BATCH", "100")
+            if not raw.isdigit():
+                raise ValueError(f"MAX_BATCH must be a whole number, got {raw!r}")
+            return {"model_dir": model_dir, "max_batch": int(raw)}
+      - |
+        def load_settings(env: dict[str, str]) -> dict[str, str | int]:
+            """Requires every variable, with no defaults."""
+            raw = env["MAX_BATCH"]
+            if not raw.isdigit() or not 1 <= int(raw) <= 1_000:
+                raise ValueError(f"MAX_BATCH bad: {raw!r}")
+            return {"model_dir": env["MODEL_DIR"], "max_batch": int(raw)}
+    wrong_answers:
+      - answer: |
+          def load_settings(env: dict[str, str]) -> dict[str, str | int]:
+              """No range check."""
+              model_dir = env.get("MODEL_DIR", "model")
+              if not model_dir:
+                  raise ValueError("MODEL_DIR must not be empty")
+              raw = env.get("MAX_BATCH", "100")
+              if not raw.isdigit():
+                  raise ValueError(f"MAX_BATCH must be a whole number, got {raw!r}")
+              return {"model_dir": model_dir, "max_batch": int(raw)}
+        triggers: bad_batch
+    hints:
+      - "`env.get(name, default)` supplies the defaults."
+      - "Check `raw.isdigit()` before `int(raw)`."
+      - "Then check the range and name MAX_BATCH in the message."
+    explanation: |
+      Checking settings when the app starts turns a typo in the deployment into a clear start-up failure instead of odd behaviour under load.
+
+  - id: B27-L3-E6
+    type: spot_bug
+    difficulty: 4
+    language: text
+    prompt: |
+      This image works, but every one-line code change makes `docker build` reinstall all packages, which takes four minutes. Tap the line responsible.
+    code: |
+      FROM python:3.12-slim
+      WORKDIR /app
+      COPY . .
+      RUN pip install --no-cache-dir -r requirements-serve.txt
+      RUN useradd --create-home appuser
+      USER appuser
+      CMD ["uvicorn", "serve_lab.app:build", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    bug_lines: [3]
+    wrong_answers:
+      - lines: [4]
+        feedback: "The install itself is right. It reruns because something before it changed."
+      - lines: [1]
+        feedback: "The slim base image is a good choice. Look at what is copied before the install."
+    hints:
+      - "Docker reuses a step until its inputs change."
+      - "Which step's inputs include your code?"
+      - "Copy the requirements file alone first."
+    explanation: |
+      `COPY . .` puts every source file into the step before `pip install`, so any code change invalidates the install. Copy `requirements-serve.txt` first, install, then copy the code.
+
+recap:
+  - front: "Pinned serving requirements"
+    back: "name==version for each package the service needs, and nothing else. The model's scikit-learn version must match."
+  - front: "Dockerfile order"
+    back: "FROM, copy requirements, install, copy code and model, non-root USER, CMD. Docker reuses steps until an input changes."
+  - front: "--host 0.0.0.0"
+    back: "Uvicorn 0.54 defaults to 127.0.0.1, which only the container itself can reach."
+  - front: "Settings and secrets"
+    back: "Read settings from environment variables and check them at start-up. Secrets are injected at run time, never built in."
+
+claims:
+  - claim: "Docker 29.9.2 built the lab's Dockerfile on python:3.12-slim into a 561 MB image that ran as appuser, answered /health and /predict, returned 422 for an empty list, and logged one JSON line per request; uvicorn 0.54.0 --help gives --host default 127.0.0.1 and a --factory flag."
+    status: verified
+    source: "Built and run locally, November 2026. The base image came from the mirror.gcr.io copy because Docker Hub returned 429 Too Many Requests."
+  - claim: "A server bound to 127.0.0.1 inside a container is unreachable through a published port; EXPOSE documents a port and does not change the bind address."
+    status: search-only
+    source: "Search results (uvicorn GitHub discussion 2325 and Stack Overflow answers), November 2026. Bridge networking was not available in the build session to test it."

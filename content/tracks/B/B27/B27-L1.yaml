@@ -1,0 +1,397 @@
+id: B27-L1
+title: The model registry, versions and aliases
+
+concept: |
+  Experiment tracking (module B14) records every run. The **model registry** names the models you might serve and numbers their versions. In MLflow 3.17:
+
+  ```python
+  info = mlflow.sklearn.log_model(model, name="model")       # info.model_uri: "models:/m-..."
+  version = mlflow.register_model(info.model_uri, "survey_topics").version   # 1, then 2, ...
+  client = MlflowClient()
+  client.set_registered_model_alias("survey_topics", "champion", "1")
+  model = mlflow.pyfunc.load_model("models:/survey_topics@champion")
+  ```
+
+  An **alias** is a movable name for one version. Serving code loads `@champion` and never names a version. To promote version 2, move the alias. To roll back, move it back. Nothing in the serving code changes.
+
+  - One alias points to one version at a time. A version can carry several aliases, such as `champion` and `challenger`.
+  - `client.get_model_version_by_alias(name, alias).version` tells you which version an alias points to now.
+  - Loading an alias that does not exist raises `MlflowException: Registered model alias challenger not found.`
+  - Stages such as `Production` are deprecated since MLflow 2.9. `transition_model_version_stage` warns that stages will be removed. Use aliases.
+
+  **Resolve the alias once.** If you load `@champion` and then ask the registry for the champion's version, someone may move the alias between the two calls. You would serve version 2 and report version 3. Ask for the version first, then load `models:/survey_topics/<version>`, so the model and the reported version always agree.
+
+  Keep old versions. A version you delete cannot be a rollback target. In the B27 lab, `train` registers versions 1 and 2, `promote 1` points `champion` at version 1, and `export` writes that version to a folder for the container.
+
+why_it_matters: |
+  A team served a survey classifier from a file path written into the deployment settings. A retrained model went live by overwriting the file. When accuracy dropped, nobody could say which training run was live or restore the previous file, which had been replaced. With a registry and an alias, the previous version would have been one command away, and every response could have named the version that produced it.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      model = mlflow.pyfunc.load_model("models:/survey_topics/Production")
+      version = client.get_latest_versions("survey_topics")[0].version
+    annotations:
+      - find: "model = mlflow.pyfunc.load_model(\"models:/survey_topics/Production\")"
+        note: "Stages are deprecated since MLflow 2.9. Use an alias."
+      - find: "version = client.get_latest_versions(\"survey_topics\")[0].version"
+        note: "The newest version is not necessarily the one being served, so this can report the wrong version."
+  strong:
+    code: |
+      import mlflow
+      from mlflow import MlflowClient
+      from sklearn.pipeline import Pipeline
+
+
+      def promote(name: str, version: str, alias: str = "champion") -> None:
+          """Point an alias at a version. Rolling back is promoting the old version again.
+
+          Raises:
+              ValueError: If alias is empty or version is not a positive whole number.
+          """
+          if not alias or not version.isdigit() or int(version) < 1:
+              raise ValueError(f"need an alias and a positive version, got {alias!r}, {version!r}")
+          MlflowClient().set_registered_model_alias(name, alias, version)
+
+
+      def load_alias(name: str, alias: str = "champion") -> tuple[Pipeline, str]:
+          """Load the version an alias points to, and return that version."""
+          version = MlflowClient().get_model_version_by_alias(name, alias).version
+          model = mlflow.sklearn.load_model(f"models:/{name}/{version}")
+          return model, str(version)
+    annotations:
+      - find: "MlflowClient().set_registered_model_alias(name, alias, version)"
+        note: "Promotion and rollback are the same call with a different version."
+      - find: "version = MlflowClient().get_model_version_by_alias(name, alias).version"
+        note: "Resolve the alias once."
+      - find: "model = mlflow.sklearn.load_model(f\"models:/{name}/{version}\")"
+        note: "Load that exact version, so the model and the reported version agree."
+  takeaway: |
+    Register every candidate as a version, serve through an alias, resolve the alias once, and keep old versions as rollback targets.
+
+exercises:
+  - id: B27-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Why does the serving code load `models:/survey_topics@champion` instead of `models:/survey_topics/4`?
+    options:
+      - {id: a, text: "Promotion and rollback become moving the alias, with no change to serving code or settings"}
+      - {id: b, text: "Loading by alias is faster than loading by version"}
+      - {id: c, text: "Aliases keep every version's files, while versions get deleted"}
+      - {id: d, text: "MLflow cannot load a model by its version number"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The alias separates which model is live from the code that serves it."}
+      - {id: r2, text: "Aliases are cached in memory by the tracking server."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Both resolve to the same files. The benefit is control, not speed."
+      - answer: c
+        feedback: "Aliases are names. Versions keep their files until you delete them."
+      - answer: d
+        feedback: "models:/survey_topics/4 loads version 4. The lab's load_alias does exactly that after resolving the alias."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Caching has nothing to do with it. The alias decouples the live choice from the code."
+    hints:
+      - "What do you change to promote a new model?"
+      - "What do you change to roll back?"
+      - "Neither should touch the serving code."
+    explanation: |
+      With an alias, the registry decides which version is live. Promotion and rollback are one registry call each, and the deployed code stays the same.
+
+  - id: B27-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      This dictionary stands in for a registry's aliases. What does it print?
+    code: |
+      aliases = {}
+
+
+      def promote(alias, version):
+          aliases[alias] = version
+
+
+      promote("champion", 1)
+      promote("challenger", 2)
+      promote("champion", 2)
+      promote("champion", 1)
+      print(aliases, sorted(set(aliases.values())))
+    answer: |
+      {'champion': 1, 'challenger': 2} [1, 2]
+    wrong_answers:
+      - answer: "{'champion': 2, 'challenger': 2} [2]"
+        feedback: "The last call moved champion back to version 1: that is the rollback."
+      - answer: "{'champion': 1, 'challenger': 2, 'champion': 2} [1, 2]"
+        feedback: "An alias names one version at a time. Moving it replaces the old target."
+    hints:
+      - "Each alias holds one version."
+      - "Follow champion through three moves."
+      - "Which versions still carry an alias?"
+    explanation: |
+      `champion` moved from 1 to 2 and back to 1, a promotion followed by a rollback. `challenger` still names version 2. Version 2 is unchanged and can be promoted again.
+
+  - id: B27-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Point the champion alias at version 3, then load whatever it points to.
+    template: |
+      client.set_registered_model_alias("survey_topics", "[[g1]]", "3")
+      model = mlflow.pyfunc.load_model("models:/survey_topics[[g2]]champion")
+    gaps:
+      g1: {accepted: [champion]}
+      g2: {accepted: ["@"]}
+    wrong_answers:
+      - answer: {g1: champion, g2: "/"}
+        feedback: "models:/name/... takes a version number. An alias follows @."
+    hints:
+      - "The alias name goes in the first call."
+      - "Which character introduces an alias in a model URI?"
+      - "`champion` and `@`."
+    explanation: |
+      `set_registered_model_alias(name, alias, version)` moves the alias, and `models:/name@alias` loads whatever it points to.
+
+  - id: B27-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `model_uri(name, alias=None, version=None) -> str`.
+
+      - With an alias, return `"models:/<name>@<alias>"`. With a version, return `"models:/<name>/<version>"`.
+      - Raise `ValueError` unless exactly one of `alias` and `version` is given, or if `version` is below 1.
+    starter: |
+      def model_uri(name, alias=None, version=None):
+          return f"models:/{name}/{alias}"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: model_uri
+          typed: true
+          docstring: true
+          message: "Give model_uri type hints and a docstring."
+      tests:
+        - id: alias
+          code: |
+            assert model_uri("survey_topics", alias="champion") == "models:/survey_topics@champion"
+          message: "An alias follows @."
+        - id: version
+          code: |
+            assert model_uri("survey_topics", version=3) == "models:/survey_topics/3"
+          message: "A version follows a slash."
+        - id: exactly_one
+          code: |
+            for kwargs in [{}, {"alias": "champion", "version": 2}, {"alias": "champion", "version": 0}]:
+                try:
+                    model_uri("survey_topics", **kwargs)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {kwargs}")
+          message: "Raise ValueError unless exactly one of alias and version is given."
+        - id: positive
+          code: |
+            try:
+                model_uri("survey_topics", version=0)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for version 0")
+          message: "Versions start at 1. Test for None with `is None`, so version 0 reaches the check."
+    solution: |
+      def model_uri(name: str, alias: str | None = None, version: int | None = None) -> str:
+          """A registry URI for a model by alias or by version.
+
+          Args:
+              name: Registered model name.
+              alias: Alias such as "champion".
+              version: Version number, from 1.
+
+          Returns:
+              "models:/<name>@<alias>" or "models:/<name>/<version>".
+
+          Raises:
+              ValueError: Unless exactly one of alias and version is given, or if version is below 1.
+          """
+          if (alias is None) == (version is None):
+              raise ValueError("give exactly one of alias and version")
+          if version is not None:
+              if version < 1:
+                  raise ValueError(f"versions start at 1, got {version}")
+              return f"models:/{name}/{version}"
+          return f"models:/{name}@{alias}"
+    seeded_bugs:
+      - |
+        def model_uri(name: str, alias: str | None = None, version: int | None = None) -> str:
+            """Uses a slash for aliases too."""
+            if (alias is None) == (version is None):
+                raise ValueError("give exactly one")
+            if version is not None:
+                if version < 1:
+                    raise ValueError("bad version")
+                return f"models:/{name}/{version}"
+            return f"models:/{name}/{alias}"
+      - |
+        def model_uri(name: str, alias: str | None = None, version: int | None = None) -> str:
+            """Truthiness lets version 0 through as 'no version'."""
+            if bool(alias) == bool(version):
+                raise ValueError("give exactly one")
+            if version:
+                return f"models:/{name}/{version}"
+            return f"models:/{name}@{alias}"
+    wrong_answers:
+      - answer: |
+          def model_uri(name: str, alias: str | None = None, version: int | None = None) -> str:
+              """Uses a slash for aliases too."""
+              if (alias is None) == (version is None):
+                  raise ValueError("give exactly one")
+              if version is not None:
+                  if version < 1:
+                      raise ValueError("bad version")
+                  return f"models:/{name}/{version}"
+              return f"models:/{name}/{alias}"
+        triggers: alias
+    hints:
+      - "`(alias is None) == (version is None)` is true when both or neither are given."
+      - "Check `version < 1` before building the version URI."
+      - "@ for an alias, / for a version."
+    explanation: |
+      Comparing the two `is None` tests catches both and neither in one line. Testing with `is None` matters: version 0 is falsy and would otherwise look like no version at all.
+
+  - id: B27-L1-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Every alias move is logged as `(alias, version)` in time order. Write `rollback_target(moves, alias="champion") -> int | None`: the version `alias` pointed to before its current one.
+
+      - Ignore moves of other aliases.
+      - Skip moves that left the alias on the version it already had.
+      - Return `None` if the alias has never pointed to a different version.
+    starter: |
+      def rollback_target(moves, alias="champion"):
+          return moves[-2][1]
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: rollback_target
+          typed: true
+          docstring: true
+          message: "Give rollback_target type hints and a docstring."
+      tests:
+        - id: basic
+          code: |
+            moves = [("champion", 1), ("challenger", 2), ("champion", 2)]
+            assert rollback_target(moves) == 1, rollback_target(moves)
+          message: "Follow only the alias you were asked about: champion went 1 then 2."
+        - id: repeats
+          code: |
+            moves = [("champion", 1), ("champion", 2), ("champion", 2)]
+            assert rollback_target(moves) == 1, rollback_target(moves)
+          message: "A repeat move to the same version is not a change. Skip it."
+        - id: none
+          code: |
+            assert rollback_target([("champion", 3)]) is None
+            assert rollback_target([]) is None
+            assert rollback_target([("challenger", 1), ("challenger", 2)]) is None
+          message: "Return None when the alias never pointed to a different version."
+        - id: other_alias
+          code: |
+            moves = [("challenger", 4), ("champion", 1), ("challenger", 5)]
+            assert rollback_target(moves, alias="challenger") == 4
+          message: "Use the alias argument."
+    solution: |
+      def rollback_target(moves: list[tuple[str, int]], alias: str = "champion") -> int | None:
+          """The version an alias pointed to before its current one.
+
+          Args:
+              moves: (alias, version) pairs in time order.
+              alias: The alias to follow.
+
+          Returns:
+              The previous distinct version, or None if there is none.
+          """
+          history: list[int] = []
+          for name, version in moves:
+              if name == alias and (not history or history[-1] != version):
+                  history.append(version)
+          return history[-2] if len(history) >= 2 else None
+    seeded_bugs:
+      - |
+        def rollback_target(moves: list[tuple[str, int]], alias: str = "champion") -> int | None:
+            """Counts repeat moves as changes."""
+            history = [v for name, v in moves if name == alias]
+            return history[-2] if len(history) >= 2 else None
+      - |
+        def rollback_target(moves: list[tuple[str, int]], alias: str = "champion") -> int | None:
+            """Ignores which alias moved."""
+            history: list[int] = []
+            for _, version in moves:
+                if not history or history[-1] != version:
+                    history.append(version)
+            return history[-2] if len(history) >= 2 else None
+    wrong_answers:
+      - answer: |
+          def rollback_target(moves: list[tuple[str, int]], alias: str = "champion") -> int | None:
+              """Counts repeat moves as changes."""
+              history = [v for name, v in moves if name == alias]
+              return history[-2] if len(history) >= 2 else None
+        triggers: repeats
+    hints:
+      - "Build the alias's own history of versions."
+      - "Append only when the version differs from the last one."
+      - "The answer is the second-to-last entry, if there is one."
+    explanation: |
+      Filtering by alias and dropping repeats gives the real sequence of champions. The second-to-last is where a rollback goes.
+
+  - id: B27-L1-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      Responses sometimes report version 3 while version 2's predictions come back. The champion alias was being moved during a deployment. Tap the line responsible.
+    code: |
+      import mlflow
+      from mlflow import MlflowClient
+
+
+      def load_champion(name):
+          model = mlflow.sklearn.load_model(f"models:/{name}@champion")
+          version = MlflowClient().get_model_version_by_alias(name, "champion").version
+          return model, version
+    bug_lines: [6]
+    wrong_answers:
+      - lines: [7]
+        feedback: "Asking the registry for the alias's version is right. The trouble is that the model was loaded from a separate lookup."
+      - lines: [8]
+        feedback: "Returning both is right. They must come from the same lookup."
+    hints:
+      - "How many times is the alias resolved?"
+      - "What if the alias moves between the two calls?"
+      - "Resolve once, then load that version."
+    explanation: |
+      Line 6 resolves `@champion` once to load the model, and line 7 resolves it again for the version. If the alias moves in between, they disagree. Resolve the version first, then load `models:/{name}/{version}`.
+
+recap:
+  - front: "Registering a model (MLflow 3.17)"
+    back: "mlflow.register_model(model_uri, name) creates version 1, 2, ... of a named model."
+  - front: "Alias"
+    back: "A movable name for one version. set_registered_model_alias(name, alias, version); load models:/name@alias."
+  - front: "Promote and roll back"
+    back: "Both move the alias. Keep old versions as rollback targets."
+  - front: "Resolve once"
+    back: "get_model_version_by_alias, then load models:/name/version, so the model and the reported version agree."
+
+claims:
+  - claim: "MLflow 3.17.2: log_model(model, name='model', registered_model_name=...) returns ModelInfo with model_uri 'models:/m-...'; register_model(model_uri, name) returns ModelVersion with an integer version; set_registered_model_alias(name, alias, version); models:/name@alias loads; a moved alias returns the new version; a missing alias raises MlflowException 'Registered model alias challenger not found.'; transition_model_version_stage warns it is deprecated since 2.9.0 and stages will be removed."
+    status: verified
+    source: "Run locally on MLflow 3.17.2 with a SQLite tracking store, November 2026."

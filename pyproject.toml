@@ -69,19 +69,24 @@ ignore = ["N812"]
 [tool.mypy]
 strict = true
 python_version = "3.11"
-files = ["learnkit", "checkers", "scripts", "practice", "labs/testing/src", "labs/rag/src", "labs/rag/solution", "labs/torch/src", "labs/torch/solution", "labs/cnn/src", "labs/cnn/solution", "labs/transformer/src", "labs/transformer/solution", "labs/finetune/src", "labs/finetune/solution"]
+files = ["learnkit", "checkers", "scripts", "practice", "labs/testing/src", "labs/rag/src", "labs/rag/solution", "labs/torch/src", "labs/torch/solution", "labs/cnn/src", "labs/cnn/solution", "labs/transformer/src", "labs/transformer/solution", "labs/finetune/src", "labs/finetune/solution", "labs/serving/src", "labs/serving/solution"]
 exclude = ["practice/exercises/", "practice/capstone/before_pipeline.py", "practice/capstone/pr_review"]
 # Pygments and nbformat ship without full type hints.
 untyped_calls_exclude = ["pygments", "nbformat"]
 
 [[tool.mypy.overrides]]
-module = ["docx.*", "weasyprint.*", "nbformat.*", "pyspark.*", "delta.*", "pandas.*", "sklearn.*", "anthropic.*", "torch.*"]
+module = ["docx.*", "weasyprint.*", "nbformat.*", "pyspark.*", "delta.*", "pandas.*", "sklearn.*", "anthropic.*", "torch.*", "mlflow.*", "fastapi.*", "uvicorn.*", "joblib.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # Without PyTorch installed, torch classes are Any. The labs subclass Dataset and nn.Module.
 module = ["survey_torch.*", "nn_steps", "digits_cnn.*", "tiny_transformer.*", "layers", "model", "finetune_lab.*", "lora", "strategies"]
 disallow_subclassing_any = false
+
+[[tool.mypy.overrides]]
+# Without FastAPI installed, its route decorators are untyped.
+module = ["serve_lab.*", "api"]
+disallow_untyped_decorators = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests/content"]
