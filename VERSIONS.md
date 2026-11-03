@@ -54,6 +54,10 @@ Checked on 25 September 2026. Status key:
 | sentence-transformers | Not installed | none | Unverified. Its API in B15-L1 comes from the library documentation |
 | transformers | 5.22.1 | scratch environment, Python 3.12, PyPI wheel run on CPU | Verified (local run) for module B26, with models built from a config and a local vocabulary. No hub download: huggingface.co was blocked |
 | peft | 0.21.2 | scratch environment, Python 3.12, PyPI wheel | Verified (local run) for module B26 |
+| MLflow (registry) | 3.17.2 | scratch environment, Python 3.12, SQLite tracking store | Verified (local run) for module B27 and `labs/serving`. B14 was checked on 3.16.1 |
+| FastAPI | 0.162.0, with Starlette 1.10.0, uvicorn 0.54.0, httpx 0.28.1 | scratch environment, Python 3.12 | Verified (local run) for module B27. Starlette 1.10 warns that TestClient prefers the httpx2 package, which was not installed |
+| Docker Engine | 29.9.2 | build machine | Verified (local build and run of `labs/serving`). The python:3.12-slim base came from mirror.gcr.io because Docker Hub returned 429. Bridge networking was unavailable, so published-port behaviour was not tested |
+| Azure Container Apps and the Azure CLI `containerapp` commands | Microsoft Learn pages dated 2025-10-27 to 2026-10-23 | not run | Search only. No Azure subscription in the build session. `az containerapp secret set` is GA in the CLI reference; deployment labels revision mode and `--max-inactive-revisions` are preview |
 | uv | 0.8.17 | build machine | Verified (local run) |
 | scikit-learn TfidfVectorizer | 1.9.1 (dev), 1.8.0 (parity) | `labs/rag` index | Verified (local run). Lab retrieval on 12 gold questions: recall at 3 1.000, MRR 0.903 at chunk size 80 |
 | mutmut | 3.8.1 | not installed | Search only (PyPI listing). B19-L8 names it as an example of mutation testing and teaches no commands |
@@ -219,6 +223,12 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 | transformers 5.22 classification and tagging: load report lists the new classifier as MISSING and the pooler as UNEXPECTED for token classification; `from_pretrained` returns eval mode; problem_type from labels (long: single-label, float with 3 labels: multi-label, 1 label: regression); `word_ids()` gives [None, 0, 1, 2, 3, 3, None] for a split word; CrossEntropyLoss ignore_index -100. | Verified | Local, transformers 5.22.1, local vocabulary |
 | Behaviour of named Hub checkpoints (download size, vocabulary, accuracy). | Unverified | huggingface.co blocked in the build session. B26 names no checkpoint |
 | `labs/finetune` reference run (pretrain seed 0, 20,000 sequences; fine-tune on 60 labels, seeds 0 to 2): mean validation accuracy scratch 0.759, frozen encoder with head 0.601, full 0.992, LoRA 0.967 (1,123 of 26,979 values); on 600 labels 0.963, 0.893, 0.998 and 0.995. | Verified | Local, torch 2.15.0, NumPy 2.5.4 |
+
+| MLflow 3.17 registry: `register_model` returns integer versions; aliases set with `set_registered_model_alias`, loaded as `models:/name@alias`; a missing alias raises "Registered model alias challenger not found."; `transition_model_version_stage` is deprecated since 2.9.0. | Verified | Local, MLflow 3.17.2, SQLite store |
+| FastAPI 0.162: 422 with `too_short`, `missing`, `list_type`; 405 for the wrong method; `TestClient` without `with` skips the lifespan (`/health` 503). pydantic 2.14 error types `too_short`, `string_too_short`, `too_long`. uvicorn 0.54 `--host` defaults to 127.0.0.1 and has `--factory`. | Verified | Local, FastAPI 0.162.0, pydantic 2.14.2, uvicorn 0.54.0 |
+| A server bound to 127.0.0.1 in a container is unreachable through a published port; `EXPOSE` does not change the bind address. | Search only | Uvicorn GitHub discussion and Stack Overflow answers. Not testable in the build session |
+| PSI bands 0.1 and 0.25 are a rule of thumb (Lewis, 1994) without statistical derivation, sensitive to bins and sample size. | Search only | Search results, including the Journal of Risk Model Validation and arXiv 2303.01227 |
+| `labs/serving` reference run: validation accuracy 0.9760 (C 1.0) and 0.9700 (C 0.01); image 561 MB, runs as appuser, logs one JSON line per request; PSI 4.708 (answer length) and 0.687 (confidence) on a shifted batch, 0.008 unshifted. | Verified | Local, MLflow 3.17.2, FastAPI 0.162.0, scikit-learn 1.9.1, Docker 29.9.2 |
 
 ## Track D facts (checked September 2026)
 

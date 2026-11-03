@@ -43,3 +43,4 @@ modules:
   - {id: B20, title: Prompting and structured output, tags: [M13-15], summary: "System prompts, few-shot turns, validated JSON output and model calls you can test and reproduce."}
   - {id: B21, title: Retrieval-augmented generation, tags: [M13-15], summary: "Chunking, retrieval with embeddings and keywords, and grounded answers with checked citations."}
   - {id: B22, title: Evaluating LLM systems, tags: [M13-15], summary: "Retrieval metrics, answer checks, LLM judges and regression gates for prompt changes."}
+  - {id: B27, title: Serving and monitoring models, tags: [M16-18], summary: "The model registry and aliases, a FastAPI endpoint, container images, Azure Container Apps, drift monitoring, and retraining with rollback."}

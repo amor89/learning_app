@@ -1,0 +1,7 @@
+# What the container needs to serve the exported model. Pinned: the image must
+# rebuild the same way next month. Checked with Python 3.12, November 2026.
+fastapi==0.162.0
+uvicorn==0.54.0
+scikit-learn==1.9.1
+numpy==2.5.4
+joblib==1.6.0

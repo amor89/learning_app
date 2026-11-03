@@ -1,0 +1,32 @@
+# The B27 serving lab. From this folder: `pip install -e ".[dev]"`, then `pytest`.
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "serve-lab"
+version = "0.1.0"
+description = "Register, serve, package and monitor a survey-topic classifier"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.160,<1",
+    "uvicorn>=0.50,<1",
+    "scikit-learn>=1.9,<1.10",
+    "numpy>=2,<3",
+    "joblib>=1.5,<2",
+]
+
+[project.optional-dependencies]
+dev = ["mlflow>=3.17,<4", "httpx>=0.28,<1", "pytest>=9"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--strict-markers"
+filterwarnings = [
+    # Starlette 1.10 prefers the httpx2 package for TestClient and warns with httpx.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]

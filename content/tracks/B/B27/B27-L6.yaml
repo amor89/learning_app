@@ -1,0 +1,463 @@
+id: B27-L6
+title: Retraining, promotion and rollback
+
+concept: |
+  A served model needs a plan for its replacement. Decide in advance what starts a retrain: a schedule, a drift alert confirmed by a labelled sample (lesson B27-L5), or a fall in accuracy once labels arrive.
+
+  **Compare like with like.** Score the new model, the **challenger**, and the live one, the **champion**, on the same recent labelled data. Each model's own validation score was measured on different data and proves nothing about which is better. Use several batches, and promote only when the challenger wins by a margin worth the risk of a change.
+
+  **Shadow first.** Keep serving the champion's answers, run the challenger on the same requests, and log both. The agreement rate, and which classes the two models swap, show how much the change would affect users before any user sees it.
+
+  **Promote in steps you can reverse.**
+
+  - Move the registry alias to the challenger's version (lesson B27-L1), export it, and build an image tagged with that version, such as `survey-topics:3`.
+  - Deploy a new Container Apps revision. In the default single revision mode, traffic moves once the new revision passes its readiness probe, and the old revision is shut down. In multiple revision mode, the old revision stays active, and you can split traffic, for example 80% to the old and 20% to the new.
+
+  **Roll back** by reversing the same steps: move the alias back, and send traffic back to the previous revision or redeploy the previous image tag. Container Apps keeps up to 100 inactive revisions. Keep old registry versions and old image tags for the same reason.
+
+  Write every promotion down: which versions, who, when, and the evidence. In the B27 lab, `promote 1` after version 2 is a rollback, and the endpoint's `model_version` field shows which one is live.
+
+why_it_matters: |
+  A team retrained a topic classifier and promoted it because its validation accuracy was 2 points higher than the old model's. Both scores came from different validation sets. On the next month's labelled answers the new model was 3 points worse. With the old image deleted, rolling back took a day of rebuilding. Comparing on the same recent data, and keeping the old image tag, would have avoided both problems.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      if challenger_val_accuracy > champion_val_accuracy:
+          client.delete_model_version("survey_topics", champion_version)
+          client.set_registered_model_alias("survey_topics", "champion", challenger_version)
+    annotations:
+      - find: "if challenger_val_accuracy > champion_val_accuracy:"
+        note: "Two scores from different data, and a win of any size counts."
+      - find: "client.delete_model_version(\"survey_topics\", champion_version)"
+        note: "Deletes the only rollback target."
+  strong:
+    code: |
+      from statistics import mean
+
+
+      def should_promote(champion: list[float], challenger: list[float], margin: float = 0.01) -> bool:
+          """Promote only if the challenger beats the champion on the same batches.
+
+          Args:
+              champion: The live model's score on each recent labelled batch.
+              challenger: The new model's score on the same batches, in the same order.
+              margin: Smallest mean gain worth a change.
+
+          Returns:
+              True if the mean gain is at least margin and the challenger wins most batches.
+
+          Raises:
+              ValueError: If the lists are empty or differ in length.
+          """
+          if not champion or len(champion) != len(challenger):
+              raise ValueError("need the same, non-empty set of batches for both models")
+          gain = mean(challenger) - mean(champion)
+          wins = sum(new > old for old, new in zip(champion, challenger))
+          return gain >= margin and wins > len(champion) / 2
+    annotations:
+      - find: "challenger: The new model's score on the same batches, in the same order."
+        note: "Paired scores on the same data: the only fair comparison."
+      - find: "gain = mean(challenger) - mean(champion)"
+        note: "The gain must clear a margin. Being positive is not enough."
+      - find: "wins = sum(new > old for old, new in zip(champion, challenger))"
+        note: "A win on one lucky batch does not count; it must win most of them."
+  takeaway: |
+    Compare champion and challenger on the same recent data, shadow before switching, promote by moving an alias and deploying a new revision, and keep old versions, images and revisions for rollback.
+
+exercises:
+  - id: B27-L6-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      A challenger scored 0.91 on its own validation set. The champion scored 0.89 on its own, older validation set. What do you do?
+    options:
+      - {id: a, text: "Score both on the same recent labelled data before deciding"}
+      - {id: b, text: "Promote the challenger: 0.91 is higher"}
+      - {id: c, text: "Keep the champion: older models are safer"}
+      - {id: d, text: "Average the two scores and promote if the average rises"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Scores from different data cannot rank two models: the gap may come from the data, not the models."}
+      - {id: r2, text: "Validation sets always overstate accuracy by 2 points."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The two numbers come from different data, so the 2-point gap may say nothing about the models."
+      - answer: c
+        feedback: "Age is not evidence. Measure both on the same data."
+      - answer: d
+        feedback: "Averaging scores from different data still compares unlike things."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. There is no fixed overstatement. The data differ, so the scores cannot be compared."
+    hints:
+      - "Where did each score come from?"
+      - "What else differs besides the model?"
+      - "Same data, then compare."
+    explanation: |
+      A fair comparison holds the data fixed. Score both models on the same recent labelled batches, then decide.
+
+  - id: B27-L6-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      In shadow mode, both models labelled the same five answers. What does this print?
+    code: |
+      champion = ["price", "delivery", "staff", "delivery", "price"]
+      challenger = ["price", "delivery", "delivery", "delivery", "staff"]
+      swaps = {}
+      for old, new in zip(champion, challenger):
+          if old != new:
+              swaps[(old, new)] = swaps.get((old, new), 0) + 1
+      agreement = sum(old == new for old, new in zip(champion, challenger)) / len(champion)
+      print(agreement, swaps)
+    answer: |
+      0.6 {('staff', 'delivery'): 1, ('price', 'staff'): 1}
+    wrong_answers:
+      - answer: "0.4 {('staff', 'delivery'): 1, ('price', 'staff'): 1}"
+        feedback: "Three of five labels match: positions 0, 1 and 3."
+      - answer: "0.6 {('delivery', 'staff'): 1, ('staff', 'price'): 1}"
+        feedback: "Each key is (champion, challenger): the old label first."
+    hints:
+      - "Count matching positions."
+      - "Positions 2 and 4 differ."
+      - "Keys are (old, new)."
+    explanation: |
+      The models agree on 3 of 5 answers. The swaps show where the challenger would change users' results: one staff answer becomes delivery, one price answer becomes staff.
+
+  - id: B27-L6-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Order the steps of replacing a live model.
+    items:
+      - {id: train, text: "Train the challenger and register it as a new version"}
+      - {id: compare, text: "Score champion and challenger on the same recent labelled batches"}
+      - {id: shadow, text: "Run the challenger in shadow on live requests and review the swaps"}
+      - {id: promote, text: "Move the champion alias, export, build an image tagged with the version"}
+      - {id: deploy, text: "Deploy a new revision and watch errors, latency and drift"}
+      - {id: rollback, text: "If the signals turn bad, move the alias back and return traffic to the old revision"}
+    answer: [train, compare, shadow, promote, deploy, rollback]
+    wrong_answers:
+      - answer: [train, promote, compare, shadow, deploy, rollback]
+        feedback: "Promotion comes after the evidence: comparison and shadow first."
+      - answer: [train, compare, promote, deploy, shadow, rollback]
+        feedback: "Shadow mode runs before the switch, while users still get the champion's answers."
+    hints:
+      - "Evidence before the switch."
+      - "Users should see nothing until promotion."
+      - "Rollback is the safety net after deployment."
+    explanation: |
+      Register, compare offline, shadow online, promote, deploy and watch. Rollback reverses the last two steps, which only works if old versions and revisions still exist.
+
+  - id: B27-L6-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `should_promote(champion, challenger, margin=0.01) -> bool`. The lists hold each model's score on the same recent labelled batches, in the same order.
+
+      - Promote when the challenger's mean is at least `margin` above the champion's, and the challenger scores higher on more than half the batches.
+      - Raise `ValueError` if the lists are empty or differ in length.
+    primer: |
+      `statistics.mean` averages a list, and `zip` pairs two lists position by position:
+
+      ```python
+      from statistics import mean
+      mean([2.0, 4.0])                                 # 3.0
+      list(zip([1, 2], [10, 20]))                      # [(1, 10), (2, 20)]
+      ```
+    starter: |
+      def should_promote(champion, challenger, margin=0.01):
+          return max(challenger) > max(champion)
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: should_promote
+          typed: true
+          docstring: true
+          message: "Give should_promote type hints and a docstring."
+      tests:
+        - id: clear_win
+          code: |
+            assert should_promote([0.80, 0.82, 0.81], [0.84, 0.85, 0.83]) is True
+          message: "A gain above the margin on most batches is a promotion."
+        - id: one_lucky_batch
+          code: |
+            assert should_promote([0.80, 0.82, 0.81], [0.95, 0.80, 0.79]) is False
+          message: "A big win on one batch is not enough: the challenger must win most batches."
+        - id: margin
+          code: |
+            assert should_promote([0.80, 0.80], [0.805, 0.805]) is False
+            assert should_promote([0.80, 0.80], [0.805, 0.805], margin=0.001) is True
+          message: "The mean gain must reach the margin."
+        - id: guards
+          code: |
+            for args in [([], []), ([0.8], [0.8, 0.9])]:
+                try:
+                    should_promote(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {args}")
+          message: "Raise ValueError for empty or unequal lists."
+    solution: |
+      from statistics import mean
+
+
+      def should_promote(champion: list[float], challenger: list[float], margin: float = 0.01) -> bool:
+          """Promote only if the challenger beats the champion on the same batches.
+
+          Args:
+              champion: Live model's score per batch.
+              challenger: New model's score on the same batches.
+              margin: Smallest mean gain worth a change.
+
+          Returns:
+              True if the mean gain reaches margin and the challenger wins most batches.
+
+          Raises:
+              ValueError: If the lists are empty or differ in length.
+          """
+          if not champion or len(champion) != len(challenger):
+              raise ValueError("need the same, non-empty set of batches for both models")
+          gain = mean(challenger) - mean(champion)
+          wins = sum(new > old for old, new in zip(champion, challenger))
+          return gain >= margin and wins > len(champion) / 2
+    seeded_bugs:
+      - |
+        from statistics import mean
+
+
+        def should_promote(champion: list[float], challenger: list[float], margin: float = 0.01) -> bool:
+            """Looks only at the mean."""
+            if not champion or len(champion) != len(challenger):
+                raise ValueError("bad lists")
+            return mean(challenger) - mean(champion) >= margin
+      - |
+        from statistics import mean
+
+
+        def should_promote(champion: list[float], challenger: list[float], margin: float = 0.01) -> bool:
+            """Ignores the margin."""
+            if not champion or len(champion) != len(challenger):
+                raise ValueError("bad lists")
+            wins = sum(new > old for old, new in zip(champion, challenger))
+            return mean(challenger) > mean(champion) and wins > len(champion) / 2
+    wrong_answers:
+      - answer: |
+          from statistics import mean
+
+
+          def should_promote(champion: list[float], challenger: list[float], margin: float = 0.01) -> bool:
+              """Looks only at the mean."""
+              if not champion or len(champion) != len(challenger):
+                  raise ValueError("bad lists")
+              return mean(challenger) - mean(champion) >= margin
+        triggers: one_lucky_batch
+    hints:
+      - "Guard the lists first."
+      - "Mean gain: `mean(challenger) - mean(champion)`."
+      - "Count batches where the challenger is higher, and compare with half."
+    explanation: |
+      The mean alone can be carried by one lucky batch. Requiring wins on most batches as well guards against that, and the margin keeps you from swapping models for noise.
+
+  - id: B27-L6-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `shadow_report(champion, challenger) -> dict` from the two models' labels on the same requests.
+
+      - `agreement`: the share of positions where the labels match, rounded to 4 places.
+      - `top_swap`: the most frequent `(champion_label, challenger_label)` pair among disagreements, as a tuple, or `None` if they always agree. Break ties by the smallest pair in sorted order.
+      - Raise `ValueError` if the lists are empty or differ in length.
+    starter: |
+      def shadow_report(champion, challenger):
+          return {"agreement": 1.0, "top_swap": None}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: shadow_report
+          typed: true
+          docstring: true
+          message: "Give shadow_report type hints and a docstring."
+      tests:
+        - id: report
+          code: |
+            champ = ["price", "staff", "staff", "delivery", "price", "staff"]
+            chall = ["price", "delivery", "delivery", "delivery", "staff", "staff"]
+            got = shadow_report(champ, chall)
+            assert got == {"agreement": 0.5, "top_swap": ("staff", "delivery")}, got
+          message: "Agreement is the matching share; top_swap is the commonest (champion, challenger) pair."
+        - id: ties
+          code: |
+            got = shadow_report(["staff", "price"], ["price", "delivery"])
+            assert got == {"agreement": 0.0, "top_swap": ("price", "delivery")}, got
+          message: "Break ties by the smallest pair in sorted order."
+        - id: agree
+          code: |
+            assert shadow_report(["a", "b"], ["a", "b"]) == {"agreement": 1.0, "top_swap": None}
+          message: "With no disagreements, top_swap is None."
+        - id: guards
+          code: |
+            for args in [([], []), (["a"], ["a", "b"])]:
+                try:
+                    shadow_report(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {args}")
+          message: "Raise ValueError for empty or unequal lists."
+    solution: |
+      def shadow_report(champion: list[str], challenger: list[str]) -> dict[str, object]:
+          """Agreement rate and the commonest label swap between two models.
+
+          Args:
+              champion: Live model's labels.
+              challenger: Shadow model's labels for the same requests.
+
+          Returns:
+              {"agreement": float, "top_swap": (old, new) or None}.
+
+          Raises:
+              ValueError: If the lists are empty or differ in length.
+          """
+          if not champion or len(champion) != len(challenger):
+              raise ValueError("need two non-empty lists of the same length")
+          swaps: dict[tuple[str, str], int] = {}
+          for old, new in zip(champion, challenger):
+              if old != new:
+                  swaps[(old, new)] = swaps.get((old, new), 0) + 1
+          agreement = round(1 - sum(swaps.values()) / len(champion), 4)
+          top = min(swaps, key=lambda pair: (-swaps[pair], pair)) if swaps else None
+          return {"agreement": agreement, "top_swap": top}
+    seeded_bugs:
+      - |
+        def shadow_report(champion: list[str], challenger: list[str]) -> dict[str, object]:
+            """Keys the swap the wrong way round."""
+            if not champion or len(champion) != len(challenger):
+                raise ValueError("bad lists")
+            swaps: dict[tuple[str, str], int] = {}
+            for old, new in zip(champion, challenger):
+                if old != new:
+                    swaps[(new, old)] = swaps.get((new, old), 0) + 1
+            agreement = round(1 - sum(swaps.values()) / len(champion), 4)
+            top = min(swaps, key=lambda pair: (-swaps[pair], pair)) if swaps else None
+            return {"agreement": agreement, "top_swap": top}
+      - |
+        def shadow_report(champion: list[str], challenger: list[str]) -> dict[str, object]:
+            """Breaks ties by insertion order."""
+            if not champion or len(champion) != len(challenger):
+                raise ValueError("bad lists")
+            swaps: dict[tuple[str, str], int] = {}
+            for old, new in zip(champion, challenger):
+                if old != new:
+                    swaps[(old, new)] = swaps.get((old, new), 0) + 1
+            agreement = round(1 - sum(swaps.values()) / len(champion), 4)
+            top = max(swaps, key=lambda pair: swaps[pair]) if swaps else None
+            return {"agreement": agreement, "top_swap": top}
+    wrong_answers:
+      - answer: |
+          def shadow_report(champion: list[str], challenger: list[str]) -> dict[str, object]:
+              """Keys the swap the wrong way round."""
+              if not champion or len(champion) != len(challenger):
+                  raise ValueError("bad lists")
+              swaps: dict[tuple[str, str], int] = {}
+              for old, new in zip(champion, challenger):
+                  if old != new:
+                      swaps[(new, old)] = swaps.get((new, old), 0) + 1
+              agreement = round(1 - sum(swaps.values()) / len(champion), 4)
+              top = min(swaps, key=lambda pair: (-swaps[pair], pair)) if swaps else None
+              return {"agreement": agreement, "top_swap": top}
+        triggers: report
+    hints:
+      - "Count disagreements as (old, new) pairs in a dict."
+      - "Agreement is 1 minus disagreements over the total."
+      - "`min(swaps, key=lambda p: (-swaps[p], p))` picks the commonest, then the smallest."
+    explanation: |
+      The top swap tells you which users would notice the change first. A fixed tie-break makes the report the same on every run, so two reports can be compared.
+
+  - id: B27-L6-E6
+    type: design
+    difficulty: 4
+    prompt: |
+      Plan for rolling back the survey classifier within five minutes if a new version misbehaves.
+    slots:
+      - id: registry
+        label: Old model versions
+        options:
+          - {id: keep, text: "Keep them, and log every alias move with who, when and why"}
+          - {id: delete, text: "Delete them after each promotion to keep the registry tidy"}
+          - {id: overwrite, text: "Overwrite version 1 with each new model"}
+        answer: keep
+      - id: images
+        label: Container images
+        options:
+          - {id: tagged, text: "Tag each image with its model version and keep the old tags"}
+          - {id: latest, text: "Push every build as latest"}
+          - {id: rebuild, text: "Rebuild the old image from source when needed"}
+        answer: tagged
+      - id: revisions
+        label: Container Apps revisions
+        options:
+          - {id: multiple, text: "Multiple revision mode: keep the old revision active and move traffic back if needed"}
+          - {id: single, text: "Single revision mode only, with no other plan"}
+          - {id: delete, text: "Delete the app and recreate it on a problem"}
+        answer: multiple
+    model_answer: |
+      - Keep every registered version and an audit trail of alias moves: the rollback target must exist and be known.
+      - Tag images by model version, so the previous image is ready to deploy.
+      - Multiple revision mode keeps the old revision able to take traffic again within minutes.
+    wrong_answers:
+      - answer: {registry: delete}
+        feedback: "A deleted version cannot be promoted back."
+      - answer: {registry: overwrite}
+        feedback: "Overwriting destroys the old model and makes version numbers meaningless."
+      - answer: {images: latest}
+        feedback: "latest moves with every build, so the previous image has no name to deploy."
+      - answer: {images: rebuild}
+        feedback: "A rebuild takes time and may not reproduce the old image if dependencies changed."
+      - answer: {revisions: single}
+        feedback: "Single revision mode shuts down the old revision, so a rollback means deploying the old image as a new revision, which must provision and pass its probes first."
+      - answer: {revisions: delete}
+        feedback: "Recreating the app is the slowest possible rollback, and it loses settings."
+    hints:
+      - "A rollback needs something to roll back to."
+      - "Can you name the previous image?"
+      - "Which revision mode keeps the old revision able to serve?"
+    explanation: |
+      Each layer keeps its previous state: registry versions, image tags and an active old revision. Rollback is then a few commands, not a rebuild.
+
+recap:
+  - front: "Champion and challenger"
+    back: "Compare on the same recent labelled batches. Promote only for a gain above a margin, won on most batches."
+  - front: "Shadow mode"
+    back: "Serve the champion, run the challenger on the same requests, log both, and review agreement and swaps."
+  - front: "Promotion"
+    back: "Move the alias, export, build an image tagged with the version, deploy a new revision."
+  - front: "Rollback"
+    back: "Move the alias back and return traffic to the old revision, or redeploy the old image tag. Keep old versions, tags and revisions."
+
+claims:
+  - claim: "Azure Container Apps revisions: single revision mode is the default, moves traffic once the new revision is ready and deprovisions old revisions; multiple revision mode keeps several active and splits traffic by percentage; deployment labels mode is in preview; up to 100 inactive revisions are kept."
+    status: search-only
+    source: "Microsoft Learn, 'Update and deploy changes in Azure Container Apps', ms.date 2025-10-27, read November 2026."
+
+practical:
+  platform: laptop
+  title: Register, serve, containerise and monitor a model
+  intro: |
+    Work in `labs/serving/` in this repository. You register model versions in MLflow and serve the champion through an alias, write a FastAPI service with a health route and a validated prediction route, package it as a Docker image, and measure drift with PSI. You need Python 3.12, Docker and the lab's dev extras on the laptop. Deploying to Azure is optional and needs a subscription. The running service and its README are the roadmap's evidence for month 18: one deployed model.
+  steps:
+    - "Run `cd labs/serving`, create a virtual environment, then `pip install -e \".[dev]\"`. Run `pytest`: most tests fail with NotImplementedError. Read `README.md` and every file in `src/serve_lab/`."
+    - "Write `psi` and `drift_status` in `drift.py` (lesson B27-L5). Run `pytest tests/test_drift_and_model.py`."
+    - "Write `register`, `promote` and `load_alias` in `registry.py` (lesson B27-L1), then `create_app` in `api.py` (lesson B27-L2). Run `pytest`: every test passes."
+    - "Set `MLFLOW_TRACKING_URI=sqlite:///mlflow.db`. Run `python -m serve_lab train` twice, once with `--c 0.01`, then `promote 1`, `export` and `serve`. Open `http://127.0.0.1:8000/docs` and send a request."
+    - "Build and run the image (lesson B27-L3): `docker build -t survey-topics:1 .`, then `docker run --rm -p 8000:8000 survey-topics:1`. Call `/health` and `/predict` and read the JSON log line."
+    - "Run `python -m serve_lab drift` and compare with the README's reference table. Then promote version 2, export, rebuild as `survey-topics:2`, and roll back to version 1 (lesson B27-L6)."
+    - "Optional: deploy with `az containerapp up` (lesson B27-L4), call the public URL, then delete the resource group. Write your README: the registry steps, the API contract, the image, the drift report and the rollback. Push it to a new GitHub repository."
