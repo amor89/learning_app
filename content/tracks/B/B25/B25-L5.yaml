@@ -1,0 +1,472 @@
+id: B25-L5
+title: Multi-head attention and position information
+
+concept: |
+  One attention layer gives each query one weighting over the keys. **Multi-head attention** runs `h` smaller attentions side by side, so one head can follow the subject while another follows a negation (PyTorch 2.15):
+
+  1. Project the input `X` of shape `(N, L, d)` with three learned `nn.Linear(d, d)` layers into Q, K and V.
+  2. Split `d` into `h` heads of `d // h`: `x.reshape(N, L, h, d // h).transpose(1, 2)` gives `(N, h, L, d // h)`.
+  3. Attend within each head, as in lesson B25-L3.
+  4. Merge: transpose back, reshape to `(N, L, d)`, and apply one more `nn.Linear(d, d)`.
+
+  `nn.MultiheadAttention(embed_dim=d, num_heads=h, batch_first=True)` does all four. It holds `4 * d * d + 4 * d` parameters whatever the number of heads: 288 for `d = 8` with 2 heads or 4, and 1,050,624 for `d = 512`. A `d` that does not divide by `h` raises "embed_dim must be divisible by num_heads".
+
+  **Attention cannot see order.** Shuffle the input tokens and the outputs come back shuffled in the same way, with the same values: attention compares contents, not places. In a check, permuting five tokens permuted the outputs exactly. "not good" and "good not" look identical. So add position information to the embeddings before the first layer:
+
+  - **Learned positions:** `nn.Embedding(max_len, d)` indexed by positions 0 to `L - 1` and added to the token embeddings. It cannot go beyond `max_len`.
+  - **Sinusoidal positions** (Vaswani and others, 2017): `PE[pos, 2i] = sin(pos / 10000 ** (2i / d))` and `PE[pos, 2i + 1] = cos(...)` at the same angle. No weights, and defined for any position, though the model has not trained on positions beyond its longest training text. For `d = 4`, position 1 is `[0.8415, 0.5403, 0.01, 1.0]`.
+
+why_it_matters: |
+  A transformer classifier of complaints treated "not resolved" and "resolved, not" alike and missed many unresolved cases. Its embeddings had no position information: the team had dropped the positional layer while tidying the model code, and nothing failed. A test that shuffles the tokens and expects a different prediction would have caught it at once.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      class Encoder(nn.Module):
+          def __init__(self, vocab_size, d):
+              super().__init__()
+              self.tokens = nn.Embedding(vocab_size, d, padding_idx=0)
+              self.attn = nn.MultiheadAttention(d, num_heads=5)
+
+          def forward(self, ids):
+              x = self.tokens(ids)
+              return self.attn(x, x, x)[0]
+    annotations:
+      - find: "self.attn = nn.MultiheadAttention(d, num_heads=5)"
+        note: "No batch_first, and d must divide by 5: with d = 64 this raises."
+      - find: "x = self.tokens(ids)"
+        note: "No positions: word order is invisible to everything after this line."
+  strong:
+    code: |
+      import numpy as np
+      import torch
+      from torch import nn
+
+
+      def sinusoidal_positions(n: int, d: int) -> np.ndarray:
+          """Sinusoidal position encodings, shape (n, d), with d even."""
+          pos = np.arange(n)[:, None]
+          angle = pos / 10000 ** (np.arange(0, d, 2)[None, :] / d)
+          pe = np.zeros((n, d))
+          pe[:, 0::2], pe[:, 1::2] = np.sin(angle), np.cos(angle)
+          return pe
+
+
+      class Encoder(nn.Module):
+          """Token embeddings plus learned positions, then multi-head self-attention."""
+
+          def __init__(self, vocab_size: int, d: int, heads: int, max_len: int) -> None:
+              super().__init__()
+              if d % heads:
+                  raise ValueError(f"d={d} must divide by heads={heads}")
+              self.tokens = nn.Embedding(vocab_size, d, padding_idx=0)
+              self.positions = nn.Embedding(max_len, d)
+              self.attn = nn.MultiheadAttention(d, heads, batch_first=True)
+
+          def forward(self, ids: torch.Tensor) -> torch.Tensor:
+              where = torch.arange(ids.shape[1], device=ids.device)
+              x = self.tokens(ids) + self.positions(where)
+              return self.attn(x, x, x, key_padding_mask=ids == 0)[0]
+    annotations:
+      - find: "angle = pos / 10000 ** (np.arange(0, d, 2)[None, :] / d)"
+        note: "One frequency per pair of columns, from fast to slow."
+      - find: "pe[:, 0::2], pe[:, 1::2] = np.sin(angle), np.cos(angle)"
+        note: "Sine in even columns, cosine in odd columns."
+      - find: "raise ValueError(f\"d={d} must divide by heads={heads}\")"
+        note: "Fail early with a clear message."
+      - find: "x = self.tokens(ids) + self.positions(where)"
+        note: "Each token vector now carries its position."
+      - find: "return self.attn(x, x, x, key_padding_mask=ids == 0)[0]"
+        note: "Padding is ignored: True in key_padding_mask means ignore (lesson B25-L4)."
+  takeaway: |
+    Multi-head attention splits d into heads, attends in each and merges them. Attention ignores order, so add learned or sinusoidal positions to the embeddings.
+
+exercises:
+  - id: B25-L5-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Why does a transformer add position information to its token embeddings?
+    options:
+      - {id: a, text: "Attention compares contents only, so without positions a shuffled sentence gives the same outputs, shuffled"}
+      - {id: b, text: "To make the embeddings larger"}
+      - {id: c, text: "To mark which tokens are padding"}
+      - {id: d, text: "Because softmax needs positive inputs"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Without positions, \"not good\" and \"good not\" are the same set of vectors to attention."}
+      - {id: r2, text: "Positions speed up the matrix products."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Positions are added, so the width stays d."
+      - answer: c
+        feedback: "Padding is handled by a mask (lesson B25-L4), not by positions."
+      - answer: d
+        feedback: "Softmax accepts any real inputs."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. It is about word order, not speed."
+    hints:
+      - "What does attention compare?"
+      - "What happens to outputs if you shuffle the inputs?"
+      - "Order is invisible without positions."
+    explanation: |
+      Attention is a function of contents. Adding a position vector to each token makes the same word at different places look different.
+
+  - id: B25-L5-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.15)
+    code: |
+      import torch
+      from torch import nn
+
+      x = torch.zeros(2, 5, 8)
+      heads = x.reshape(2, 5, 2, 4).transpose(1, 2)
+      two = sum(p.numel() for p in nn.MultiheadAttention(8, 2, batch_first=True).parameters())
+      four = sum(p.numel() for p in nn.MultiheadAttention(8, 4, batch_first=True).parameters())
+      print(tuple(heads.shape), two, four)
+    answer: |
+      (2, 2, 5, 4) 288 288
+    wrong_answers:
+      - answer: "(2, 5, 2, 4) 288 288"
+        feedback: "transpose(1, 2) swaps the length and head dimensions: (N, h, L, d // h)."
+      - answer: "(2, 2, 5, 4) 288 576"
+        feedback: "More heads split the same d into smaller pieces. The projections stay d by d."
+    hints:
+      - "reshape gives (2, 5, 2, 4). Then swap dimensions 1 and 2."
+      - "Parameters: 4 * d * d + 4 * d with d = 8."
+      - "Does the head count appear in that formula?"
+    explanation: |
+      Heads split the width, so the four projections stay 8 by 8 with biases: 288 parameters for any head count that divides 8.
+
+  - id: B25-L5-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Split a `(N, L, d)` tensor into heads, and build attention that reads `(batch, length, features)`.
+    template: |
+      heads = x.reshape(N, L, h, d // h).[[g1]](1, 2)
+      attn = nn.MultiheadAttention(64, 4, [[g2]]=True)
+    gaps:
+      g1: {accepted: [transpose]}
+      g2: {accepted: [batch_first]}
+    wrong_answers:
+      - answer: {g1: reshape, g2: batch_first}
+        feedback: "reshape cannot move the head dimension in front of the length. transpose(1, 2) swaps them."
+    hints:
+      - "Which method swaps two dimensions?"
+      - "Which argument puts batch first?"
+      - "`transpose` and `batch_first`."
+    explanation: |
+      `transpose(1, 2)` gives `(N, h, L, d // h)`, so each head attends over the full length. `batch_first=True` matches the usual layout.
+
+  - id: B25-L5-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `split_heads(x, n_heads) -> np.ndarray` for one sequence.
+
+      - `x` has shape `(L, d)`. Return shape `(n_heads, L, d // n_heads)`, where head `k` holds columns `k * dh` to `(k + 1) * dh - 1`.
+      - Raise `ValueError` when `x` is not 2-D, `n_heads` is below 1, or `d` does not divide by `n_heads`.
+    primer: |
+      In NumPy, `arr.transpose(1, 0, 2)` reorders axes, like PyTorch's `permute`: the new axis 0 is the old axis 1.
+
+      ```python
+      a = np.zeros((5, 2, 4))
+      a.transpose(1, 0, 2).shape    # (2, 5, 4)
+      ```
+    starter: |
+      import numpy as np
+
+
+      def split_heads(x, n_heads):
+          return x.reshape(n_heads, x.shape[0], -1)
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+
+        _X = np.arange(24.0).reshape(3, 8)
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: split_heads
+          typed: true
+          docstring: true
+          message: "Give split_heads type hints and a docstring."
+      tests:
+        - id: columns
+          code: |
+            out = split_heads(_X, 2)
+            assert out.shape == (2, 3, 4), out.shape
+            assert np.array_equal(out[0], _X[:, :4]) and np.array_equal(out[1], _X[:, 4:]), out
+          message: "Head k takes columns k * dh to (k + 1) * dh - 1 of every row."
+        - id: four_heads
+          code: |
+            out = split_heads(_X, 4)
+            assert out.shape == (4, 3, 2) and np.array_equal(out[3], _X[:, 6:]), out
+          message: "Reshape to (L, h, dh), then move the head axis first."
+        - id: guards
+          code: |
+            for x, h in [(_X, 3), (_X, 0), (np.ones(8), 2)]:
+                try:
+                    split_heads(x, h)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for shape {x.shape}, heads {h}")
+          message: "Raise ValueError for non-2-D input, heads below 1, or a width that does not divide."
+    solution: |
+      import numpy as np
+
+
+      def split_heads(x: np.ndarray, n_heads: int) -> np.ndarray:
+          """Split the width of one sequence into attention heads.
+
+          Args:
+              x: Shape (length, d).
+              n_heads: Number of heads. d must divide by it.
+
+          Returns:
+              Shape (n_heads, length, d // n_heads).
+
+          Raises:
+              ValueError: If the shapes do not allow the split.
+          """
+          if x.ndim != 2 or n_heads < 1 or x.shape[1] % n_heads:
+              raise ValueError(f"cannot split shape {x.shape} into {n_heads} heads")
+          length, d = x.shape
+          return x.reshape(length, n_heads, d // n_heads).transpose(1, 0, 2)
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def split_heads(x: np.ndarray, n_heads: int) -> np.ndarray:
+            """Reshapes straight to (h, L, dh): mixes rows across heads."""
+            if x.ndim != 2 or n_heads < 1 or x.shape[1] % n_heads:
+                raise ValueError("cannot split")
+            length, d = x.shape
+            return x.reshape(n_heads, length, d // n_heads)
+      - |
+        import numpy as np
+
+
+        def split_heads(x: np.ndarray, n_heads: int) -> np.ndarray:
+            """No divisibility check: drops the leftover columns."""
+            if x.ndim != 2 or n_heads < 1:
+                raise ValueError("cannot split")
+            length, d = x.shape
+            dh = d // n_heads
+            return x[:, : dh * n_heads].reshape(length, n_heads, dh).transpose(1, 0, 2)
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def split_heads(x: np.ndarray, n_heads: int) -> np.ndarray:
+              """Reshapes straight to (h, L, dh): mixes rows across heads."""
+              if x.ndim != 2 or n_heads < 1 or x.shape[1] % n_heads:
+                  raise ValueError("cannot split")
+              length, d = x.shape
+              return x.reshape(n_heads, length, d // n_heads)
+        triggers: columns
+    hints:
+      - "Check `x.shape[1] % n_heads` first."
+      - "Reshape to `(length, n_heads, d // n_heads)`."
+      - "Then `transpose(1, 0, 2)` to put heads first."
+    explanation: |
+      Reshaping to `(L, h, dh)` cuts each row into consecutive column blocks, and the transpose gathers each block across rows. Reshaping straight to `(h, L, dh)` splits the rows instead, mixing tokens between heads.
+
+  - id: B25-L5-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `sinusoidal_positions(n, d) -> np.ndarray`, shape `(n, d)`.
+
+      - For position `pos` and `i` in `0, 2, 4, ...`: `angle = pos / 10000 ** (i / d)`. Column `i` holds `sin(angle)` and column `i + 1` holds `cos(angle)`.
+      - Raise `ValueError` when `n` is below 1 or `d` is not a positive even number.
+    starter: |
+      import numpy as np
+
+
+      def sinusoidal_positions(n, d):
+          return np.zeros((n, d))
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: sinusoidal_positions
+          typed: true
+          docstring: true
+          message: "Give sinusoidal_positions type hints and a docstring."
+      tests:
+        - id: values
+          code: |
+            pe = sinusoidal_positions(3, 4)
+            expected = [[0.0, 1.0, 0.0, 1.0], [0.8415, 0.5403, 0.01, 1.0], [0.9093, -0.4161, 0.02, 0.9998]]
+            assert pe.shape == (3, 4) and np.allclose(pe, expected, atol=1e-4), pe.round(4)
+          message: "Even columns sin(pos / 10000 ** (i / d)), odd columns cos of the same angle."
+        - id: wide
+          code: |
+            pe = sinusoidal_positions(50, 16)
+            assert pe.shape == (50, 16) and np.allclose(pe[:, 0], np.sin(np.arange(50)))
+            assert np.allclose(pe ** 2 @ np.ones(16), 8.0)
+          message: "Each sin and cos pair satisfies sin^2 + cos^2 = 1, so every row's squares sum to d / 2."
+        - id: guards
+          code: |
+            for n, d in [(0, 4), (3, 5), (3, 0)]:
+                try:
+                    sinusoidal_positions(n, d)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for n={n}, d={d}")
+          message: "Raise ValueError for n below 1 or d that is not a positive even number."
+    solution: |
+      import numpy as np
+
+
+      def sinusoidal_positions(n: int, d: int) -> np.ndarray:
+          """Sinusoidal position encodings.
+
+          Args:
+              n: Number of positions.
+              d: Width, a positive even number.
+
+          Returns:
+              Shape (n, d): sine in even columns, cosine in odd columns.
+
+          Raises:
+              ValueError: If n is below 1 or d is not positive and even.
+          """
+          if n < 1 or d < 2 or d % 2:
+              raise ValueError(f"need n >= 1 and an even d >= 2, got {n} and {d}")
+          pos = np.arange(n)[:, None]
+          angle = pos / 10000 ** (np.arange(0, d, 2)[None, :] / d)
+          pe = np.zeros((n, d))
+          pe[:, 0::2] = np.sin(angle)
+          pe[:, 1::2] = np.cos(angle)
+          return pe
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def sinusoidal_positions(n: int, d: int) -> np.ndarray:
+            """Uses the pair index, not 2i, in the exponent."""
+            if n < 1 or d < 2 or d % 2:
+                raise ValueError("bad sizes")
+            pos = np.arange(n)[:, None]
+            angle = pos / 10000 ** (np.arange(d // 2)[None, :] / d)
+            pe = np.zeros((n, d))
+            pe[:, 0::2] = np.sin(angle)
+            pe[:, 1::2] = np.cos(angle)
+            return pe
+      - |
+        import numpy as np
+
+
+        def sinusoidal_positions(n: int, d: int) -> np.ndarray:
+            """Sine in both columns of each pair."""
+            if n < 1 or d < 2 or d % 2:
+                raise ValueError("bad sizes")
+            pos = np.arange(n)[:, None]
+            angle = pos / 10000 ** (np.arange(0, d, 2)[None, :] / d)
+            pe = np.zeros((n, d))
+            pe[:, 0::2] = np.sin(angle)
+            pe[:, 1::2] = np.sin(angle)
+            return pe
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def sinusoidal_positions(n: int, d: int) -> np.ndarray:
+              """Uses the pair index, not 2i, in the exponent."""
+              if n < 1 or d < 2 or d % 2:
+                  raise ValueError("bad sizes")
+              pos = np.arange(n)[:, None]
+              angle = pos / 10000 ** (np.arange(d // 2)[None, :] / d)
+              pe = np.zeros((n, d))
+              pe[:, 0::2] = np.sin(angle)
+              pe[:, 1::2] = np.cos(angle)
+              return pe
+        triggers: values
+    hints:
+      - "`pos` as a column: `np.arange(n)[:, None]`; `i` as a row: `np.arange(0, d, 2)[None, :]`."
+      - "`angle = pos / 10000 ** (i / d)`, shape (n, d // 2)."
+      - "Fill `pe[:, 0::2]` with sin and `pe[:, 1::2]` with cos."
+    explanation: |
+      Each pair of columns is a sine and cosine at one frequency, from fast in the first pair to slow in the last. Broadcasting a column of positions against a row of exponents builds the whole table at once.
+
+  - id: B25-L5-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    packages: [numpy]
+    prompt: |
+      After merging heads, each token's vector holds pieces of other tokens' vectors. `merge_heads` should undo `split_heads`. Tap the line responsible, then fix it.
+    code: |
+      import numpy as np
+
+
+      def merge_heads(heads):
+          n_heads, length, dh = heads.shape
+          return heads.reshape(length, n_heads * dh)
+    bug_lines: [6]
+    fix_checker:
+      kind: python
+      setup: |
+        import numpy as np
+      tests:
+        - id: round_trip
+          code: |
+            x = np.arange(24.0).reshape(3, 8)
+            heads = x.reshape(3, 2, 4).transpose(1, 0, 2)
+            assert np.array_equal(merge_heads(heads), x), merge_heads(heads)
+          message: "Move the head axis back next to the width first: transpose(1, 0, 2), then reshape."
+    fix_solution: |
+      import numpy as np
+
+
+      def merge_heads(heads):
+          n_heads, length, dh = heads.shape
+          return heads.transpose(1, 0, 2).reshape(length, n_heads * dh)
+    wrong_answers:
+      - lines: [5]
+        feedback: "Reading the three sizes is right. The data is reshaped in the wrong order."
+    hints:
+      - "What axis order does split_heads produce?"
+      - "reshape reads values in memory order: heads first, then rows."
+      - "Transpose back to (L, h, dh) before reshaping."
+    explanation: |
+      `reshape` takes values in their current order, all of head 0 first, so rows of the result mix tokens. Transposing to `(length, n_heads, dh)` first puts each token's heads next to each other, and the reshape then rebuilds its vector.
+
+recap:
+  - front: "Multi-head attention steps"
+    back: "Project to Q, K, V; split d into h heads of d // h; attend per head; merge and project with Linear(d, d)."
+  - front: "nn.MultiheadAttention parameters"
+    back: "4 * d * d + 4 * d, whatever the number of heads. d must divide by num_heads."
+  - front: "Why positions"
+    back: "Attention ignores order: shuffled inputs give the same outputs, shuffled. Add learned or sinusoidal positions to the embeddings."
+  - front: "Sinusoidal positions"
+    back: "PE[pos, 2i] = sin(pos / 10000 ** (2i / d)), PE[pos, 2i + 1] = cos of the same angle."
+
+claims:
+  - claim: "PyTorch 2.15: nn.MultiheadAttention(8, h) has 288 parameters for h = 2 and 4, and 1,050,624 for d = 512; embed_dim not divisible by num_heads raises 'embed_dim must be divisible by num_heads'; without positions, permuting the input permutes the output exactly; reshape and transpose(1, 2) give (2, 2, 5, 4)."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), November 2026."
+  - claim: "The sinusoidal encoding PE(pos, 2i) = sin(pos / 10000^(2i/d)), PE(pos, 2i+1) = cos(pos / 10000^(2i/d)) comes from Vaswani and others, Attention Is All You Need (2017)."
+    status: search-only
+    source: "Search results citing arXiv 1706.03762, November 2026. arxiv.org was blocked in the build session. Values for d = 4 computed locally."

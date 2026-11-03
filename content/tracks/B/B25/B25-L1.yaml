@@ -1,0 +1,432 @@
+id: B25-L1
+title: Tokens, vocabularies and embeddings
+
+concept: |
+  A network needs numbers. Text becomes numbers in two steps (PyTorch 2.15).
+
+  **Tokenise.** Split the text into tokens and map each one to an integer ID from a **vocabulary** built on training text. Production models use subword tokenisers, which split rare words into frequent pieces. This module uses whole words, so the arithmetic stays visible. Reserve ID 0 for `<pad>` and ID 1 for `<unk>`, the stand-in for words the vocabulary lacks. Pad every sequence in a batch to the same length with 0:
+
+  ```python
+  vocab = {"<pad>": 0, "<unk>": 1, "price": 2, "too": 3, "high": 4, "staff": 5, "great": 6}
+  encode("Price too high", vocab, length=5)      # [2, 3, 4, 0, 0]
+  encode("Staff were great", vocab, length=5)    # [5, 1, 6, 0, 0]
+  ```
+
+  **Embed.** `nn.Embedding(num_embeddings, embedding_dim, padding_idx=0)` holds a weight table of shape `(vocabulary size, dim)`. Looking up ID `i` returns row `i`, the same result as multiplying a one-hot vector by the table, without building the one-hot vector. A batch of IDs shaped `(N, L)` becomes `(N, L, dim)`. Training learns the rows like any other weights (lesson B23-L3).
+
+  - IDs must be integers. Float IDs raise "Expected tensor for argument #1 'indices' to have one of the following scalar types: Long, Int".
+  - An ID at or beyond the vocabulary size raises "index out of range in self". It happens when IDs built with one vocabulary meet a model trained with another.
+  - With `padding_idx=0`, row 0 starts at zero and receives no gradient, so padding never learns a meaning.
+
+  Build the vocabulary from training text only, as with any preprocessing (lesson B10-L2), and save it with the model. Without it, the IDs mean nothing.
+
+why_it_matters: |
+  A sentiment model for open-ended answers lost twelve points of accuracy after a retrain, with no change to the model code. The retrain had rebuilt the vocabulary from new text, so "price" moved from ID 214 to ID 197, while the serving code still used the old vocabulary file. Saving the vocabulary beside the weights, and checking both carry the same version, made the mismatch impossible.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      def encode(text, vocab):
+          return [vocab[word] for word in text.split()]
+    annotations:
+      - find: "return [vocab[word] for word in text.split()]"
+        note: "An unseen word raises KeyError, case is not normalised, and nothing pads or truncates."
+  strong:
+    code: |
+      PAD, UNK = "<pad>", "<unk>"
+
+
+      def build_vocab(train_texts: list[str], min_count: int = 1) -> dict[str, int]:
+          """Word IDs from training text: 0 for padding, 1 for unknown words, then by frequency.
+
+          Raises:
+              ValueError: If min_count is below 1.
+          """
+          if min_count < 1:
+              raise ValueError(f"min_count must be at least 1, got {min_count}")
+          counts: dict[str, int] = {}
+          for text in train_texts:
+              for word in text.lower().split():
+                  counts[word] = counts.get(word, 0) + 1
+          kept = sorted((w for w, c in counts.items() if c >= min_count), key=lambda w: (-counts[w], w))
+          return {PAD: 0, UNK: 1, **{word: i for i, word in enumerate(kept, start=2)}}
+
+
+      def encode(text: str, vocab: dict[str, int], length: int) -> list[int]:
+          """Token IDs for one text, truncated or padded to length.
+
+          Raises:
+              ValueError: If length is below 1.
+          """
+          if length < 1:
+              raise ValueError(f"length must be at least 1, got {length}")
+          ids = [vocab.get(word, vocab[UNK]) for word in text.lower().split()][:length]
+          return ids + [vocab[PAD]] * (length - len(ids))
+    annotations:
+      - find: "kept = sorted((w for w, c in counts.items() if c >= min_count), key=lambda w: (-counts[w], w))"
+        note: "Frequent words first, ties by spelling: the same text always gives the same IDs."
+      - find: "return {PAD: 0, UNK: 1, **{word: i for i, word in enumerate(kept, start=2)}}"
+        note: "Words start at 2, so no word shares an ID with padding or unknown."
+      - find: "ids = [vocab.get(word, vocab[UNK]) for word in text.lower().split()][:length]"
+        note: "Unseen words map to <unk> instead of raising, and long texts are cut."
+      - find: "return ids + [vocab[PAD]] * (length - len(ids))"
+        note: "Short texts are padded to a fixed length."
+  takeaway: |
+    Build the vocabulary on training text with reserved IDs for padding and unknown words, encode to fixed-length integer IDs, and save the vocabulary with the model.
+
+exercises:
+  - id: B25-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Why does a vocabulary reserve an `<unk>` ID?
+    options:
+      - {id: a, text: "So that words not seen in training map to one known ID instead of raising an error"}
+      - {id: b, text: "So that rare words get extra weight"}
+      - {id: c, text: "To mark the end of each sequence"}
+      - {id: d, text: "To fill short sequences up to a fixed length"}
+    answer: a
+    reasons:
+      - {id: r1, text: "New text always contains words the training text lacked, and every token needs a valid ID."}
+      - {id: r2, text: "Unknown words are usually the most important ones."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "<unk> gives every unseen word the same ID. It adds no weight."
+      - answer: c
+        feedback: "An end marker is a separate special token. <unk> stands for words missing from the vocabulary."
+      - answer: d
+        feedback: "That is <pad>, ID 0 here."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. It is about giving every token a valid ID."
+    hints:
+      - "What happens to a word the vocabulary lacks?"
+      - "Which special token fills short sequences?"
+      - "Unseen words need an ID."
+    explanation: |
+      Every token must map to a row of the embedding table. `<unk>` catches every word the training text never contained.
+
+  - id: B25-L1-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.15)
+    code: |
+      import torch
+      from torch import nn
+
+      emb = nn.Embedding(10, 4, padding_idx=0)
+      ids = torch.tensor([[3, 5, 0, 0], [7, 1, 2, 0]])
+      print(tuple(emb(ids).shape), bool((emb.weight[0] == 0).all()))
+    answer: |
+      (2, 4, 4) True
+    wrong_answers:
+      - answer: "(2, 4) True"
+        feedback: "Each ID becomes a vector of embedding_dim values, so a dimension of 4 is added."
+      - answer: "(2, 4, 10) True"
+        feedback: "The last dimension is embedding_dim, 4. The 10 is the number of rows in the table."
+      - answer: "(2, 4, 4) False"
+        feedback: "With padding_idx=0, row 0 starts at zero."
+    hints:
+      - "Input shape (2, 4) of IDs."
+      - "Each ID becomes a row of length embedding_dim."
+      - "What does padding_idx do to its row?"
+    explanation: |
+      Two sequences of four IDs become two sequences of four 4-value vectors. The padding row starts at zero and stays there.
+
+  - id: B25-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Build an embedding whose padding row never trains, and pass it integer IDs.
+    template: |
+      emb = nn.Embedding(len(vocab), 32, [[g1]]=0)
+      vectors = emb(torch.tensor(batch_ids, dtype=torch.[[g2]]))
+    gaps:
+      g1: {accepted: [padding_idx]}
+      g2: {accepted: [long, int64]}
+    wrong_answers:
+      - answer: {g1: padding_idx, g2: float32}
+        feedback: "Embedding looks up rows by index, so IDs must be integers: torch.long."
+    hints:
+      - "Which argument names the ID that never trains?"
+      - "Which dtype do indices use?"
+      - "`padding_idx` and `long`."
+    explanation: |
+      `padding_idx=0` keeps row 0 at zero, and `torch.long` IDs index the table.
+
+  - id: B25-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `encode(text: str, vocab: dict[str, int], length: int) -> list[int]`.
+
+      - Lower-case the text and split it on whitespace.
+      - Map each word to its ID, or to `vocab["<unk>"]` when it is missing.
+      - Keep at most `length` IDs, then pad with `vocab["<pad>"]` up to `length`.
+      - Raise `ValueError` when `length` is below 1, or when `vocab` lacks `"<pad>"` or `"<unk>"`.
+    starter: |
+      def encode(text, vocab, length):
+          return [vocab[word] for word in text.split()]
+    checker:
+      kind: python
+      setup: |
+        _VOCAB = {"<pad>": 0, "<unk>": 1, "price": 2, "too": 3, "high": 4, "staff": 5, "great": 6}
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: encode
+          typed: true
+          docstring: true
+          message: "Give encode type hints and a docstring."
+      tests:
+        - id: pads_and_unknown
+          code: |
+            assert encode("Price too high", _VOCAB, 5) == [2, 3, 4, 0, 0], encode("Price too high", _VOCAB, 5)
+            assert encode("Staff were great", _VOCAB, 5) == [5, 1, 6, 0, 0], encode("Staff were great", _VOCAB, 5)
+          message: "Lower-case, map unseen words to <unk>, and pad with <pad>."
+        - id: truncates
+          code: |
+            assert encode("price too high staff great", _VOCAB, 3) == [2, 3, 4]
+            assert encode("   ", _VOCAB, 2) == [0, 0]
+          message: "Keep at most length IDs, and pad an empty text completely."
+        - id: guards
+          code: |
+            for vocab, length in [(_VOCAB, 0), ({"<pad>": 0, "a": 1}, 3), ({"<unk>": 1, "a": 2}, 3)]:
+                try:
+                    encode("a", vocab, length)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for length={length}, vocab keys {sorted(vocab)}")
+          message: "Raise ValueError for length below 1 or a vocabulary without <pad> and <unk>."
+    solution: |
+      def encode(text: str, vocab: dict[str, int], length: int) -> list[int]:
+          """Token IDs for one text, truncated or padded to length.
+
+          Args:
+              text: The raw text.
+              vocab: Word to ID, including "<pad>" and "<unk>".
+              length: Number of IDs to return.
+
+          Returns:
+              Exactly length IDs.
+
+          Raises:
+              ValueError: If length is below 1 or the special tokens are missing.
+          """
+          if length < 1 or "<pad>" not in vocab or "<unk>" not in vocab:
+              raise ValueError("need length >= 1 and a vocabulary with <pad> and <unk>")
+          ids = [vocab.get(word, vocab["<unk>"]) for word in text.lower().split()][:length]
+          return ids + [vocab["<pad>"]] * (length - len(ids))
+    seeded_bugs:
+      - |
+        def encode(text: str, vocab: dict[str, int], length: int) -> list[int]:
+            """Forgets to lower-case."""
+            if length < 1 or "<pad>" not in vocab or "<unk>" not in vocab:
+                raise ValueError("bad arguments")
+            ids = [vocab.get(word, vocab["<unk>"]) for word in text.split()][:length]
+            return ids + [vocab["<pad>"]] * (length - len(ids))
+      - |
+        def encode(text: str, vocab: dict[str, int], length: int) -> list[int]:
+            """Pads before truncating, so long texts come out too long."""
+            if length < 1 or "<pad>" not in vocab or "<unk>" not in vocab:
+                raise ValueError("bad arguments")
+            ids = [vocab.get(word, vocab["<unk>"]) for word in text.lower().split()]
+            return ids + [vocab["<pad>"]] * max(length - len(ids), 0)
+    wrong_answers:
+      - answer: |
+          def encode(text: str, vocab: dict[str, int], length: int) -> list[int]:
+              """Forgets to lower-case."""
+              if length < 1 or "<pad>" not in vocab or "<unk>" not in vocab:
+                  raise ValueError("bad arguments")
+              ids = [vocab.get(word, vocab["<unk>"]) for word in text.split()][:length]
+              return ids + [vocab["<pad>"]] * (length - len(ids))
+        triggers: pads_and_unknown
+    hints:
+      - "Check the arguments, then `text.lower().split()`."
+      - "`vocab.get(word, vocab[\"<unk>\"])`, then slice `[:length]`."
+      - "Add `[vocab[\"<pad>\"]] * (length - len(ids))`."
+    explanation: |
+      Lower-casing matches the vocabulary's spelling, `get` with a default handles unseen words, and truncating before padding gives exactly `length` IDs.
+
+  - id: B25-L1-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `embed(ids, table) -> np.ndarray`: what `nn.Embedding` does, in NumPy.
+
+      - `ids` is an integer array of any shape, and `table` has shape `(vocab_size, dim)`.
+      - Return `table[ids]`, of shape `ids.shape + (dim,)`.
+      - Raise `ValueError` when `ids` is not an integer array, or holds an ID below 0 or at least `vocab_size`.
+    primer: |
+      `arr.dtype.kind` is a one-letter code for the kind of data: `"i"` for signed integers, `"u"` for unsigned, `"f"` for floats.
+
+      ```python
+      np.array([1, 2]).dtype.kind      # 'i'
+      np.array([1.0]).dtype.kind       # 'f'
+      ```
+    starter: |
+      import numpy as np
+
+
+      def embed(ids, table):
+          return table[ids]
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+
+        _TABLE = np.arange(20.0).reshape(5, 4)
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: embed
+          typed: true
+          docstring: true
+          message: "Give embed type hints and a docstring."
+      tests:
+        - id: lookup
+          code: |
+            ids = np.array([[3, 1, 0], [4, 4, 2]])
+            out = embed(ids, _TABLE)
+            assert out.shape == (2, 3, 4), out.shape
+            assert np.array_equal(out[0, 0], _TABLE[3]) and np.array_equal(out[1, 2], _TABLE[2])
+            one_hot = np.eye(5)[ids]
+            assert np.allclose(out, one_hot @ _TABLE)
+          message: "Return table[ids]: one row per ID, the same as a one-hot vector times the table."
+        - id: guards
+          code: |
+            for ids in [np.array([[1.0, 2.0]]), np.array([5]), np.array([-1])]:
+                try:
+                    embed(ids, _TABLE)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {ids}")
+          message: "Raise ValueError for non-integer IDs or IDs outside 0 to vocab_size - 1."
+    solution: |
+      import numpy as np
+
+
+      def embed(ids: np.ndarray, table: np.ndarray) -> np.ndarray:
+          """Look up embedding rows by integer ID, as nn.Embedding does.
+
+          Args:
+              ids: Integer IDs of any shape.
+              table: Embedding table, shape (vocab_size, dim).
+
+          Returns:
+              Array of shape ids.shape + (dim,).
+
+          Raises:
+              ValueError: If ids are not integers or fall outside the table.
+          """
+          if ids.dtype.kind not in "iu":
+              raise ValueError(f"IDs must be integers, got {ids.dtype}")
+          if ids.size and (ids.min() < 0 or ids.max() >= len(table)):
+              raise ValueError(f"IDs must lie in 0 to {len(table) - 1}")
+          return table[ids]
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def embed(ids: np.ndarray, table: np.ndarray) -> np.ndarray:
+            """Lets negative IDs wrap round to the end of the table."""
+            if ids.dtype.kind not in "iu":
+                raise ValueError("IDs must be integers")
+            if ids.size and ids.max() >= len(table):
+                raise ValueError("ID too large")
+            return table[ids]
+      - |
+        import numpy as np
+
+
+        def embed(ids: np.ndarray, table: np.ndarray) -> np.ndarray:
+            """Rounds float IDs instead of rejecting them."""
+            ids = np.rint(ids).astype(int)
+            if ids.size and (ids.min() < 0 or ids.max() >= len(table)):
+                raise ValueError("ID out of range")
+            return table[ids]
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def embed(ids: np.ndarray, table: np.ndarray) -> np.ndarray:
+              """Lets negative IDs wrap round to the end of the table."""
+              if ids.dtype.kind not in "iu":
+                  raise ValueError("IDs must be integers")
+              if ids.size and ids.max() >= len(table):
+                  raise ValueError("ID too large")
+              return table[ids]
+        triggers: guards
+    hints:
+      - "Check `ids.dtype.kind` is `\"i\"` or `\"u\"`."
+      - "Check the smallest and largest ID against `len(table)`."
+      - "Return `table[ids]`."
+    explanation: |
+      Indexing the table with an integer array returns one row per ID. In NumPy a negative index counts from the end, so -1 would silently return the last row: the range check stops that.
+
+  - id: B25-L1-E6
+    type: spot_bug
+    difficulty: 4
+    prompt: |
+      Every answer that contains "affordable" is treated as padding, and "amazing" behaves like an unknown word. Tap the line responsible, then fix it.
+    language: python
+    code: |
+      def build_vocab(train_texts):
+          words = sorted({word for text in train_texts for word in text.lower().split()})
+          vocab = {word: i for i, word in enumerate(words)}
+          vocab["<pad>"] = 0
+          vocab["<unk>"] = 1
+          return vocab
+    bug_lines: [3]
+    fix_checker:
+      kind: python
+      tests:
+        - id: distinct_ids
+          code: |
+            vocab = build_vocab(["affordable and amazing", "Amazing staff"])
+            assert vocab["<pad>"] == 0 and vocab["<unk>"] == 1, vocab
+            assert len(set(vocab.values())) == len(vocab), vocab
+            assert min(v for w, v in vocab.items() if not w.startswith("<")) == 2, vocab
+          message: "Start word IDs at 2, after <pad> and <unk>, so every token has its own ID."
+    fix_solution: |
+      def build_vocab(train_texts):
+          words = sorted({word for text in train_texts for word in text.lower().split()})
+          vocab = {word: i for i, word in enumerate(words, start=2)}
+          vocab["<pad>"] = 0
+          vocab["<unk>"] = 1
+          return vocab
+    wrong_answers:
+      - lines: [4]
+        feedback: "<pad> should be 0. The trouble is which words also got 0 and 1."
+      - lines: [2]
+        feedback: "Sorting the distinct words makes IDs repeatable. That is fine."
+    hints:
+      - "Which IDs do the first two sorted words get?"
+      - "Which special tokens already use those IDs?"
+      - "enumerate(words, start=2)."
+    explanation: |
+      `enumerate` starts at 0, so the first two words alphabetically share IDs with `<pad>` and `<unk>`. Start at 2 so special tokens keep their own IDs.
+
+recap:
+  - front: "Reserved IDs in a vocabulary"
+    back: "0 for <pad>, 1 for <unk>. Words start at 2. Build it on training text and save it with the model."
+  - front: "What nn.Embedding(vocab_size, dim) does"
+    back: "Looks up row i for ID i: (N, L) integer IDs become (N, L, dim). Same as a one-hot vector times the table."
+  - front: "padding_idx=0"
+    back: "Row 0 starts at zero and gets no gradient, so padding never learns a meaning."
+  - front: "Two embedding errors"
+    back: "Float IDs raise a dtype error. An ID at or beyond the vocabulary size raises 'index out of range in self'."
+
+claims:
+  - claim: "PyTorch 2.15: nn.Embedding(10, 4, padding_idx=0) has a (10, 4) weight with row 0 zero and no gradient for it; lookup equals one-hot times the table; float IDs raise 'Expected tensor for argument #1 'indices' to have one of the following scalar types: Long, Int'; ID 10 raises 'index out of range in self'."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), November 2026."

@@ -1,0 +1,433 @@
+id: B24-L2
+title: Padding, stride, channels and the (N, C, H, W) layout
+
+concept: |
+  `nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0)` (PyTorch 2.15) takes a batch shaped `(N, C, H, W)`: images, channels, height, width. Its weight has shape `(out_channels, in_channels, kH, kW)`.
+
+  The output height, and the width likewise, is `(H + 2 * padding - kernel_size) // stride + 1`. For a batch of 8 colour images of 32 by 32 and 16 filters:
+
+  - kernel 3: `(8, 16, 30, 30)`. Each layer without padding shrinks the map by `kernel_size - 1`.
+  - kernel 3, padding 1: `(8, 16, 32, 32)`. **Padding** adds a border of zeros, so edge pixels are covered as often as the rest, and the size stays. `padding="same"` does this for you, with stride 1 only: with a stride it raises "padding='same' is not supported for strided convolutions".
+  - kernel 3, stride 2, padding 1: `(8, 16, 16, 16)`. **Stride** 2 moves the kernel two pixels at a time and halves height and width.
+  - kernel 5, stride 2: `(8, 16, 14, 14)`, since `(32 - 5) // 2 + 1` is 14.
+
+  **Channels.** A colour image has 3 input channels. Each filter spans all of them and sums across them, giving one output channel. Sixteen filters give 16 channels, which the next layer reads as its input channels.
+
+  **Layout.** PyTorch puts channels first. NumPy arrays and image files usually hold `(N, H, W, C)`. Passing `(8, 32, 32, 3)` to `nn.Conv2d(3, ...)` raises "expected input[8, 32, 32, 3] to have 3 channels, but got 32 channels instead". Reorder with `x.permute(0, 3, 1, 2)`. `permute` reorders dimensions, like a transpose for any number of them. A single image of shape `(C, H, W)` also works, but training code passes batches.
+
+  Write the size formula down for each layer before you build a model. Lesson B24-L3 needs it to size the dense layer after the convolutions.
+
+why_it_matters: |
+  A first image model loaded photos with an imaging library into NumPy arrays of shape (N, 224, 224, 3) and passed them to `nn.Conv2d(3, 32, 3)`. The error named 224 channels, and the team spent an afternoon checking the photos for corruption. One `permute(0, 3, 1, 2)` moved the colour channels to where PyTorch expects them.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      import torch
+
+      batch = torch.as_tensor(images, dtype=torch.float32)
+      features = torch.nn.Conv2d(3, 16, 3, stride=2, padding="same")(batch)
+    annotations:
+      - find: "batch = torch.as_tensor(images, dtype=torch.float32)"
+        note: "Images arrive as (N, H, W, C). Conv2d reads dimension 1 as channels."
+      - find: "features = torch.nn.Conv2d(3, 16, 3, stride=2, padding=\"same\")(batch)"
+        note: "padding='same' with a stride raises a ValueError in PyTorch 2.15."
+  strong:
+    code: |
+      import numpy as np
+      import torch
+      from torch import nn
+
+
+      def to_nchw(images: np.ndarray) -> torch.Tensor:
+          """Convert (N, H, W, C) images to a float32 (N, C, H, W) batch.
+
+          Raises:
+              ValueError: If the array is not 4-D.
+          """
+          if images.ndim != 4:
+              raise ValueError(f"expected (N, H, W, C), got {images.shape}")
+          return torch.as_tensor(images, dtype=torch.float32).permute(0, 3, 1, 2)
+
+
+      def conv_output_size(size: int, kernel_size: int, stride: int = 1, padding: int = 0) -> int:
+          """Height or width after one Conv2d layer."""
+          return (size + 2 * padding - kernel_size) // stride + 1
+
+
+      DOWNSAMPLE = nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1)
+      assert conv_output_size(32, 3, stride=2, padding=1) == 16
+    annotations:
+      - find: "return torch.as_tensor(images, dtype=torch.float32).permute(0, 3, 1, 2)"
+        note: "Channels move to dimension 1, where Conv2d reads them."
+      - find: "return (size + 2 * padding - kernel_size) // stride + 1"
+        note: "The size rule, written once and checked against each layer."
+      - find: "DOWNSAMPLE = nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1)"
+        note: "Explicit padding 1 with stride 2 halves 32 to 16."
+  takeaway: |
+    Conv2d reads (N, C, H, W). Output size is (H + 2p - k) // s + 1. Pad to keep the size, stride to shrink it, and permute images that arrive channels last.
+
+exercises:
+  - id: B24-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which layer keeps a 32 by 32 input at 32 by 32?
+    options:
+      - {id: a, text: "`nn.Conv2d(3, 16, kernel_size=3, padding=1)`"}
+      - {id: b, text: "`nn.Conv2d(3, 16, kernel_size=3)`"}
+      - {id: c, text: "`nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1)`"}
+      - {id: d, text: "`nn.Conv2d(3, 16, kernel_size=5, padding=1)`"}
+    answer: a
+    reasons:
+      - {id: r1, text: "(32 + 2 - 3) // 1 + 1 = 32: one pixel of padding on each side makes up for the kernel's overhang."}
+      - {id: r2, text: "Padding always keeps the size, whatever the kernel."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Without padding, a 3 by 3 kernel gives 30."
+      - answer: c
+        feedback: "Stride 2 halves the size: 16."
+      - answer: d
+        feedback: "A 5 by 5 kernel needs padding 2 to keep the size. With padding 1 it gives 30."
+      - answer: a|r2
+        feedback: "Right layer, wrong reason. The padding must match the kernel: (k - 1) / 2 for an odd k."
+    hints:
+      - "Use (H + 2p - k) // s + 1."
+      - "Which option has stride 1 and p = (k - 1) / 2?"
+      - "Kernel 3, padding 1."
+    explanation: |
+      With stride 1 and padding `(k - 1) / 2`, the output size equals the input size: 3 and 1 here.
+
+  - id: B24-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.15)
+    code: |
+      import torch
+      from torch import nn
+
+      x = torch.zeros(8, 3, 32, 32)
+      print(tuple(nn.Conv2d(3, 16, 3)(x).shape))
+      print(tuple(nn.Conv2d(3, 16, 3, stride=2, padding=1)(x).shape))
+      print(tuple(nn.Conv2d(3, 16, 5, stride=2)(x).shape))
+    answer: |
+      (8, 16, 30, 30)
+      (8, 16, 16, 16)
+      (8, 16, 14, 14)
+    wrong_answers:
+      - answer: |
+          (8, 3, 30, 30)
+          (8, 3, 16, 16)
+          (8, 3, 14, 14)
+        feedback: "The channel dimension becomes out_channels: 16."
+      - answer: |
+          (8, 16, 30, 30)
+          (8, 16, 15, 15)
+          (8, 16, 14, 14)
+        feedback: "(32 + 2 - 3) // 2 + 1 = 31 // 2 + 1 = 16. Padding counts on both sides."
+    hints:
+      - "Channels become out_channels."
+      - "Apply (H + 2p - k) // s + 1 to each."
+      - "30, then 16, then 14."
+    explanation: |
+      32 - 3 + 1 = 30. (32 + 2 - 3) // 2 + 1 = 16. (32 - 5) // 2 + 1 = 14. The channels become 16 each time.
+
+  - id: B24-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Complete the output-size rule, and the reorder from (N, H, W, C) to (N, C, H, W).
+    template: |
+      out = (size + 2 * padding - kernel_size) // [[g1]] + 1
+      batch = images.[[g2]](0, 3, 1, 2)
+    gaps:
+      g1: {accepted: [stride]}
+      g2: {accepted: [permute]}
+    wrong_answers:
+      - answer: {g1: stride, g2: reshape}
+        feedback: "reshape keeps the memory order and scrambles pixels across channels. permute moves dimensions."
+    hints:
+      - "What divides the distance the kernel can travel?"
+      - "Which method reorders dimensions?"
+      - "`stride` and `permute`."
+    explanation: |
+      The kernel moves `stride` pixels per step. `permute(0, 3, 1, 2)` moves the channel dimension to position 1. `reshape` to the same shape would mix pixels from different channels.
+
+  - id: B24-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `conv_output_size(size, kernel_size, stride=1, padding=0) -> int`.
+
+      - Return `(size + 2 * padding - kernel_size) // stride + 1`.
+      - Raise `ValueError` when `size`, `kernel_size` or `stride` is below 1, `padding` is negative, or the result would be below 1.
+    starter: |
+      def conv_output_size(size, kernel_size, stride=1, padding=0):
+          return size - kernel_size
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: conv_output_size
+          typed: true
+          docstring: true
+          message: "Give conv_output_size type hints and a docstring."
+      tests:
+        - id: sizes
+          code: |
+            assert conv_output_size(32, 3) == 30
+            assert conv_output_size(32, 3, padding=1) == 32
+            assert conv_output_size(32, 3, stride=2, padding=1) == 16
+            assert conv_output_size(32, 5, stride=2) == 14
+            assert conv_output_size(7, 2, stride=2) == 3
+          message: "Return (size + 2 * padding - kernel_size) // stride + 1."
+        - id: guards
+          code: |
+            for args in [(0, 3, 1, 0), (32, 0, 1, 0), (32, 3, 0, 0), (32, 3, 1, -1), (2, 5, 1, 0)]:
+                try:
+                    conv_output_size(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {args}")
+          message: "Raise ValueError for sizes below 1, negative padding, or an output below 1."
+    solution: |
+      def conv_output_size(size: int, kernel_size: int, stride: int = 1, padding: int = 0) -> int:
+          """Height or width after one Conv2d or pooling layer.
+
+          Args:
+              size: Input height or width.
+              kernel_size: Kernel height or width.
+              stride: Step between positions.
+              padding: Zeros added on each side.
+
+          Returns:
+              The output height or width.
+
+          Raises:
+              ValueError: If an argument is out of range or the kernel does not fit.
+          """
+          if min(size, kernel_size, stride) < 1 or padding < 0:
+              raise ValueError(f"invalid sizes: {size}, {kernel_size}, {stride}, {padding}")
+          out = (size + 2 * padding - kernel_size) // stride + 1
+          if out < 1:
+              raise ValueError(f"a {kernel_size} kernel does not fit a padded size of {size + 2 * padding}")
+          return out
+    seeded_bugs:
+      - |
+        def conv_output_size(size: int, kernel_size: int, stride: int = 1, padding: int = 0) -> int:
+            """Padding on one side only."""
+            if min(size, kernel_size, stride) < 1 or padding < 0:
+                raise ValueError("invalid sizes")
+            out = (size + padding - kernel_size) // stride + 1
+            if out < 1:
+                raise ValueError("kernel does not fit")
+            return out
+      - |
+        def conv_output_size(size: int, kernel_size: int, stride: int = 1, padding: int = 0) -> int:
+            """Rounds up."""
+            if min(size, kernel_size, stride) < 1 or padding < 0:
+                raise ValueError("invalid sizes")
+            out = -(-(size + 2 * padding - kernel_size) // stride) + 1
+            if out < 1:
+                raise ValueError("kernel does not fit")
+            return out
+      - |
+        def conv_output_size(size: int, kernel_size: int, stride: int = 1, padding: int = 0) -> int:
+            """No checks."""
+            return (size + 2 * padding - kernel_size) // stride + 1
+    wrong_answers:
+      - answer: |
+          def conv_output_size(size: int, kernel_size: int, stride: int = 1, padding: int = 0) -> int:
+              """Padding on one side only."""
+              if min(size, kernel_size, stride) < 1 or padding < 0:
+                  raise ValueError("invalid sizes")
+              out = (size + padding - kernel_size) // stride + 1
+              if out < 1:
+                  raise ValueError("kernel does not fit")
+              return out
+        triggers: sizes
+    hints:
+      - "Validate the arguments first."
+      - "Padding is added on both sides: `2 * padding`."
+      - "Use `//` and check the result is at least 1."
+    explanation: |
+      Padding counts twice, floor division drops a partial last step, and the guards catch layer settings that cannot work before a model is built.
+
+  - id: B24-L2-E5
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `stack_output_size(size: int, layers: list[tuple[int, int, int]]) -> int`: the height after a stack of layers, each given as `(kernel_size, stride, padding)`. `conv_output_size` from exercise 4 is defined for you, and raises `ValueError` when a layer does not fit.
+
+      - Apply the layers in order and return the final size.
+      - Return `size` unchanged for an empty list.
+    starter: |
+      def stack_output_size(size, layers):
+          return size
+    checker:
+      kind: python
+      setup: |
+        def conv_output_size(size, kernel_size, stride=1, padding=0):
+            if min(size, kernel_size, stride) < 1 or padding < 0:
+                raise ValueError("invalid sizes")
+            out = (size + 2 * padding - kernel_size) // stride + 1
+            if out < 1:
+                raise ValueError("kernel does not fit")
+            return out
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: stack_output_size
+          typed: true
+          docstring: true
+          message: "Give stack_output_size type hints and a docstring."
+      tests:
+        - id: stack
+          code: |
+            layers = [(3, 1, 1), (2, 2, 0), (3, 1, 1), (2, 2, 0)]
+            assert stack_output_size(8, layers) == 2, stack_output_size(8, layers)
+            assert stack_output_size(32, [(3, 1, 0), (3, 1, 0)]) == 28
+            assert stack_output_size(28, []) == 28
+          message: "Apply conv_output_size layer by layer, in order."
+        - id: order
+          code: |
+            assert stack_output_size(9, [(3, 1, 0), (2, 2, 0)]) == 3
+            assert stack_output_size(9, [(2, 2, 0), (3, 1, 0)]) == 2
+          message: "Apply the layers in the order given."
+        - id: too_small
+          code: |
+            try:
+                stack_output_size(4, [(2, 2, 0), (2, 2, 0), (2, 2, 0)])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError when the map shrinks below 1")
+          message: "Let conv_output_size's ValueError through when a layer no longer fits."
+    solution: |
+      def stack_output_size(size: int, layers: list[tuple[int, int, int]]) -> int:
+          """Height or width after a stack of conv or pooling layers.
+
+          Args:
+              size: Input height or width.
+              layers: (kernel_size, stride, padding) for each layer, in order.
+
+          Returns:
+              The final height or width.
+
+          Raises:
+              ValueError: If a layer does not fit its input.
+          """
+          for kernel_size, stride, padding in layers:
+              size = conv_output_size(size, kernel_size, stride, padding)
+          return size
+    seeded_bugs:
+      - |
+        def stack_output_size(size: int, layers: list[tuple[int, int, int]]) -> int:
+            """Applies every layer to the input size, not to the previous output."""
+            out = size
+            for kernel_size, stride, padding in layers:
+                out = conv_output_size(size, kernel_size, stride, padding)
+            return out
+      - |
+        def stack_output_size(size: int, layers: list[tuple[int, int, int]]) -> int:
+            """Swallows errors."""
+            for kernel_size, stride, padding in layers:
+                try:
+                    size = conv_output_size(size, kernel_size, stride, padding)
+                except ValueError:
+                    return 0
+            return size
+    wrong_answers:
+      - answer: |
+          def stack_output_size(size: int, layers: list[tuple[int, int, int]]) -> int:
+              """Applies every layer to the input size, not to the previous output."""
+              out = size
+              for kernel_size, stride, padding in layers:
+                  out = conv_output_size(size, kernel_size, stride, padding)
+              return out
+        triggers: stack
+    hints:
+      - "Loop over the layers, unpacking each tuple."
+      - "Feed each layer the previous layer's output size."
+      - "Do not catch the ValueError."
+    explanation: |
+      Each layer reads the previous layer's output. On 8 by 8 digits, two padded 3 by 3 convolutions with 2 by 2 pooling after each give 8, 4, 4, 2.
+
+  - id: B24-L2-E6
+    type: spot_bug
+    difficulty: 4
+    language: python
+    prompt: |
+      The first forward pass raises "expected input[64, 28, 28, 1] to have 1 channels, but got 28 channels instead". Tap the line responsible, then fix it.
+    code: |
+      import numpy as np
+      import torch
+      from torch import nn
+
+      model = nn.Sequential(nn.Conv2d(1, 16, 3, padding=1), nn.ReLU(), nn.Flatten(), nn.Linear(16 * 28 * 28, 10))
+
+
+      def to_batch(images: np.ndarray) -> torch.Tensor:
+          return torch.as_tensor(images, dtype=torch.float32)
+
+
+      logits = model(to_batch(scans))
+    bug_lines: [9]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: permute
+          kind: requires_pattern
+          pattern: "\\.permute\\(\\s*0\\s*,\\s*3\\s*,\\s*1\\s*,\\s*2\\s*\\)"
+          message: "Move channels to dimension 1: .permute(0, 3, 1, 2)."
+        - id: no_reshape
+          kind: forbids_pattern
+          pattern: "\\.reshape\\(|\\.view\\("
+          message: "reshape and view keep memory order and mix pixels. Use permute."
+    fix_solution: |
+      import numpy as np
+      import torch
+      from torch import nn
+
+      model = nn.Sequential(nn.Conv2d(1, 16, 3, padding=1), nn.ReLU(), nn.Flatten(), nn.Linear(16 * 28 * 28, 10))
+
+
+      def to_batch(images: np.ndarray) -> torch.Tensor:
+          return torch.as_tensor(images, dtype=torch.float32).permute(0, 3, 1, 2)
+
+
+      logits = model(to_batch(scans))
+    wrong_answers:
+      - lines: [5]
+        feedback: "Conv2d(1, 16, 3, padding=1) is right for single-channel scans. The input layout is wrong."
+      - lines: [12]
+        feedback: "The call is fine. The batch it receives has channels last."
+    hints:
+      - "Which dimension does Conv2d read as channels?"
+      - "What layout do the scans arrive in?"
+      - "permute(0, 3, 1, 2)."
+    explanation: |
+      The scans are (N, H, W, C), so Conv2d reads 28, the height, as the channel count. `permute(0, 3, 1, 2)` moves the single channel to dimension 1.
+
+recap:
+  - front: "Conv2d output size"
+    back: "(H + 2 * padding - kernel_size) // stride + 1, for height and width alike."
+  - front: "Keep the size with a k by k kernel"
+    back: "Stride 1 and padding (k - 1) / 2, or padding='same' (stride 1 only)."
+  - front: "Conv2d input layout"
+    back: "(N, C, H, W). Convert (N, H, W, C) with x.permute(0, 3, 1, 2), never reshape."
+  - front: "Conv2d weight shape"
+    back: "(out_channels, in_channels, kH, kW)."
+
+claims:
+  - claim: "PyTorch 2.15: on (8, 3, 32, 32), Conv2d(3, 16, 3) gives (8, 16, 30, 30), with padding 1 (8, 16, 32, 32), with stride 2 and padding 1 (8, 16, 16, 16), kernel 5 stride 2 (8, 16, 14, 14); padding='same' with stride raises 'padding='same' is not supported for strided convolutions'; an (8, 32, 32, 3) input raises 'expected input[8, 32, 32, 3] to have 3 channels, but got 32 channels instead'."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), November 2026."

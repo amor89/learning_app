@@ -1,0 +1,389 @@
+id: B25-L2
+title: Sequence models, recurrence and its limits
+
+concept: |
+  Before transformers, text models read tokens one at a time with a **recurrent network**. A hidden state `h` carries what has been read so far. At each step, `nn.RNN` (PyTorch 2.15, default `tanh`) computes `h_t = tanh(x_t @ W_ih.T + h_prev @ W_hh.T + b)`, with the same weights at every step:
+
+  ```python
+  rnn = nn.RNN(input_size=4, hidden_size=8, batch_first=True)
+  outputs, h_last = rnn(torch.zeros(2, 5, 4))    # (2, 5, 8) and (1, 2, 8)
+  ```
+
+  `outputs` holds `h_t` for every step, and `h_last` the final state, with a leading dimension for the layer. `nn.LSTM` adds gates and a cell state `c`, returns `outputs, (h, c)`, and holds four times the weights: 448 against 112 for these sizes. A NumPy loop over the formula above matched `nn.RNN` to within 1e-6.
+
+  **batch_first.** Without `batch_first=True`, RNN and LSTM read input as `(sequence, batch, features)`. A `(2, 5, 4)` batch then means five sequences of length 2, and the output still has shape `(2, 5, 8)`: no error, the wrong model. Set `batch_first=True` and assert shapes.
+
+  **Two limits** led to attention:
+
+  - **Long-range memory.** Gradients flow back through every step and are multiplied by a factor at each. Factors below 1 shrink the signal: 0.9 over 50 steps leaves 0.0052. Factors above 1 blow it up: 1.1 over 50 steps gives 117.4. LSTM gates slow the shrinking, but a word 200 tokens back still reaches the output faintly.
+  - **No parallelism.** Step `t` needs step `t - 1`, so 512 tokens take 512 steps, one after another. Attention (lesson B25-L3) relates every pair of positions in one matrix product.
+
+  A recurrent model is still a fair baseline for short sequences. Lessons B25-L3 to B25-L6 build what replaced it.
+
+why_it_matters: |
+  A team classified long complaint transcripts with an LSTM that read the text from start to end. Accuracy was good on short complaints and near chance on long ones, where the reason for the complaint came in the first lines. Error analysis by transcript length (lesson B12-L3) showed the pattern. An attention model, which compares every position with every other directly, kept its accuracy at all lengths.
+
+worked_example:
+  language: python
+  weak:
+    code: |
+      lstm = nn.LSTM(input_size=32, hidden_size=64)
+      outputs, (h, c) = lstm(embedded)       # embedded: (batch, length, 32)
+      logits = head(outputs[:, -1])
+    annotations:
+      - find: "lstm = nn.LSTM(input_size=32, hidden_size=64)"
+        note: "batch_first defaults to False: the batch is read as the sequence, with no error."
+      - find: "logits = head(outputs[:, -1])"
+        note: "Takes the last step of a padded batch, which for short texts is a padding step."
+  strong:
+    code: |
+      import numpy as np
+
+
+      def rnn_forward(
+          x: np.ndarray, W_ih: np.ndarray, W_hh: np.ndarray, b: np.ndarray
+      ) -> np.ndarray:
+          """Hidden states of a tanh RNN over one sequence, as nn.RNN computes them.
+
+          Args:
+              x: One sequence, shape (length, input_size).
+              W_ih: Input weights, shape (hidden_size, input_size).
+              W_hh: Recurrent weights, shape (hidden_size, hidden_size).
+              b: Combined bias, shape (hidden_size,).
+
+          Returns:
+              Hidden state after each step, shape (length, hidden_size).
+
+          Raises:
+              ValueError: If the shapes do not fit together.
+          """
+          if x.ndim != 2 or W_ih.shape[1] != x.shape[1] or W_hh.shape != (len(b), len(b)):
+              raise ValueError(f"shapes do not fit: x {x.shape}, W_ih {W_ih.shape}, W_hh {W_hh.shape}")
+          h = np.zeros(len(b))
+          states = []
+          for x_t in x:
+              h = np.tanh(x_t @ W_ih.T + h @ W_hh.T + b)
+              states.append(h)
+          return np.stack(states) if states else np.zeros((0, len(b)))
+    annotations:
+      - find: "h = np.zeros(len(b))"
+        note: "The state starts at zero, as in nn.RNN without an initial state."
+      - find: "for x_t in x:"
+        note: "One step at a time: step t cannot start before step t - 1."
+      - find: "h = np.tanh(x_t @ W_ih.T + h @ W_hh.T + b)"
+        note: "The same weights at every step, mixing the new input with the previous state."
+  takeaway: |
+    A recurrent network carries a hidden state step by step. Set batch_first=True, and remember its two limits: fading long-range signal and no parallelism.
+
+exercises:
+  - id: B25-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Why does a plain RNN struggle to use a word 200 tokens before the end of a text?
+    options:
+      - {id: a, text: "The gradient reaching that word is multiplied by a factor at every step, and products of factors below 1 shrink towards zero"}
+      - {id: b, text: "RNNs can only read 100 tokens"}
+      - {id: c, text: "The embedding table forgets early words"}
+      - {id: d, text: "The hidden state is reset every 50 tokens"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Training signal for early words passes back through every step, so it fades: 0.9 over 50 steps is 0.0052."}
+      - {id: r2, text: "Early words are less important by nature."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "An RNN can run over any length. The problem is how faintly early steps are trained."
+      - answer: c
+        feedback: "The embedding table is the same for every position. The fading happens in the recurrence."
+      - answer: d
+        feedback: "Nothing resets the state. It carries on, but early information fades."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. It is about how the gradient travels, not what words matter."
+    hints:
+      - "How does the gradient reach step 1 from step 200?"
+      - "What happens to a product of many numbers below 1?"
+      - "Vanishing gradients."
+    explanation: |
+      The gradient for an early word is a product over every later step. With factors below 1 it vanishes, so early words barely train.
+
+  - id: B25-L2-E2
+    type: predict_output
+    difficulty: 2
+    language: python
+    prompt: |
+      What does this print? (PyTorch 2.15)
+    code: |
+      import torch
+      from torch import nn
+
+      lstm = nn.LSTM(4, 8, batch_first=True)
+      outputs, (h, c) = lstm(torch.zeros(2, 5, 4))
+      print(tuple(outputs.shape), tuple(h.shape), tuple(c.shape))
+    answer: |
+      (2, 5, 8) (1, 2, 8) (1, 2, 8)
+    wrong_answers:
+      - answer: "(2, 5, 8) (2, 8) (2, 8)"
+        feedback: "h and c keep a leading dimension for the number of layers: (1, 2, 8)."
+      - answer: "(2, 5, 4) (1, 2, 8) (1, 2, 8)"
+        feedback: "Outputs hold the hidden state, so their last dimension is hidden_size, 8."
+    hints:
+      - "batch_first=True: (batch, length, features)."
+      - "Outputs: one hidden state per step."
+      - "h and c: (layers, batch, hidden)."
+    explanation: |
+      Outputs give a hidden state of size 8 for each of 5 steps in 2 sequences. The final h and c add a layer dimension in front.
+
+  - id: B25-L2-E3
+    type: fill_gap
+    difficulty: 2
+    language: python
+    prompt: |
+      Read batches as `(batch, length, features)`, and complete one step of the recurrence in NumPy.
+    template: |
+      lstm = nn.LSTM(32, 64, [[g1]]=True)
+
+      h = np.[[g2]](x_t @ W_ih.T + h @ W_hh.T + b)
+    gaps:
+      g1: {accepted: [batch_first]}
+      g2: {accepted: [tanh]}
+    wrong_answers:
+      - answer: {g1: batch_first, g2: maximum}
+        feedback: "nn.RNN's default non-linearity is tanh, which keeps the state between -1 and 1."
+    hints:
+      - "Which argument puts batch first?"
+      - "Which function squashes values into (-1, 1)?"
+      - "`batch_first` and `tanh`."
+    explanation: |
+      `batch_first=True` matches the usual data layout, and `tanh` is the RNN's default non-linearity.
+
+  - id: B25-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    packages: [numpy]
+    prompt: |
+      Write `rnn_forward(x, W_ih, W_hh, b) -> np.ndarray`: the hidden states of a tanh RNN over one sequence, starting from a zero state.
+
+      - At each step, `h = tanh(x_t @ W_ih.T + h @ W_hh.T + b)`.
+      - Return the states stacked, shape `(length, hidden_size)`.
+      - Raise `ValueError` when `x` is not 2-D, `W_ih` does not have `x`'s feature count as columns, or `W_hh` is not `(hidden_size, hidden_size)` with `hidden_size = len(b)`.
+    primer: |
+      `np.stack(list_of_arrays)` joins equal-shaped arrays along a new first axis:
+
+      ```python
+      np.stack([np.array([1, 2]), np.array([3, 4])])    # array([[1, 2], [3, 4]])
+      ```
+    starter: |
+      import numpy as np
+
+
+      def rnn_forward(x, W_ih, W_hh, b):
+          return np.tanh(x @ W_ih.T + b)
+    checker:
+      kind: python
+      setup: |
+        import numpy as np
+
+        _rng = np.random.default_rng(0)
+        _X = _rng.normal(size=(6, 3))
+        _W_IH = _rng.normal(size=(4, 3)) * 0.5
+        _W_HH = _rng.normal(size=(4, 4)) * 0.5
+        _B = _rng.normal(size=4) * 0.1
+
+
+        def _reference(x, w_ih, w_hh, b):
+            h, out = np.zeros(len(b)), []
+            for x_t in x:
+                h = np.tanh(x_t @ w_ih.T + h @ w_hh.T + b)
+                out.append(h)
+            return np.stack(out)
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: rnn_forward
+          typed: true
+          docstring: true
+          message: "Give rnn_forward type hints and a docstring."
+      tests:
+        - id: states
+          code: |
+            out = rnn_forward(_X, _W_IH, _W_HH, _B)
+            assert out.shape == (6, 4), out.shape
+            assert np.allclose(out, _reference(_X, _W_IH, _W_HH, _B)), out
+          message: "Carry h from step to step: h = tanh(x_t @ W_ih.T + h @ W_hh.T + b), starting at zeros."
+        - id: order_matters
+          code: |
+            forward = rnn_forward(_X, _W_IH, _W_HH, _B)[-1]
+            backward = rnn_forward(_X[::-1], _W_IH, _W_HH, _B)[-1]
+            assert not np.allclose(forward, backward), "the last state ignores the order of the inputs"
+          message: "Use the previous state at each step, so the order of the inputs changes the result."
+        - id: guards
+          code: |
+            bad = [(np.ones(3), _W_IH, _W_HH, _B), (np.ones((2, 5)), _W_IH, _W_HH, _B), (_X, _W_IH, np.ones((3, 3)), _B)]
+            for args in bad:
+                try:
+                    rnn_forward(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for shapes {[a.shape for a in args]}")
+          message: "Raise ValueError when the shapes do not fit."
+    solution: |
+      import numpy as np
+
+
+      def rnn_forward(x: np.ndarray, W_ih: np.ndarray, W_hh: np.ndarray, b: np.ndarray) -> np.ndarray:
+          """Hidden states of a tanh RNN over one sequence, as nn.RNN computes them.
+
+          Args:
+              x: One sequence, shape (length, input_size).
+              W_ih: Input weights, shape (hidden_size, input_size).
+              W_hh: Recurrent weights, shape (hidden_size, hidden_size).
+              b: Combined bias, shape (hidden_size,).
+
+          Returns:
+              Hidden state after each step, shape (length, hidden_size).
+
+          Raises:
+              ValueError: If the shapes do not fit together.
+          """
+          if x.ndim != 2 or W_ih.shape[1] != x.shape[1] or W_hh.shape != (len(b), len(b)):
+              raise ValueError(f"shapes do not fit: x {x.shape}, W_ih {W_ih.shape}, W_hh {W_hh.shape}")
+          h = np.zeros(len(b))
+          states = []
+          for x_t in x:
+              h = np.tanh(x_t @ W_ih.T + h @ W_hh.T + b)
+              states.append(h)
+          return np.stack(states) if states else np.zeros((0, len(b)))
+    seeded_bugs:
+      - |
+        import numpy as np
+
+
+        def rnn_forward(x: np.ndarray, W_ih: np.ndarray, W_hh: np.ndarray, b: np.ndarray) -> np.ndarray:
+            """Never uses the previous state."""
+            if x.ndim != 2 or W_ih.shape[1] != x.shape[1] or W_hh.shape != (len(b), len(b)):
+                raise ValueError("shapes do not fit")
+            return np.tanh(x @ W_ih.T + b)
+      - |
+        import numpy as np
+
+
+        def rnn_forward(x: np.ndarray, W_ih: np.ndarray, W_hh: np.ndarray, b: np.ndarray) -> np.ndarray:
+            """Resets the state at every step."""
+            if x.ndim != 2 or W_ih.shape[1] != x.shape[1] or W_hh.shape != (len(b), len(b)):
+                raise ValueError("shapes do not fit")
+            states = []
+            for x_t in x:
+                h = np.zeros(len(b))
+                h = np.tanh(x_t @ W_ih.T + h @ W_hh.T + b)
+                states.append(h)
+            return np.stack(states)
+    wrong_answers:
+      - answer: |
+          import numpy as np
+
+
+          def rnn_forward(x: np.ndarray, W_ih: np.ndarray, W_hh: np.ndarray, b: np.ndarray) -> np.ndarray:
+              """Never uses the previous state."""
+              if x.ndim != 2 or W_ih.shape[1] != x.shape[1] or W_hh.shape != (len(b), len(b)):
+                  raise ValueError("shapes do not fit")
+              return np.tanh(x @ W_ih.T + b)
+        triggers: states
+    hints:
+      - "Check the three shapes first."
+      - "Start with `h = np.zeros(len(b))` before the loop."
+      - "In the loop, update h from x_t and the previous h, and append it."
+    explanation: |
+      The state is created once and updated at every step, so each output depends on everything before it. That dependence is also why the steps cannot run in parallel.
+
+  - id: B25-L2-E5
+    type: predict_output
+    difficulty: 3
+    language: python
+    prompt: |
+      A gradient passes back through 50 steps and is multiplied by the same factor at each. What does this print?
+    code: |
+      print(round(0.9 ** 50, 4), round(1.1 ** 50, 1))
+    answer: |
+      0.0052 117.4
+    wrong_answers:
+      - answer: "0.0 inf"
+        feedback: "Fifty steps is not enough to reach exactly 0 or infinity, but the signal is already a two-hundredth, or over a hundred times too large."
+      - answer: "0.45 5.0"
+        feedback: "That would be adding 50 small changes. Each step multiplies."
+    hints:
+      - "0.9 ** 10 is about 0.35."
+      - "Raise that to the fifth power."
+      - "1.1 ** 50 grows the same way, upwards."
+    explanation: |
+      A product of 50 factors of 0.9 vanishes to 0.0052, and of 1.1 explodes to 117.4. That is why plain RNNs lose long-range signal or become unstable.
+
+  - id: B25-L2-E6
+    type: spot_bug
+    difficulty: 4
+    prompt: |
+      The model trains without errors, but its accuracy stays at chance. Each batch of embedded answers has shape `(64, 30, 32)`: batch, length, features. Tap the line responsible, then fix it.
+    language: python
+    code: |
+      from torch import nn
+
+
+      class AnswerClassifier(nn.Module):
+          def __init__(self, vocab_size, n_classes):
+              super().__init__()
+              self.tokens = nn.Embedding(vocab_size, 32, padding_idx=0)
+              self.lstm = nn.LSTM(32, 64)
+              self.head = nn.Linear(64, n_classes)
+
+          def forward(self, ids):
+              outputs, (h, c) = self.lstm(self.tokens(ids))
+              return self.head(h[-1])
+    bug_lines: [8]
+    fix_checker:
+      kind: python
+      ast_rules:
+        - id: batch_first
+          kind: requires_pattern
+          pattern: "nn\\.LSTM\\(\\s*32\\s*,\\s*64\\s*,\\s*batch_first\\s*=\\s*True\\s*\\)"
+          message: "Read batches as (batch, length, features): nn.LSTM(32, 64, batch_first=True)."
+    fix_solution: |
+      from torch import nn
+
+
+      class AnswerClassifier(nn.Module):
+          def __init__(self, vocab_size, n_classes):
+              super().__init__()
+              self.tokens = nn.Embedding(vocab_size, 32, padding_idx=0)
+              self.lstm = nn.LSTM(32, 64, batch_first=True)
+              self.head = nn.Linear(64, n_classes)
+
+          def forward(self, ids):
+              outputs, (h, c) = self.lstm(self.tokens(ids))
+              return self.head(h[-1])
+    wrong_answers:
+      - lines: [13]
+        feedback: "h[-1] is the last layer's final state, a fine summary. Which axis did the LSTM treat as time?"
+      - lines: [7]
+        feedback: "The embedding is right. Its (64, 30, 32) output is read wrongly on the next layer."
+    hints:
+      - "What layout does nn.LSTM expect by default?"
+      - "With that layout, what does dimension 0 of (64, 30, 32) mean?"
+      - "batch_first=True."
+    explanation: |
+      By default, the LSTM reads `(64, 30, 32)` as 30 sequences of length 64, running across different answers. There is no error, because the shapes still fit. `batch_first=True` makes it run along each answer.
+
+recap:
+  - front: "The RNN step"
+    back: "h_t = tanh(x_t @ W_ih.T + h_prev @ W_hh.T + b), with the same weights at every step."
+  - front: "nn.LSTM outputs with batch_first=True"
+    back: "outputs (batch, length, hidden), plus h and c of shape (layers, batch, hidden)."
+  - front: "batch_first default"
+    back: "False for RNN and LSTM: (length, batch, features). Wrong layouts often run without error. Set it and assert shapes."
+  - front: "Two limits of recurrent models"
+    back: "Gradients fade or explode over long sequences (0.9 ** 50 = 0.0052), and steps cannot run in parallel."
+
+claims:
+  - claim: "PyTorch 2.15: nn.RNN(4, 8, batch_first=True) on (2, 5, 4) gives outputs (2, 5, 8) and h (1, 2, 8), with tanh by default and 112 parameters; nn.LSTM gives (2, 5, 8), (1, 2, 8), (1, 2, 8) and 448 parameters; without batch_first the same input runs and returns (2, 5, 8); a NumPy tanh loop with W_ih, W_hh and b_ih + b_hh matches nn.RNN within 1e-6."
+    status: verified
+    source: "Run on PyTorch 2.15.0 (PyPI wheel, CPU), November 2026."

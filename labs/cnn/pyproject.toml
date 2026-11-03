@@ -1,0 +1,19 @@
+# The B24 CNN lab. From this folder: `pip install -e .`, then `pytest`.
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "digits-cnn"
+version = "0.1.0"
+description = "A small CNN on scikit-learn's 8 by 8 digits, compared with a dense network"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2,<3", "scikit-learn>=1.9,<1.10", "torch>=2.14,<3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--strict-markers"
