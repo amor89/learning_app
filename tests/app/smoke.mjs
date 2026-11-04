@@ -73,28 +73,57 @@ check(await page.locator(`#stage-${first.stages[1].id}`).evaluate((d) => d.open)
 await page.getByRole("button", { name: "Make this my pathway" }).click();
 await page.getByText("Your pathway", { exact: true }).waitFor();
 
-// Cheat sheets: module, stage and lesson links open real PDFs in a new tab
-async function sheetOk(link, label) {
-  const href = await link.getAttribute("href");
-  const response = await page.request.get(new URL(href, page.url()).href);
-  const type = response.headers()["content-type"] ?? "";
-  check(response.ok() && type.includes("pdf") && (await link.getAttribute("target")) === "_blank", `${label}: ${href} opens a PDF in a new tab`);
+// Cheat sheets open inside the app, Back returns, and Save PDF hands over a real PDF.
+// No link may point straight at a PDF: on an iPhone home-screen app it replaces the app with no way back.
+async function noPdfLinks(label) {
+  const direct = await page.locator('a[href$=".pdf"], a[href$=".docx"], a[href$=".ipynb"], a[target="_blank"]').count();
+  check(direct === 0, `${label}: no link opens a file or a new tab directly`);
 }
 await page.goto(`${base}${query}#/module/B23`);
 await page.getByRole("heading", { name: "B23 PyTorch foundations" }).waitFor();
-await sheetOk(page.getByRole("link", { name: "B23 cheat sheet (PDF)" }), "module cheat sheet");
-await noHorizontalScroll("module B23");
+await page.getByRole("link", { name: "B23 cheat sheet" }).click();
+await page.waitForFunction(() => location.hash === "#/sheet/B23" && document.querySelector(".sheet-lesson"));
+const b23 = index.tracks.flatMap((t) => t.modules).find((m) => m.id === "B23");
+check(await page.locator(".sheet-lesson").count() === b23.lessons.length, `module sheet shows all ${b23.lessons.length} B23 lessons`);
+check(await page.locator(".tabbar").isVisible(), "the tab bar stays on screen with a sheet open");
+await noHorizontalScroll("cheat sheet B23");
+await noPdfLinks("cheat sheet B23");
+const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Save PDF" }).click()]);
+const saved = readFileSync(await download.path());
+check(download.suggestedFilename() === "cheatsheet-B23.pdf" && saved.subarray(0, 5).toString() === "%PDF-", "Save PDF delivers cheatsheet-B23.pdf");
+await page.screenshot({ path: `${shots}/09-cheatsheet.png`, fullPage: true });
+await page.getByRole("link", { name: "‹ Back" }).click();
+await page.waitForFunction(() => location.hash === "#/module/B23");
+check(true, "Back returns to the module page");
+await noPdfLinks("module B23");
+
 await page.goto(`${base}${query}#/path/${first.id}/${first.stages[1].id}`);
 await page.waitForFunction((title) => document.querySelector("h1")?.textContent === title, first.title);
-await sheetOk(page.locator(`#stage-${first.stages[1].id}`).getByRole("link", { name: "Stage cheat sheet (PDF)" }), "stage cheat sheet");
+await noPdfLinks(`pathway ${first.id}`);
+await page.locator(`#stage-${first.stages[1].id}`).getByRole("link", { name: "Stage cheat sheet" }).click();
+await page.waitForFunction((title) => document.querySelector("h1")?.textContent === title, first.stages[1].title);
+const stageModules = first.stages[1].modules.length;
+check(await page.locator(".sheet h2").count() === stageModules, `stage sheet groups its ${stageModules} modules`);
+await noHorizontalScroll("stage cheat sheet");
+
 await page.goto(`${base}${query}#/lesson/B23-L1`);
 await page.getByRole("heading", { name: /Tensors/ }).waitFor();
-await sheetOk(page.getByRole("link", { name: "Open the B23 cheat sheet" }), "lesson cheat sheet");
+await page.getByRole("link", { name: "Open the B23 cheat sheet" }).click();
+await page.waitForFunction(() => location.hash === "#/sheet/B23");
+await page.getByRole("link", { name: "‹ Back" }).click();
+await page.waitForFunction(() => location.hash === "#/lesson/B23-L1");
+check(true, "Back from a sheet opened in a lesson returns to that lesson");
+await page.goto(`${base}${query}#/lesson/B23-L6`);
+await page.getByRole("heading", { name: /Dataset/ }).waitFor();
+await noPdfLinks("lesson B23-L6 with a practical");
+const [lab] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Save lab (PDF)" }).click()]);
+check(lab.suggestedFilename() === "B23-L6.pdf", "Save lab delivers the practical PDF");
 await page.goto(`${base}${query}#/library`);
 await page.getByRole("heading", { name: "All tracks and downloads" }).waitFor();
 check(await page.locator("details.sheets").count() === index.pathways.length, "library lists cheat sheets for every pathway");
 await page.evaluate(() => document.querySelectorAll("details.sheets").forEach((d) => (d.open = true)));
 await noHorizontalScroll("library with cheat sheets open");
+await noPdfLinks("library");
 
 // Lesson A3-L1: multiple choice with reasoning
 await page.goto(`${base}${query}#/lesson/A3-L1`);

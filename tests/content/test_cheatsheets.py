@@ -55,3 +55,23 @@ def test_takeaways_and_recap_cards_render_without_stray_emphasis() -> None:
             if "**" not in text and re.search(r"<(em|strong)>", md_inline(text)):
                 stray.append((lesson.id, text))
     assert not stray, stray
+
+
+def test_app_bundle_has_a_sheet_for_every_published_module() -> None:
+    """The in-app sheet view reads site/content/sheets/<module>.json, built from the lessons."""
+    import json
+    from pathlib import Path
+
+    from learnkit.cheatsheet import module_sheet_data
+
+    course = load_course()
+    folder = Path(__file__).resolve().parents[2] / "site" / "content" / "sheets"
+    published = {m.meta.id for m in course.modules.values() if m.lessons}
+    assert {p.stem for p in folder.glob("*.json")} == published
+    module = course.modules["B23"]
+    bundled = json.loads((folder / "B23.json").read_text(encoding="utf-8"))
+    built = module_sheet_data(module, "downloads/cheatsheets/cheatsheet-B23.pdf")
+    assert bundled == json.loads(json.dumps(built))
+    for lesson, data in zip(module.lessons, bundled["lessons"], strict=True):
+        assert len(data["recap"]) == len(lesson.recap)
+        assert len(data["snippets"]) == len(concept_snippets(lesson))

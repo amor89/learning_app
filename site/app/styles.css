@@ -206,6 +206,13 @@ a.card:hover { border-color: var(--accent); }
 a.small.sheet-link { align-self: flex-start; padding: 6px 0; min-height: 32px; }
 details.sheets { margin-bottom: 8px; }
 details.sheets .plain-list { margin-top: 8px; }
+.sheet-lesson { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 12px; }
+.sheet-lesson h3 { margin: 6px 0 4px; font-size: 1rem; }
+.sheet-lesson h3 a { color: var(--accent); text-decoration: none; }
+.sheet .takeaway { font-style: italic; margin: 4px 0 8px; }
+.recap-list { margin: 8px 0; display: grid; gap: 2px; }
+.recap-list dt { font-weight: 700; margin-top: 6px; }
+.recap-list dd { margin: 0; color: var(--text); }
 
 .section-nav {
   position: sticky; top: calc(env(safe-area-inset-top) + 45px); z-index: 4;

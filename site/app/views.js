@@ -9,7 +9,9 @@ import {
   h,
   notesList,
   pct,
+  fileName,
   progressBar,
+  saveFile,
   sheetLink,
   tagChips,
 } from "./ui.js";
@@ -137,7 +139,7 @@ function moduleBlock(app, module) {
     module.lessons.length
       ? h("ol", { class: "path-lessons" }, module.lessons.map((l) => lessonRow(app, l)))
       : h("span", { class: "muted small" }, "Coming in a later phase"),
-    sheetLink(module.cheatsheet, `${module.id} cheat sheet`, "small sheet-link"),
+    sheetLink(module.cheatsheet && `#/sheet/${module.id}`, `${module.id} cheat sheet`, "small sheet-link"),
   );
 }
 
@@ -179,10 +181,69 @@ export function pathwayView(app, pathwayId, stageId) {
           h("span", { class: "muted small" }, `${p.done} of ${p.total} exercises`),
         ),
         h("p", { class: "muted small" }, stage.summary),
-        h("div", { class: "actions" }, sheetLink(stage.cheatsheet, "Stage cheat sheet (PDF)")),
+        h("div", { class: "actions" }, sheetLink(stage.cheatsheet && `#/sheet/${pathway.id}/${stage.id}`, "Stage cheat sheet")),
         h("ol", { class: "module-list" }, paths.stageModules(stage, modules).map((m) => moduleBlock(app, m))),
       ));
     })),
+  );
+}
+
+// Cheat sheets ------------------------------------------------------------------
+
+function sheetLesson(lesson) {
+  return h("section", { class: "sheet-lesson", id: `sheet-${lesson.id}` },
+    h("h3", {}, h("a", { href: `#/lesson/${lesson.id}` }, `${lesson.id} ${lesson.title}`)),
+    h("p", { class: "takeaway", html: lesson.takeaway_html }),
+    lesson.snippets.map((lines) => codeBlock(lines)),
+    h("dl", { class: "recap-list" }, lesson.recap.flatMap((card) => [h("dt", { html: card.front_html }), h("dd", { html: card.back_html })])),
+  );
+}
+
+// A module's sheet (#/sheet/B23) or a pathway stage's (#/sheet/ds-roadmap/m1-3), inside the app.
+export async function sheetView(app, first, second) {
+  let title;
+  let subtitle;
+  let pdf;
+  let moduleIds;
+  let back;
+  if (second) {
+    const pathway = app.index.pathways.find((p) => p.id === first);
+    const stage = pathway?.stages.find((s) => s.id === second);
+    if (!stage?.cheatsheet) return notFound(`Cheat sheet ${first}/${second}`);
+    const modules = paths.moduleIndex(app.index);
+    ({ title } = stage);
+    subtitle = pathway.title;
+    pdf = stage.cheatsheet;
+    moduleIds = stage.modules.filter((id) => modules.get(id)?.lessons.length);
+    back = { href: `#/path/${pathway.id}/${stage.id}`, label: pathway.title };
+  } else {
+    const found = findModule(app.index, first);
+    if (!found?.module.cheatsheet) return notFound(`Cheat sheet ${first}`);
+    title = `${found.module.id} ${found.module.title}`;
+    subtitle = found.module.summary;
+    pdf = found.module.cheatsheet;
+    moduleIds = [first];
+    back = { href: `#/module/${first}`, label: found.module.id };
+  }
+  const sheets = await Promise.all(moduleIds.map((id) => app.sheet(id)));
+  const name = pdf.split("/").pop();
+  const blob = fetch(pdf).then((r) => (r.ok ? r.blob() : null)).catch(() => null);
+  return h(
+    "article",
+    { class: "page sheet" },
+    h("nav", { class: "crumbs" },
+      h("a", { href: back.href, onclick: (e) => { if (history.length > 1) { e.preventDefault(); history.back(); } } }, "‹ Back"),
+      " · ", h("a", { href: back.href }, back.label),
+    ),
+    h("h1", {}, title),
+    h("p", { class: "muted small" }, `Cheat sheet · ${subtitle}`),
+    h("div", { class: "actions" },
+      h("button", { type: "button", class: "btn", onclick: () => saveFile(blob, name) }, "Save PDF"),
+    ),
+    sheets.map((sheet) => [
+      sheets.length > 1 ? h("h2", {}, `${sheet.id} ${sheet.title}`) : null,
+      sheet.lessons.map(sheetLesson),
+    ]),
   );
 }
 
@@ -231,10 +292,10 @@ export function libraryView(app) {
       }),
     ),
     h("h2", {}, "Cheat sheets"),
-    h("p", { class: "muted" }, "One PDF per pathway stage. Each module page has its own sheet too."),
+    h("p", { class: "muted" }, "One sheet per pathway stage, each with a PDF to save. Each module page has its own sheet too."),
     index.pathways.map((pathway) => h("details", { class: "path-stage sheets" },
       h("summary", {}, h("strong", {}, pathway.title)),
-      h("ul", { class: "plain-list" }, pathway.stages.map((s) => h("li", {}, h("span", {}, s.title), sheetLink(s.cheatsheet, "PDF")))),
+      h("ul", { class: "plain-list" }, pathway.stages.map((s) => h("li", {}, h("span", {}, s.title), sheetLink(s.cheatsheet && `#/sheet/${pathway.id}/${s.id}`, "Open")))),
     )),
     h("h2", {}, "Handbook"),
     h("p", { class: "muted" }, "The full handbook. Solutions sit in an appendix at the end."),
@@ -287,8 +348,8 @@ export function moduleView(app, moduleId) {
     h("p", {}, module.summary),
     tagChips(module.tags, app.index.bands),
     h("h2", {}, "Cheat sheet"),
-    h("p", { class: "muted small" }, "Every lesson's takeaway, key code and recap cards on one or two pages. Opens in a new tab."),
-    h("div", { class: "actions" }, sheetLink(module.cheatsheet, `${module.id} cheat sheet (PDF)`, "btn")),
+    h("p", { class: "muted small" }, "Every lesson's takeaway, key code and recap cards on one page, with a PDF to save."),
+    h("div", { class: "actions" }, sheetLink(module.cheatsheet && `#/sheet/${module.id}`, `${module.id} cheat sheet`, "btn")),
     h("h2", {}, "Download this module"),
     downloadButtons(module.downloads, `${module.id} handbook`),
     h("h2", {}, "Lessons"),
@@ -383,7 +444,7 @@ export async function lessonView(app, lessonId) {
 
   const practical = lesson.practical
     ? h("section", { id: "practical" }, h("h2", {}, `Practical: ${lesson.practical.title}`), h("div", { html: lesson.practical.intro_html }),
-        h("a", { class: "btn", href: lesson.practical.download, download: "" }, lesson.practical.platform === "databricks" ? "Download notebook (.ipynb)" : "Download lab (PDF)"))
+        h("button", { type: "button", class: "btn", onclick: () => saveFile(lesson.practical.download, fileName(lesson.practical.download)) }, lesson.practical.platform === "databricks" ? "Save notebook (.ipynb)" : "Save lab (PDF)"))
     : null;
 
   return h(
@@ -392,7 +453,7 @@ export async function lessonView(app, lessonId) {
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard"), " › ", h("a", { href: `#/track/${meta.track.id}` }, `Track ${meta.track.id}`), " › ", h("a", { href: `#/module/${meta.module.id}` }, meta.module.id)),
     h("h1", {}, lesson.title),
     tagChips(lesson.tags, app.index.bands),
-    meta.module.cheatsheet ? h("p", { class: "small" }, sheetLink(meta.module.cheatsheet, `Open the ${meta.module.id} cheat sheet`, "sheet-link")) : null,
+    meta.module.cheatsheet ? h("p", { class: "small" }, sheetLink(`#/sheet/${meta.module.id}`, `Open the ${meta.module.id} cheat sheet`, "sheet-link")) : null,
     h("nav", { class: "section-nav", "aria-label": "Lesson sections" },
       ["concept", "why", "example", "practice", "recap"].map((id) => h("a", { href: `#/lesson/${lesson.id}`, onclick: (e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: "smooth" }); } }, id === "why" ? "Why" : id[0].toUpperCase() + id.slice(1))),
     ),
