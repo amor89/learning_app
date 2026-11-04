@@ -419,7 +419,7 @@ recap:
   - front: "Change one setting on a frozen config"
     back: "dataclasses.replace(cfg, min_base=30) returns a new object."
   - front: "Are dataclass type hints checked at runtime?"
-    back: "No. Validate or convert in __post_init__, or use pydantic for external input."
+    back: "No. Validate or convert in `__post_init__`, or use pydantic for external input."
   - front: "Empty list default on a dataclass field"
     back: "field(default_factory=list). A plain [] raises ValueError at class definition."
 

@@ -444,7 +444,7 @@ exercises:
 
 recap:
   - front: "What pytest collects by default"
-    back: "Files test_*.py or *_test.py, functions starting with test, and test methods in Test classes without __init__."
+    back: "Files `test_*.py` or `*_test.py`, functions starting with `test`, and test methods in `Test` classes without `__init__`."
   - front: "Test that code raises the right error"
     back: "with pytest.raises(ValueError, match=\"pattern\"): call(). match searches the message with a regular expression."
   - front: "Run one test, or only failures"

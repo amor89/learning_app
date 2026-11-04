@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT))
 from pygments.formatters import HtmlFormatter  # noqa: E402
 
 from learnkit.brief import Brief, code_brief, fix_brief  # noqa: E402
+from learnkit.cheatsheet import module_stem, stage_stem  # noqa: E402
 from learnkit.loader import Course, ModuleContent, load_course  # noqa: E402
 from learnkit.models import (  # noqa: E402
     CodeExercise,
@@ -210,6 +211,28 @@ def download_links(stem: str) -> dict[str, str] | None:
     return None
 
 
+def sheet_link(stem: str) -> str | None:
+    """Path of a cheat sheet when its PDF exists."""
+    pdf = DOWNLOADS / "cheatsheets" / f"{stem}.pdf"
+    return f"downloads/cheatsheets/{pdf.name}" if pdf.exists() else None
+
+
+def pathway_index(course: Course) -> list[dict[str, Any]]:
+    """Pathways with a cheat-sheet link on each stage."""
+    return [
+        {
+            "id": p.id,
+            "title": p.title,
+            "summary": p.summary,
+            "stages": [
+                {**s.model_dump(), "cheatsheet": sheet_link(stage_stem(p.id, s.id))}
+                for s in p.stages
+            ],
+        }
+        for p in course.pathways
+    ]
+
+
 def build_index(course: Course, version: str) -> dict[str, Any]:
     """Syllabus index with lesson summaries and download links."""
     tracks = []
@@ -223,6 +246,7 @@ def build_index(course: Course, version: str) -> dict[str, Any]:
                     "tags": module.meta.tags,
                     "summary": module.meta.summary,
                     "downloads": download_links(f"handbook-{module.meta.id}"),
+                    "cheatsheet": sheet_link(module_stem(module.meta.id)),
                     "lessons": [
                         {
                             "id": lesson.id,
@@ -248,7 +272,7 @@ def build_index(course: Course, version: str) -> dict[str, Any]:
         "version": version,
         "bands": [b.model_dump() for b in course.roadmap.bands],
         "tracks": tracks,
-        "pathways": [p.model_dump() for p in course.pathways],
+        "pathways": pathway_index(course),
         "downloads": download_links("handbook-full"),
     }
 

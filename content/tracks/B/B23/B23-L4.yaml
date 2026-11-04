@@ -94,7 +94,7 @@ worked_example:
       - find: "return sum(p.numel() for p in model.parameters())"
         note: "Log this with every run. A surprising count is the fastest check that layers are registered."
   takeaway: |
-    Subclass nn.Module, call super().__init__() first, register layers in attributes, Sequential or ModuleList, and put activations between Linear layers.
+    Subclass nn.Module, call `super().__init__()` first, register layers in attributes, Sequential or ModuleList, and put activations between Linear layers.
 
 exercises:
   - id: B23-L4-E1
@@ -460,7 +460,7 @@ exercises:
 
 recap:
   - front: "Skeleton of a PyTorch model"
-    back: "Subclass nn.Module, call super().__init__() first, build layers in __init__, use them in forward, call model(x)."
+    back: "Subclass nn.Module, call `super().__init__()` first, build layers in `__init__`, use them in forward, call model(x)."
   - front: "nn.Linear(in, out) weight shape and parameter count"
     back: "Weight (out, in), bias (out,). Parameters: in * out + out."
   - front: "Why put ReLU between Linear layers"

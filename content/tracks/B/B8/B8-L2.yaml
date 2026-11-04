@@ -311,7 +311,7 @@ recap:
   - front: "Significant vs meaningful"
     back: "Large samples make trivial differences significant. Report the size with its interval."
   - front: "Cohen's h"
-    back: "2*asin(sqrt(p1)) - 2*asin(sqrt(p2)). About 0.2 small, 0.5 medium, 0.8 large."
+    back: "`2 * asin(sqrt(p1)) - 2 * asin(sqrt(p2))`. About 0.2 small, 0.5 medium, 0.8 large."
 
 claims:
   - claim: "statsmodels proportion_confint(40, 100, method=\"wilson\") returns (0.3094, 0.4980); method=\"normal\" gives (0, 0) for 0 of 20."

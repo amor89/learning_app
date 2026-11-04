@@ -1,6 +1,6 @@
-"""Run every build step in order: content, handbook, practicals, content again.
+"""Run every build step in order: content, handbook, practicals, cheat sheets, content again.
 
-The second content pass picks up the download links the handbook step created.
+The second content pass picks up the download links the earlier steps created.
 Run from the repository root after any content change: ``python scripts/build_all.py``.
 """
 
@@ -11,7 +11,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-STEPS = ["build_content.py", "build_handbook.py", "build_practicals.py", "build_content.py"]
+STEPS = [
+    "build_content.py",
+    "build_handbook.py",
+    "build_practicals.py",
+    "build_cheatsheets.py",
+    "build_content.py",
+]
 
 
 def main() -> None:

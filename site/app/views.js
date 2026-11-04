@@ -10,6 +10,7 @@ import {
   notesList,
   pct,
   progressBar,
+  sheetLink,
   tagChips,
 } from "./ui.js";
 
@@ -136,6 +137,7 @@ function moduleBlock(app, module) {
     module.lessons.length
       ? h("ol", { class: "path-lessons" }, module.lessons.map((l) => lessonRow(app, l)))
       : h("span", { class: "muted small" }, "Coming in a later phase"),
+    sheetLink(module.cheatsheet, `${module.id} cheat sheet`, "small sheet-link"),
   );
 }
 
@@ -177,6 +179,7 @@ export function pathwayView(app, pathwayId, stageId) {
           h("span", { class: "muted small" }, `${p.done} of ${p.total} exercises`),
         ),
         h("p", { class: "muted small" }, stage.summary),
+        h("div", { class: "actions" }, sheetLink(stage.cheatsheet, "Stage cheat sheet (PDF)")),
         h("ol", { class: "module-list" }, paths.stageModules(stage, modules).map((m) => moduleBlock(app, m))),
       ));
     })),
@@ -227,6 +230,12 @@ export function libraryView(app) {
         return m.lessons.length ? h("a", { ...attrs, href: `#/module/${m.id}` }, inner) : h("span", attrs, inner);
       }),
     ),
+    h("h2", {}, "Cheat sheets"),
+    h("p", { class: "muted" }, "One PDF per pathway stage. Each module page has its own sheet too."),
+    index.pathways.map((pathway) => h("details", { class: "path-stage sheets" },
+      h("summary", {}, h("strong", {}, pathway.title)),
+      h("ul", { class: "plain-list" }, pathway.stages.map((s) => h("li", {}, h("span", {}, s.title), sheetLink(s.cheatsheet, "PDF")))),
+    )),
     h("h2", {}, "Handbook"),
     h("p", { class: "muted" }, "The full handbook. Solutions sit in an appendix at the end."),
     downloadButtons(index.downloads, "Full handbook"),
@@ -277,6 +286,9 @@ export function moduleView(app, moduleId) {
     h("h1", {}, `${module.id} ${module.title}`),
     h("p", {}, module.summary),
     tagChips(module.tags, app.index.bands),
+    h("h2", {}, "Cheat sheet"),
+    h("p", { class: "muted small" }, "Every lesson's takeaway, key code and recap cards on one or two pages. Opens in a new tab."),
+    h("div", { class: "actions" }, sheetLink(module.cheatsheet, `${module.id} cheat sheet (PDF)`, "btn")),
     h("h2", {}, "Download this module"),
     downloadButtons(module.downloads, `${module.id} handbook`),
     h("h2", {}, "Lessons"),
@@ -380,6 +392,7 @@ export async function lessonView(app, lessonId) {
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard"), " › ", h("a", { href: `#/track/${meta.track.id}` }, `Track ${meta.track.id}`), " › ", h("a", { href: `#/module/${meta.module.id}` }, meta.module.id)),
     h("h1", {}, lesson.title),
     tagChips(lesson.tags, app.index.bands),
+    meta.module.cheatsheet ? h("p", { class: "small" }, sheetLink(meta.module.cheatsheet, `Open the ${meta.module.id} cheat sheet`, "sheet-link")) : null,
     h("nav", { class: "section-nav", "aria-label": "Lesson sections" },
       ["concept", "why", "example", "practice", "recap"].map((id) => h("a", { href: `#/lesson/${lesson.id}`, onclick: (e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: "smooth" }); } }, id === "why" ? "Why" : id[0].toUpperCase() + id.slice(1))),
     ),

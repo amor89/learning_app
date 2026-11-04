@@ -505,7 +505,7 @@ exercises:
 
 recap:
   - front: "The two methods of a Dataset"
-    back: "__len__ returns the row count. __getitem__(i) returns row i as tensors, converted once in __init__."
+    back: "`__len__` returns the row count. `__getitem__(i)` returns row i as tensors, converted once in `__init__`."
   - front: "DataLoader batches for 10 rows, batch_size=4"
     back: "4, 4 and 2. drop_last=True gives 4 and 4."
   - front: "Which loaders shuffle"
