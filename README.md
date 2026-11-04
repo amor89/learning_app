@@ -12,9 +12,11 @@ The **Paths** tab lists four routes through the modules: the Senior Data Scienti
 
 ## Cheat sheets
 
-Every module and every pathway stage has a cheat sheet: an A5 PDF with each lesson's takeaway, the code from its concept section and its recap cards. Open one from a module page, from the top of any lesson, from each stage of a pathway, or from the list on the library page. It opens in a new tab, so you can keep it beside the app, a notebook or your editor. The service worker keeps each sheet you open for offline use.
+Every module and every pathway stage has a cheat sheet: an A5 PDF with each lesson's takeaway, the code from its concept section and its recap cards. Open one from a module page, from the top of any lesson, from each stage of a pathway, or from the list on the library page. The sheet opens inside the app, with **Back** and the tab bar on screen. **Save PDF** opens the share sheet on an iPhone (choose **Save to Files**, then keep the PDF open in Files or Books beside your work) and downloads the file on a computer. The service worker keeps each sheet you open for offline use.
 
-`scripts/build_cheatsheets.py` builds them into `site/downloads/cheatsheets/` from the lesson files, so they never hold text of their own. `python scripts/build_all.py` runs it after the handbook.
+The app never links straight to a file. In an iPhone home-screen app, a PDF opened from a link replaces the app and leaves no way back, so the handbook, practical and cheat-sheet downloads all go through the same save button.
+
+`scripts/build_cheatsheets.py` builds the PDFs into `site/downloads/cheatsheets/`, and `scripts/build_content.py` writes the same points for the in-app view to `site/content/sheets/`. Both read the lesson files, so the sheets never hold text of their own. `python scripts/build_all.py` runs it after the handbook.
 
 ## Install on your iPhone
 

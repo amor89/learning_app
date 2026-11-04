@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from learnkit.handbook import Code, code_html, prose_blocks
 from learnkit.loader import Course, ModuleContent
 from learnkit.models import Lesson
-from learnkit.render import md_inline
+from learnkit.render import code_lines, md_inline
 
 PREFIX = "cheatsheet-"
 
@@ -61,6 +61,31 @@ def sheet_scopes(course: Course) -> list[SheetScope]:
 def concept_snippets(lesson: Lesson) -> list[Code]:
     """The fenced code blocks of a lesson's concept section."""
     return [block for block in prose_blocks(lesson.concept) if isinstance(block, Code)]
+
+
+def lesson_data(lesson: Lesson) -> dict[str, object]:
+    """The same points as lesson_html, as data the app renders itself."""
+    return {
+        "id": lesson.id,
+        "title": lesson.title,
+        "takeaway_html": md_inline(lesson.worked_example.takeaway.strip()),
+        "snippets": [code_lines(code.code, code.language) for code in concept_snippets(lesson)],
+        "recap": [
+            {"front_html": md_inline(card.front), "back_html": md_inline(card.back)}
+            for card in lesson.recap
+        ],
+    }
+
+
+def module_sheet_data(module: ModuleContent, pdf: str | None) -> dict[str, object]:
+    """A module's cheat sheet for the app: every lesson's points and the PDF link."""
+    return {
+        "id": module.meta.id,
+        "title": module.meta.title,
+        "summary": module.meta.summary,
+        "pdf": pdf,
+        "lessons": [lesson_data(lesson) for lesson in module.lessons],
+    }
 
 
 def lesson_html(lesson: Lesson) -> str:

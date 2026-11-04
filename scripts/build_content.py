@@ -3,6 +3,7 @@
 Writes:
     site/content/index.json          syllabus, roadmap bands and download links
     site/content/lessons/<id>.json   one rendered lesson per file
+    site/content/sheets/<id>.json    one module cheat sheet per file, for the in-app view
     site/py/checkers/*.py            the checker package for Pyodide
     site/app/highlight.css           Pygments styles for light and dark themes
 
@@ -25,7 +26,7 @@ sys.path.insert(0, str(ROOT))
 from pygments.formatters import HtmlFormatter  # noqa: E402
 
 from learnkit.brief import Brief, code_brief, fix_brief  # noqa: E402
-from learnkit.cheatsheet import module_stem, stage_stem  # noqa: E402
+from learnkit.cheatsheet import module_sheet_data, module_stem, stage_stem  # noqa: E402
 from learnkit.loader import Course, ModuleContent, load_course  # noqa: E402
 from learnkit.models import (  # noqa: E402
     CodeExercise,
@@ -335,6 +336,14 @@ def main() -> None:
             rendered = render_lesson(lesson, module)
             check_html(rendered, lesson.id)
             write_json(lessons_dir / f"{lesson.id}.json", rendered)
+    sheets_dir = OUT / "sheets"
+    if sheets_dir.exists():
+        shutil.rmtree(sheets_dir)
+    for module in course.modules.values():
+        if module.lessons:
+            sheet = module_sheet_data(module, sheet_link(module_stem(module.meta.id)))
+            check_html(sheet, f"sheet {module.meta.id}")
+            write_json(sheets_dir / f"{module.meta.id}.json", sheet)
     version = content_version()
     write_json(OUT / "index.json", build_index(course, version))
     write_json(TEST_FIXTURE, [ex.model_dump(mode="json") for ex in all_exercises(course)])

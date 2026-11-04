@@ -132,8 +132,8 @@ export function downloadButtons(links, label) {
   return h(
     "div",
     { class: "downloads", role: "group", "aria-label": label },
-    h("a", { class: "btn", href: links.pdf, download: "" }, "PDF"),
-    h("a", { class: "btn secondary", href: links.docx, download: "" }, "Word"),
+    h("button", { type: "button", class: "btn", onclick: () => saveFile(links.pdf, fileName(links.pdf)) }, "PDF"),
+    h("button", { type: "button", class: "btn secondary", onclick: () => saveFile(links.docx, fileName(links.docx)) }, "Word"),
   );
 }
 
@@ -142,8 +142,48 @@ export function tagChips(tags, bands) {
   return h("ul", { class: "chips", "aria-label": "Roadmap tags" }, tags.map((t) => h("li", { title: labels.get(t) ?? t }, t)));
 }
 
-// Opens a cheat sheet in a new tab, so it stays open beside the app.
-export function sheetLink(href, label = "Cheat sheet (PDF)", cls = "btn secondary") {
-  if (!href) return null;
-  return h("a", { class: cls, href, target: "_blank", rel: "noopener" }, label);
+// Links to a cheat sheet inside the app, so the tab bar and Back stay on screen.
+// A PDF opened directly in an iPhone home-screen app has no way back.
+export function sheetLink(hash, label = "Cheat sheet", cls = "btn secondary") {
+  if (!hash) return null;
+  return h("a", { class: cls, href: hash }, label);
+}
+
+// Saves a file without leaving the app: the share sheet where the device has one
+// (iPhone: Save to Files), otherwise a download. source is a URL, or a promise of a
+// Blob started early so the share call stays inside the tap that asked for it.
+// Plain links to files are avoided: in an iPhone home-screen app they replace the
+// app with no way back.
+export async function saveFile(source, name) {
+  try {
+    const data = typeof source === "string"
+      ? await fetch(source).then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.blob();
+        })
+      : await source;
+    if (!data) throw new Error("not available");
+    const file = new File([data], name, { type: data.type || "application/octet-stream" });
+    if (navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: name });
+        return;
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+        // NotAllowedError: the tap expired while downloading. Fall back to a download.
+      }
+    }
+    const url = URL.createObjectURL(data);
+    const a = h("a", { href: url, download: name });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch {
+    toast("Could not save the file. Check your connection and try again.");
+  }
+}
+
+export function fileName(url) {
+  return url.split("/").pop();
 }

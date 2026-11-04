@@ -10,11 +10,13 @@ import {
   pathwayView,
   reviewView,
   settingsView,
+  sheetView,
   trackView,
 } from "./views.js";
 
 const root = document.getElementById("app");
 const lessons = new Map();
+const sheets = new Map();
 
 const app = {
   index: null,
@@ -34,6 +36,20 @@ const app = {
     app.state.settings.theme = theme;
     app.save();
     applyTheme();
+  },
+  async sheet(id) {
+    if (!sheets.has(id)) {
+      sheets.set(id, fetch(`content/sheets/${id}.json`).then((r) => {
+        if (!r.ok) throw new Error(`Cheat sheet ${id} failed to load (${r.status}).`);
+        return r.json();
+      }));
+    }
+    try {
+      return await sheets.get(id);
+    } catch (error) {
+      sheets.delete(id);
+      throw error;
+    }
   },
   async lesson(id) {
     if (!lessons.has(id)) {
@@ -62,6 +78,7 @@ const ROUTES = [
   [/^#\/paths$/, () => pathwaysView(app), "paths"],
   [/^#\/path\/([\w-]+)(?:\/([\w-]+))?$/, (m) => pathwayView(app, m[1], m[2]), "paths"],
   [/^#\/library$/, () => libraryView(app), "home"],
+  [/^#\/sheet\/([\w-]+)(?:\/([\w-]+))?$/, (m) => sheetView(app, m[1], m[2]), "home"],
   [/^#\/track\/(\w+)$/, (m) => trackView(app, m[1]), "home"],
   [/^#\/module\/(\w+)$/, (m) => moduleView(app, m[1]), "home"],
   [/^#\/lesson\/([\w-]+)$/, (m) => lessonView(app, m[1]), "home"],
