@@ -10,6 +10,12 @@ The **Paths** tab lists four routes through the modules: the Senior Data Scienti
 
 `content/pathways.yaml` defines the pathways. The build rejects a pathway that names a missing module, lists a module twice, or leaves any module out of every pathway.
 
+## Cheat sheets
+
+Every module and every pathway stage has a cheat sheet: an A5 PDF with each lesson's takeaway, the code from its concept section and its recap cards. Open one from a module page, from the top of any lesson, from each stage of a pathway, or from the list on the library page. It opens in a new tab, so you can keep it beside the app, a notebook or your editor. The service worker keeps each sheet you open for offline use.
+
+`scripts/build_cheatsheets.py` builds them into `site/downloads/cheatsheets/` from the lesson files, so they never hold text of their own. `python scripts/build_all.py` runs it after the handbook.
+
 ## Install on your iPhone
 
 1. Open the site in **Safari**.

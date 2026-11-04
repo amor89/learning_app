@@ -467,7 +467,7 @@ recap:
   - front: "torchvision v2 steps for a uint8 image"
     back: "v2.ToImage(), v2.ToDtype(torch.float32, scale=True), v2.Normalize(mean, std)."
   - front: "Where augmentation goes"
-    back: "Training transform only, applied in __getitem__ so each epoch draws new changes. Validation and test get the fixed steps."
+    back: "Training transform only, applied in `__getitem__` so each epoch draws new changes. Validation and test get the fixed steps."
   - front: "Choosing augmentations"
     back: "Only changes that keep the label true: shifts and left-right flips for photos, never flips or half-turns for digits."
 

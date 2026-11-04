@@ -73,6 +73,29 @@ check(await page.locator(`#stage-${first.stages[1].id}`).evaluate((d) => d.open)
 await page.getByRole("button", { name: "Make this my pathway" }).click();
 await page.getByText("Your pathway", { exact: true }).waitFor();
 
+// Cheat sheets: module, stage and lesson links open real PDFs in a new tab
+async function sheetOk(link, label) {
+  const href = await link.getAttribute("href");
+  const response = await page.request.get(new URL(href, page.url()).href);
+  const type = response.headers()["content-type"] ?? "";
+  check(response.ok() && type.includes("pdf") && (await link.getAttribute("target")) === "_blank", `${label}: ${href} opens a PDF in a new tab`);
+}
+await page.goto(`${base}${query}#/module/B23`);
+await page.getByRole("heading", { name: "B23 PyTorch foundations" }).waitFor();
+await sheetOk(page.getByRole("link", { name: "B23 cheat sheet (PDF)" }), "module cheat sheet");
+await noHorizontalScroll("module B23");
+await page.goto(`${base}${query}#/path/${first.id}/${first.stages[1].id}`);
+await page.waitForFunction((title) => document.querySelector("h1")?.textContent === title, first.title);
+await sheetOk(page.locator(`#stage-${first.stages[1].id}`).getByRole("link", { name: "Stage cheat sheet (PDF)" }), "stage cheat sheet");
+await page.goto(`${base}${query}#/lesson/B23-L1`);
+await page.getByRole("heading", { name: /Tensors/ }).waitFor();
+await sheetOk(page.getByRole("link", { name: "Open the B23 cheat sheet" }), "lesson cheat sheet");
+await page.goto(`${base}${query}#/library`);
+await page.getByRole("heading", { name: "All tracks and downloads" }).waitFor();
+check(await page.locator("details.sheets").count() === index.pathways.length, "library lists cheat sheets for every pathway");
+await page.evaluate(() => document.querySelectorAll("details.sheets").forEach((d) => (d.open = true)));
+await noHorizontalScroll("library with cheat sheets open");
+
 // Lesson A3-L1: multiple choice with reasoning
 await page.goto(`${base}${query}#/lesson/A3-L1`);
 await page.getByRole("heading", { name: /Idempotent MERGE/ }).waitFor();

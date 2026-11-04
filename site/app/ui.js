@@ -141,3 +141,9 @@ export function tagChips(tags, bands) {
   const labels = new Map(bands.map((b) => [b.id, b.label]));
   return h("ul", { class: "chips", "aria-label": "Roadmap tags" }, tags.map((t) => h("li", { title: labels.get(t) ?? t }, t)));
 }
+
+// Opens a cheat sheet in a new tab, so it stays open beside the app.
+export function sheetLink(href, label = "Cheat sheet (PDF)", cls = "btn secondary") {
+  if (!href) return null;
+  return h("a", { class: cls, href, target: "_blank", rel: "noopener" }, label);
+}

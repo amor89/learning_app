@@ -202,6 +202,10 @@ a.card:hover { border-color: var(--accent); }
 .path-lesson.done { border-left-color: var(--ok); }
 .path-lesson-title { font-size: 0.95rem; }
 .path-stage, .stage-link { scroll-margin-top: 60px; }
+.sheet-link { color: var(--accent); }
+a.small.sheet-link { align-self: flex-start; padding: 6px 0; min-height: 32px; }
+details.sheets { margin-bottom: 8px; }
+details.sheets .plain-list { margin-top: 8px; }
 
 .section-nav {
   position: sticky; top: calc(env(safe-area-inset-top) + 45px); z-index: 4;

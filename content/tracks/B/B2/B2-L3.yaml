@@ -336,7 +336,7 @@ exercises:
       Match the form to the need: function for a step, dataclass for settings, class for shared state with behaviour.
 
 recap:
-  - front: "A class with __init__ and one run method"
+  - front: "A class with `__init__` and one run method"
     back: "A function in disguise. Replace it with a function."
   - front: "Four reasons a class earns its place"
     back: "State across calls, an invariant to protect, several operations on the same data, a shared interface."

@@ -381,7 +381,7 @@ exercises:
 
 recap:
   - front: "Create a module logger"
-    back: "logger = logging.getLogger(__name__)"
+    back: "`logger = logging.getLogger(__name__)`"
   - front: "Default level threshold with no configuration"
     back: "WARNING. log.info(...) prints nothing until the entry point sets a level."
   - front: "Attach run_id and wave_id to every line"
