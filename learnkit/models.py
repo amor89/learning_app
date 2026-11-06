@@ -645,6 +645,19 @@ class PlacementQuiz(Strict):
         return self
 
 
+class Months(Strict):
+    """content/months.yaml: the pathway stages that stand for the roadmap's months."""
+
+    pathway: str
+    stages: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _unique(self) -> Months:
+        if len(self.stages) != len(set(self.stages)):
+            raise ValueError("month stages must be unique")
+        return self
+
+
 def exercise_summary(exercise: Any) -> dict[str, Any]:
     """Short dict used in indexes and tests."""
     return {"id": exercise.id, "type": exercise.type, "difficulty": exercise.difficulty}

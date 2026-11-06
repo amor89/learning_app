@@ -14,10 +14,12 @@ from learnkit.models import (
     InterviewTopic,
     Lesson,
     ModuleMeta,
+    Months,
     Pathway,
     Pathways,
     PlacementQuiz,
     Roadmap,
+    Stage,
     TheoryFile,
     TheoryQuestion,
     Track,
@@ -210,3 +212,40 @@ def load_placement(course: Course, content_dir: Path = CONTENT_DIR) -> list[Plac
                 raise ValueError(f"{question.id}: names lessons outside {quiz.module}: {outside}")
         quizzes.append(quiz)
     return sorted(quizzes, key=lambda q: order[q.track])
+
+
+@dataclass
+class MonthStage:
+    """One roadmap month: a pathway stage with its modules that have lessons."""
+
+    pathway: Pathway
+    stage: Stage
+    modules: list[ModuleContent]
+
+    @property
+    def stem(self) -> str:
+        """File stem of the month's quick reference."""
+        return f"quickref-{self.stage.id}"
+
+
+def load_months(course: Course, content_dir: Path = CONTENT_DIR) -> list[MonthStage]:
+    """Load content/months.yaml and resolve each stage against the pathways.
+
+    Raises:
+        ValueError: If the pathway or a stage does not exist, or a stage has no lessons yet.
+    """
+    months = Months.model_validate(read_yaml(content_dir / "months.yaml"))
+    pathway = next((p for p in course.pathways if p.id == months.pathway), None)
+    if pathway is None:
+        raise ValueError(f"months.yaml: pathway {months.pathway} does not exist")
+    stages = {stage.id: stage for stage in pathway.stages}
+    out: list[MonthStage] = []
+    for stage_id in months.stages:
+        if stage_id not in stages:
+            raise ValueError(f"months.yaml: stage {stage_id} is not in {pathway.id}")
+        stage = stages[stage_id]
+        modules = [course.modules[m] for m in stage.modules if course.modules[m].lessons]
+        if not modules:
+            raise ValueError(f"months.yaml: stage {stage_id} has no lessons yet")
+        out.append(MonthStage(pathway, stage, modules))
+    return out

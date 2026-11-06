@@ -429,3 +429,21 @@ details.drills .plain-list { margin-top: 8px; }
   padding: 8px 8px 8px 14px; box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
 }
 @media (min-width: 840px) { .update-banner { left: 50%; right: auto; width: 640px; transform: translateX(-50%); } }
+
+/* Monthly notes */
+.notes-box { margin: 10px 0 18px; }
+.notes-box .field-label { margin-top: 4px; }
+.notes-box p { margin: 2px 0 6px; }
+.notes-editor {
+  width: 100%; min-height: 220px; padding: 10px; font: 0.95rem/1.45 var(--sans);
+  color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  resize: vertical;
+}
+.notes-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; }
+.month h3 { margin: 18px 0 4px; }
+.qr-lesson { border-top: 1px solid var(--border); padding-top: 4px; margin-top: 8px; }
+.qr-lesson h4 { margin: 4px 0 2px; font-size: 0.95rem; }
+.qr-lesson h4 a { color: var(--accent); text-decoration: none; }
+.qr-lesson .takeaway { font-style: italic; margin: 2px 0 4px; }
+.qr-facts { padding-left: 1.2em; margin: 0 0 6px; font-size: 0.9rem; }
+.qr-facts li { margin-bottom: 3px; overflow-wrap: anywhere; }

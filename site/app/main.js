@@ -1,6 +1,7 @@
 // App entry: loads the content index, routes hash URLs and owns the progress state.
 import * as store from "./store.js";
 import { drillView, interviewView, taskView } from "./interview-view.js";
+import { monthsView, monthView } from "./month-view.js";
 import { placementView } from "./placement-view.js";
 import { clear, h, toast } from "./ui.js";
 import {
@@ -112,6 +113,8 @@ const ROUTES = [
   [/^#\/module\/(\w+)$/, (m) => moduleView(app, m[1]), "home"],
   [/^#\/lesson\/([\w-]+)$/, (m) => lessonView(app, m[1]), "home"],
   [/^#\/placement\/(\w+)$/, (m) => placementView(app, m[1]), "home"],
+  [/^#\/months$/, () => monthsView(app), "paths"],
+  [/^#\/month\/([\w-]+)$/, (m) => monthView(app, m[1]), "paths"],
   [/^#\/interview$/, () => interviewView(app), "interview"],
   [/^#\/interview\/drill$/, () => drillView(app), "interview"],
   [/^#\/interview\/task\/([\w-]+)$/, (m) => taskView(app, m[1]), "interview"],

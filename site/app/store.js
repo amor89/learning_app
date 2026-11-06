@@ -30,6 +30,7 @@ export function emptyState() {
     cards: {},
     interview: { theory: {}, tasks: {}, drills: [], prefs: { topic: "all", count: 10 } },
     placement: {},
+    notes: {},
     settings: { theme: "auto" },
   };
 }

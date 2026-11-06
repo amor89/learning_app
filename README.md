@@ -18,6 +18,16 @@ The app never links straight to a file. In an iPhone home-screen app, a PDF open
 
 `scripts/build_cheatsheets.py` builds the PDFs into `site/downloads/cheatsheets/`, and `scripts/build_content.py` writes the same points for the in-app view to `site/content/sheets/`. Both read the lesson files, so the sheets never hold text of their own. `python scripts/build_all.py` runs it after the handbook.
 
+## Monthly notes
+
+`reference/roadmap.md` asks for a quick reference and a deep dive each month. The **Monthly notes** page (from the dashboard of the Senior Data Scientist roadmap, each roadmap stage in the pathway, or the library) has one page per roadmap stage, Months 1 to 3 through Months 16 to 18:
+
+- **Quick reference from the lessons.** Each lesson's takeaway and recap facts, with no code, on one printed A4 page. **Save one-page PDF** saves it. `scripts/build_cheatsheets.py` builds the PDFs into `site/downloads/quickref/` and fails the build if a month runs past one page.
+- **Your quick reference** and **your deep dive.** Two notes boxes that save as you type, with a word count. **Start from the generated summary** copies the lesson summary in as Markdown for you to cut down. **Use the deep-dive template** adds headings: topic, how it works, what you built, what surprised you, interview trade-offs and open questions.
+- **Save notes as Markdown** exports one file per month, `learning-notes-<stage>.md`, with both notes and the month's lessons, ready for your GitHub repository.
+
+Notes live with your progress, so export and import include them. `content/months.yaml` names the pathway and the stages that count as months. `tests/content/test_months.py` checks each month fits on one page and lists every lesson.
+
 ## Placement quizzes
 
 Each track with a start-here module (A0, B0, C0 and D0) has a ten-question placement quiz on it. Score 8 or more and the app offers to skip that module. Skipping takes it out of your route: **Continue** on the dashboard passes over it, and the pathway marks it **Skipped**. Score less and the result lists the start-here lessons behind the questions you missed. You can undo a skip or retake the quiz at any time, and a retake clears an earlier skip until you choose again.
@@ -102,7 +112,7 @@ pip install -e . --group dev
 python scripts/build_all.py
 ruff check . && ruff format --check . && mypy
 pytest                                   # Python checkers: solutions pass, seeded bugs fail
-node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs
+node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs tests/app/notes.test.mjs
 ```
 
 WeasyPrint needs Pango. On macOS: `brew install pango`. On Ubuntu: `apt install libpango-1.0-0 libpangoft2-1.0-0`.
