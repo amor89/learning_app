@@ -85,7 +85,7 @@ function statsLine(state, streak) {
 function quickLinks(app, pathway) {
   const role = (app.index.roles ?? []).find((r) => r.pathway === pathway.id);
   const links = [
-    ["#/library", "Cheat sheets and handbooks"],
+    ["#/library/downloads", "Cheat sheets and handbooks"],
     app.index.months ? ["#/months", "Monthly notes"] : null,
     ["#/interview/drill", "Interview drill"],
     role ? [`#/role/${role.id}`, "Role plan"] : null,
@@ -171,7 +171,7 @@ function lessonRow(app, lesson) {
 function moduleBlock(app, module) {
   const mastery = store.masteryOf(app.state, store.moduleExercises(module));
   const skipped = store.skippedModules(app.state).has(module.id);
-  return h("li", { class: "card path-module" },
+  return h("li", { class: "path-module" },
     h("a", { class: "module-head", href: `#/module/${module.id}` },
       h("strong", {}, `${module.id} ${module.title}`),
       skipped ? h("span", { class: "pill" }, "Skipped") : h("span", { class: "muted small" }, module.lessons.length ? pct(mastery) : "soon"),
@@ -180,6 +180,15 @@ function moduleBlock(app, module) {
       ? h("ol", { class: "path-lessons" }, module.lessons.map((l) => lessonRow(app, l)))
       : h("span", { class: "muted small" }, "Coming in a later phase"),
     sheetLink(module.cheatsheet && `#/sheet/${module.id}`, `${module.id} cheat sheet`, "small sheet-link"),
+  );
+}
+
+// A compact control that opens any stage, so you need not scroll past the others.
+function stageJump(pathway, open) {
+  return h("label", { class: "stage-jump" },
+    h("span", { class: "small muted" }, "Jump to stage"),
+    h("select", { onchange: (e) => { location.hash = `#/path/${pathway.id}/${e.target.value}`; } },
+      pathway.stages.map((stage, i) => h("option", { value: stage.id, selected: stage.id === open }, `${i + 1}. ${stage.title}`))),
   );
 }
 
@@ -213,6 +222,7 @@ export function pathwayView(app, pathwayId, stageId) {
         }, "Make this my pathway")),
     nextUpCard(paths.nextStep(app.state, pathway, modules)),
     (app.index.roles ?? []).filter((r) => r.pathway === pathway.id).map((r) => roleCard(app, r)),
+    stageJump(pathway, open),
     h("ol", { class: "path-stages" }, pathway.stages.map((stage, i) => {
       const p = paths.stageProgress(app.state, stage, modules);
       return h("li", {}, h("details", { class: "path-stage", id: `stage-${stage.id}`, open: stage.id === open },
@@ -275,10 +285,7 @@ export async function sheetView(app, first, second) {
   return h(
     "article",
     { class: "page sheet" },
-    h("nav", { class: "crumbs" },
-      h("a", { href: back.href, onclick: (e) => { if (history.length > 1) { e.preventDefault(); history.back(); } } }, "‹ Back"),
-      " · ", h("a", { href: back.href }, back.label),
-    ),
+    h("nav", { class: "crumbs" }, h("a", { href: back.href }, back.label)),
     h("h1", {}, title),
     h("p", { class: "muted small" }, `Cheat sheet · ${subtitle}`),
     h("div", { class: "actions" },
@@ -293,31 +300,26 @@ export async function sheetView(app, first, second) {
 
 // Library: tracks, mastery and downloads ---------------------------------------
 
-export function libraryView(app) {
+const LIBRARY_SECTIONS = [["tracks", "Tracks"], ["progress", "Progress"], ["downloads", "Downloads"]];
+
+function libraryTracks(app) {
+  const { index, state } = app;
+  return h("div", { class: "grid" }, index.tracks.map((track) => {
+    const p = store.trackProgress(state, track);
+    const published = track.modules.filter((m) => m.lessons.length).length;
+    return h("a", { class: "card track", href: `#/track/${track.id}` },
+      h("span", { class: "track-id" }, `Track ${track.id}`),
+      h("strong", {}, track.title),
+      progressBar(p.share, `${track.title} progress`),
+      h("span", { class: "muted small" }, `${p.done} of ${p.total} exercises · ${published} of ${track.modules.length} modules published`),
+    );
+  }));
+}
+
+function libraryProgress(app) {
   const { index, state } = app;
   const bands = store.bandMastery(state, index).filter((b) => b.exercises > 0);
-  return h(
-    "section",
-    { class: "page" },
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home")),
-    h("h1", {}, "All tracks and downloads"),
-    h("h2", {}, "Tracks"),
-    h(
-      "div",
-      { class: "grid" },
-      index.tracks.map((track) => {
-        const p = store.trackProgress(state, track);
-        const published = track.modules.filter((m) => m.lessons.length).length;
-        return h(
-          "a",
-          { class: "card track", href: `#/track/${track.id}` },
-          h("span", { class: "track-id" }, `Track ${track.id}`),
-          h("strong", {}, track.title),
-          progressBar(p.share, `${track.title} progress`),
-          h("span", { class: "muted small" }, `${p.done} of ${p.total} exercises · ${published} of ${track.modules.length} modules published`),
-        );
-      }),
-    ),
+  return [
     h("h2", {}, "Mastery by roadmap month"),
     bands.length
       ? h("ul", { class: "mastery" }, bands.map((b) =>
@@ -325,16 +327,18 @@ export function libraryView(app) {
         ))
       : null,
     h("h2", {}, "Mastery by module"),
-    h(
-      "div",
-      { class: "module-grid" },
-      index.tracks.flatMap((t) => t.modules).map((m) => {
-        const mastery = store.masteryOf(state, store.moduleExercises(m));
-        const attrs = { class: `module-chip${m.lessons.length ? "" : " empty"}${state.badges[m.id] ? " badge" : ""}`, title: m.title };
-        const inner = [h("span", { class: "chip-id" }, m.id), h("span", { class: "chip-value" }, m.lessons.length ? pct(mastery) : "soon")];
-        return m.lessons.length ? h("a", { ...attrs, href: `#/module/${m.id}` }, inner) : h("span", attrs, inner);
-      }),
-    ),
+    h("div", { class: "module-grid" }, index.tracks.flatMap((t) => t.modules).map((m) => {
+      const mastery = store.masteryOf(state, store.moduleExercises(m));
+      const attrs = { class: `module-chip${m.lessons.length ? "" : " empty"}${state.badges[m.id] ? " badge" : ""}`, title: m.title };
+      const inner = [h("span", { class: "chip-id" }, m.id), h("span", { class: "chip-value" }, m.lessons.length ? pct(mastery) : "soon")];
+      return m.lessons.length ? h("a", { ...attrs, href: `#/module/${m.id}` }, inner) : h("span", attrs, inner);
+    })),
+  ];
+}
+
+function libraryDownloads(app) {
+  const { index } = app;
+  return [
     h("h2", {}, "Cheat sheets"),
     h("p", { class: "muted" }, "One sheet per pathway stage, each with a PDF to save. Each module page has its own sheet too."),
     index.pathways.map((pathway) => h("details", { class: "path-stage sheets" },
@@ -344,10 +348,27 @@ export function libraryView(app) {
     h("h2", {}, "Monthly notes"),
     h("p", { class: "muted" }, "A one-page quick reference for each roadmap month, and space for your own quick reference and deep dive."),
     h("div", { class: "actions" }, h("a", { class: "btn secondary", href: "#/months" }, "Open monthly notes")),
-    h("h2", {}, "Handbook"),
-    h("p", { class: "muted" }, "The full handbook. Solutions sit in an appendix at the end."),
-    downloadButtons(index.downloads, "Full handbook"),
-    h("ul", { class: "plain-list" }, index.tracks.map((t) => h("li", {}, h("span", {}, `Track ${t.id}: ${t.title}`), downloadButtons(t.downloads, `Track ${t.id} handbook`)))),
+    h("h2", {}, "Handbooks"),
+    h("p", { class: "muted" }, "The full handbook, or one per track. Solutions sit in an appendix at the end."),
+    h("ul", { class: "plain-list handbooks" },
+      h("li", {}, h("span", {}, "Full handbook"), downloadButtons(index.downloads, "Full handbook")),
+      index.tracks.map((t) => h("li", {}, h("span", {}, `Track ${t.id}: ${t.title}`), downloadButtons(t.downloads, `Track ${t.id} handbook`))),
+    ),
+  ];
+}
+
+// Library: three sections behind a segmented control, so no section runs for pages.
+export function libraryView(app, section = "tracks") {
+  const current = LIBRARY_SECTIONS.some(([id]) => id === section) ? section : "tracks";
+  const body = { tracks: libraryTracks, progress: libraryProgress, downloads: libraryDownloads }[current](app);
+  return h(
+    "section",
+    { class: "page" },
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home")),
+    h("h1", {}, "Library"),
+    h("nav", { class: "segmented", "aria-label": "Library sections" }, LIBRARY_SECTIONS.map(([id, label]) =>
+      h("a", { href: `#/library/${id}`, "aria-current": id === current ? "page" : null }, label))),
+    body,
   );
 }
 
@@ -366,7 +387,7 @@ export function trackView(app, trackId) {
     progressBar(p.share, "Track progress"),
     h("p", { class: "muted small" }, `${p.done} of ${p.total} published exercises done`),
     track.placement ? placementCard(app, track, track.placement) : null,
-    downloadButtons(track.downloads, `Track ${track.id} handbook`),
+    h("h2", {}, "Modules"),
     h(
       "ol",
       { class: "module-list" },
@@ -381,6 +402,9 @@ export function trackView(app, trackId) {
         return h("li", {}, m.lessons.length ? h("a", { class: "card", href: `#/module/${m.id}` }, body) : h("div", { class: "card empty" }, body));
       }),
     ),
+    h("h2", {}, `Track ${track.id} handbook`),
+    h("p", { class: "muted small" }, "Every lesson in this track in one file. Solutions sit in an appendix at the end."),
+    downloadButtons(track.downloads, `Track ${track.id} handbook`, `Track ${track.id} handbook`),
   );
 }
 
@@ -400,7 +424,7 @@ export function moduleView(app, moduleId) {
     h("p", { class: "muted small" }, "Every lesson's takeaway, key code and recap cards on one page, with a PDF to save."),
     h("div", { class: "actions" }, sheetLink(module.cheatsheet && `#/sheet/${module.id}`, `${module.id} cheat sheet`, "btn")),
     h("h2", {}, "Download this module"),
-    downloadButtons(module.downloads, `${module.id} handbook`),
+    downloadButtons(module.downloads, `${module.id} handbook`, `${module.id} handbook`),
     h("h2", {}, "Lessons"),
     module.lessons.length
       ? h("ol", { class: "lesson-list" }, module.lessons.map((l) =>
@@ -502,6 +526,10 @@ export async function lessonView(app, lessonId) {
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home"), " › ", h("a", { href: `#/track/${meta.track.id}` }, `Track ${meta.track.id}`), " › ", h("a", { href: `#/module/${meta.module.id}` }, meta.module.id)),
     h("h1", {}, lesson.title),
     tagChips(lesson.tags, app.index.bands),
+    h("p", { class: "lesson-meta small" },
+      h("a", { class: "btn secondary jump-practice", href: `#/lesson/${lesson.id}`, onclick: (e) => { e.preventDefault(); document.getElementById("practice")?.scrollIntoView({ behavior: "smooth" }); } },
+        `Jump to practice · ${exercises.length} exercise${exercises.length === 1 ? "" : "s"}`),
+    ),
     meta.module.cheatsheet ? h("p", { class: "small" }, sheetLink(`#/sheet/${meta.module.id}`, `Open the ${meta.module.id} cheat sheet`, "sheet-link")) : null,
     h("nav", { class: "section-nav", "aria-label": "Lesson sections" },
       ["concept", "why", "example", "practice", "recap"].map((id) => h("a", { href: `#/lesson/${lesson.id}`, onclick: (e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: "smooth" }); } }, id === "why" ? "Why" : id[0].toUpperCase() + id.slice(1))),

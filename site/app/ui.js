@@ -127,19 +127,29 @@ export function editor(value, onChange, label = "Code editor") {
   return area;
 }
 
-export function downloadButtons(links, label) {
+// PDF and Word buttons. With a prefix the buttons name what they save, for example
+// "Track B handbook: PDF", so they read clearly away from a heading.
+export function downloadButtons(links, label, prefix = null) {
   if (!links) return h("p", { class: "muted small" }, "Handbook download not built yet.");
+  const name = (kind) => (prefix ? `${prefix}: ${kind}` : kind);
   return h(
     "div",
     { class: "downloads", role: "group", "aria-label": label },
-    h("button", { type: "button", class: "btn secondary", onclick: () => saveFile(links.pdf, fileName(links.pdf)) }, "PDF"),
-    h("button", { type: "button", class: "btn secondary", onclick: () => saveFile(links.docx, fileName(links.docx)) }, "Word"),
+    h("button", { type: "button", class: "btn secondary", onclick: () => saveFile(links.pdf, fileName(links.pdf)) }, name("PDF")),
+    h("button", { type: "button", class: "btn secondary", onclick: () => saveFile(links.docx, fileName(links.docx)) }, name("Word")),
   );
+}
+
+// Roadmap tags written out: "Months 1 to 3", not "M1-3". The full band label,
+// with its theme, shows on hover.
+export function tagText(tag, bands) {
+  const label = bands.find((b) => b.id === tag)?.label;
+  return label ? label.split(":")[0] : tag;
 }
 
 export function tagChips(tags, bands) {
   const labels = new Map(bands.map((b) => [b.id, b.label]));
-  return h("ul", { class: "chips", "aria-label": "Roadmap tags" }, tags.map((t) => h("li", { title: labels.get(t) ?? t }, t)));
+  return h("ul", { class: "chips", "aria-label": "Roadmap tags" }, tags.map((t) => h("li", { title: labels.get(t) ?? t }, tagText(t, bands))));
 }
 
 // Links to a cheat sheet inside the app, so the tab bar and Back stay on screen.
