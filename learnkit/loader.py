@@ -19,6 +19,7 @@ from learnkit.models import (
     Pathways,
     PlacementQuiz,
     Roadmap,
+    Role,
     Stage,
     TheoryFile,
     TheoryQuestion,
@@ -249,3 +250,49 @@ def load_months(course: Course, content_dir: Path = CONTENT_DIR) -> list[MonthSt
             raise ValueError(f"months.yaml: stage {stage_id} has no lessons yet")
         out.append(MonthStage(pathway, stage, modules))
     return out
+
+
+def load_roles(course: Course, content_dir: Path = CONTENT_DIR) -> list[Role]:
+    """Load content/roles/*.yaml and check them against the course.
+
+    Raises:
+        ValueError: If a file name does not match its id, a module names a lesson
+            that does not exist, or the role's pathway does not exist.
+    """
+    lesson_ids = {lesson.id for lesson in course.lessons()}
+    pathway_ids = {p.id for p in course.pathways}
+    roles = []
+    for path in sorted((content_dir / "roles").glob("*.yaml")):
+        role = Role.model_validate(read_yaml(path))
+        if role.id != path.stem:
+            raise ValueError(f"{path}: id {role.id} does not match file name")
+        if role.pathway not in pathway_ids:
+            raise ValueError(f"{role.id}: pathway {role.pathway} does not exist")
+        for module in role.modules:
+            unknown = sorted(set(module.lessons) - lesson_ids)
+            if unknown:
+                raise ValueError(f"{module.id}: names lessons that do not exist: {unknown}")
+        roles.append(role)
+    return roles
+
+
+def role_stage_modules(role: Role, course: Course) -> list[list[str]]:
+    """The app modules each phase draws on, in the order the plan lists them, each once.
+
+    A module appears in the first phase that uses one of its lessons. The role's
+    pathway lists exactly these, so the dashboard follows the phases.
+    """
+    module_of = {lesson.id: m.meta.id for m in course.modules.values() for lesson in m.lessons}
+    by_id = {m.id: m for m in role.modules}
+    seen: set[str] = set()
+    stages = []
+    for phase in role.phases:
+        lessons = [lesson for mid in phase.modules for lesson in by_id[mid].lessons]
+        modules = []
+        for lesson in lessons:
+            module = module_of[lesson]
+            if module not in seen:
+                seen.add(module)
+                modules.append(module)
+        stages.append(modules)
+    return stages

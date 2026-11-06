@@ -121,3 +121,24 @@ pathways:
         title: Capstone
         summary: Review an AI-generated pull request.
         modules: [X3]
+
+  - id: ey-talent
+    title: "EY: Talent Data Strategy"
+    summary: "Your 180-day plan for the Senior Data Scientist, Talent Data Strategy role, from 10 December 2026. Each phase lists the modules that teach its competencies. The role plan holds your self-assessment and the gaps the app does not cover yet."
+    stages:
+      - id: p1
+        title: "Phase 1, days 1 to 30: Orient"
+        summary: "Success: a current-state map of talent data sources, owners and access routes, validated by two stakeholders."
+        modules: [C0, C1, C2, C3, C5, C10, A4]
+      - id: p2
+        title: "Phase 2, days 31 to 60: Design"
+        summary: "Success: a draft canonical model, a RACI and a first set of data quality rules for one domain."
+        modules: [A0, A2, B18, C6, A3, C9, A1, A6, D4, A9]
+      - id: p3
+        title: "Phase 3, days 61 to 90: Prove"
+        summary: "Success: one domain runs bronze to gold with a data contract, masking, lineage and an audit trail."
+        modules: [B5, A10, B13, B12]
+      - id: p4
+        title: "Phase 4, days 91 to 180: Enable"
+        summary: "Success: one AI-ready data product passes a data protection impact assessment and a bias review."
+        modules: [C8, A7, B22]

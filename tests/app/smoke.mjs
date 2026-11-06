@@ -314,6 +314,33 @@ const [onePage] = await Promise.all([page.waitForEvent("download"), page.getByRo
 check(onePage.suggestedFilename() === `quickref-${month.id}.pdf` && readFileSync(await onePage.path()).subarray(0, 5).toString() === "%PDF-", "the one-page quick reference saves as a PDF");
 await noPdfLinks("month notes");
 
+// Role plan: the EY pathway links to it, a self-assessment saves, and the summary shows the gap
+const roles = JSON.parse(readFileSync(new URL("../../site/content/roles.json", import.meta.url), "utf8")).roles;
+const plan = roles[0];
+await page.goto(`${base}${query}#/path/${plan.pathway}`);
+await page.waitForFunction((title) => document.querySelector("h1")?.textContent === title, index.pathways.find((p) => p.id === plan.pathway).title);
+check(await page.locator(`a.card[href="#/role/${plan.id}"]`).count() === 1, "the role's pathway links to its role plan");
+await page.locator(`a.card[href="#/role/${plan.id}"]`).click();
+await page.getByRole("heading", { name: plan.title }).waitFor();
+check(await page.locator(".role-module").count() === plan.modules.length, `the role plan lists ${plan.modules.length} competencies`);
+check(await page.locator("details.path-stage").count() === plan.phases.length, `the role plan shows ${plan.phases.length} phases`);
+const firstModule = plan.phases[0].modules[0];
+const target = plan.modules.find((m) => m.id === firstModule).target;
+await page.locator(`#role-${firstModule} .level-option`).nth(0).click();
+check((await page.locator(`#role-${firstModule} .level-gap`).textContent()).startsWith(`${target - 1} level`), "rating Level 1 shows the gap to the target");
+check((await page.locator(".stream-summary").textContent()).includes("1 of"), "the stream summary counts the rating");
+await page.locator(`#role-${firstModule} .assessment input`).check();
+await page.locator(".assumptions input").first().check();
+await page.reload();
+await page.getByRole("heading", { name: plan.title }).waitFor();
+check(await page.locator(`#role-${firstModule} .level-option input`).nth(0).isChecked(), "your level survives a reload");
+check(await page.locator(`#role-${firstModule} .assessment input`).isChecked(), "the assessment mark survives a reload");
+check(await page.locator(".assumptions input").first().isChecked(), "a confirmed assumption survives a reload");
+check(await page.locator(".pill.gap").count() === plan.modules.filter((m) => m.coverage === "gap").length, "competencies the app does not cover are marked");
+await page.evaluate(() => document.querySelectorAll("details.path-stage").forEach((d) => (d.open = true)));
+await noHorizontalScroll("role plan");
+await page.screenshot({ path: `${shots}/08d-role.png`, fullPage: false });
+
 // Interview practice: the hub, a timed drill to the end, and a timed task whose clock survives a reload
 const bank = JSON.parse(readFileSync(new URL("../../site/content/interview.json", import.meta.url), "utf8"));
 await page.getByRole("link", { name: "Interview" }).click();

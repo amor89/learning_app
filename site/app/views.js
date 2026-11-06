@@ -3,6 +3,7 @@ import { renderExercise } from "./exercises.js";
 import * as paths from "./pathways.js";
 import { monthLink } from "./month-view.js";
 import { placementCard } from "./placement-view.js";
+import { roleCard } from "./role-view.js";
 import * as store from "./store.js";
 import {
   codeBlock,
@@ -101,6 +102,7 @@ export function dashboard(app) {
         h("a", { class: "btn ghost", href: "#/paths" }, "Change pathway"),
       ),
     ),
+    (app.index.roles ?? []).filter((r) => r.pathway === pathway.id).map((r) => roleCard(app, r)),
     h("h2", {}, "Stages"),
     h("ol", { class: "stage-list" }, pathway.stages.map((stage) => stageLink(app, pathway, stage, modules, current))),
     h("p", {}, h("a", { href: "#/library" }, "All tracks, mastery and handbook downloads")),
@@ -185,6 +187,7 @@ export function pathwayView(app, pathwayId, stageId) {
           },
         }, "Make this my pathway")),
     nextUpCard(paths.nextStep(app.state, pathway, modules)),
+    (app.index.roles ?? []).filter((r) => r.pathway === pathway.id).map((r) => roleCard(app, r)),
     h("ol", { class: "path-stages" }, pathway.stages.map((stage, i) => {
       const p = paths.stageProgress(app.state, stage, modules);
       return h("li", {}, h("details", { class: "path-stage", id: `stage-${stage.id}`, open: stage.id === open },

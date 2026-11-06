@@ -18,6 +18,23 @@ The app never links straight to a file. In an iPhone home-screen app, a PDF open
 
 `scripts/build_cheatsheets.py` builds the PDFs into `site/downloads/cheatsheets/`, and `scripts/build_content.py` writes the same points for the in-app view to `site/content/sheets/`. Both read the lesson files, so the sheets never hold text of their own. `python scripts/build_all.py` runs it after the handbook.
 
+## Role plans
+
+A role plan turns a job description into a dated plan you can check yourself against. The first is **Senior Data Scientist, Talent Data Strategy (EY UK)**, built from the working job description in your brief, version 0.1. It is not the official EY text, and the app marks every EY-specific item as an assumption.
+
+Open it from the **EY: Talent Data Strategy** pathway, or from the dashboard while that pathway is yours (`#/role/ey-talent`). It shows:
+
+- **Where you are**: the start date, 10 December 2026, and today's day of the 180-day plan.
+- **Four phases**: Orient, Design, Prove and Enable, with dates and their success criteria to tick off.
+- **18 competencies** in five streams. Each one shows its target level, the day-one level your brief assumes, the outcomes, the hours and the assessment. A **Level 1 to 4** picker records where you are now and shows the gap to the target.
+- **The lessons that teach each competency**, with your progress, and a plain note on what the app does not cover yet. Competencies with no lesson at all are marked **Not in the app yet**: UK GDPR and special category data, cross-border transfers and works councils, DAMA-DMBOK, and EYQ.
+- **A self-assessment summary**: your mean level against the mean target in each stream, and the competencies below target.
+- **Assumptions to confirm**, each with a tick box.
+
+The **EY: Talent Data Strategy** pathway has one stage per phase, listing the modules that teach that phase's competencies, so **Continue** on the dashboard follows the plan.
+
+The plan lives in `content/roles/ey-talent.yaml`. The loader checks that every lesson exists, that prerequisites never sit in a later phase, and that the pathway exists. `tests/content/test_roles.py` checks that the pathway's stages match the phases exactly. Your levels and ticks live with your progress.
+
 ## Monthly notes
 
 `reference/roadmap.md` asks for a quick reference and a deep dive each month. The **Monthly notes** page (from the dashboard of the Senior Data Scientist roadmap, each roadmap stage in the pathway, or the library) has one page per roadmap stage, Months 1 to 3 through Months 16 to 18:
@@ -112,7 +129,7 @@ pip install -e . --group dev
 python scripts/build_all.py
 ruff check . && ruff format --check . && mypy
 pytest                                   # Python checkers: solutions pass, seeded bugs fail
-node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs tests/app/notes.test.mjs
+node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs tests/app/notes.test.mjs tests/app/role.test.mjs
 ```
 
 WeasyPrint needs Pango. On macOS: `brew install pango`. On Ubuntu: `apt install libpango-1.0-0 libpangoft2-1.0-0`.

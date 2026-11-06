@@ -3,6 +3,7 @@ import * as store from "./store.js";
 import { drillView, interviewView, taskView } from "./interview-view.js";
 import { monthsView, monthView } from "./month-view.js";
 import { placementView } from "./placement-view.js";
+import { roleView } from "./role-view.js";
 import { clear, h, toast } from "./ui.js";
 import {
   dashboard,
@@ -22,6 +23,7 @@ const lessons = new Map();
 const sheets = new Map();
 let interviewBank = null;
 let placementBank = null;
+let roleBank = null;
 
 const app = {
   index: null,
@@ -43,6 +45,18 @@ const app = {
     applyTheme();
   },
   drill: null,
+  async roles() {
+    roleBank ??= fetch("content/roles.json").then((r) => {
+      if (!r.ok) throw new Error(`Role plans failed to load (${r.status}).`);
+      return r.json();
+    });
+    try {
+      return await roleBank;
+    } catch (error) {
+      roleBank = null;
+      throw error;
+    }
+  },
   async placement() {
     placementBank ??= fetch("content/placement.json").then((r) => {
       if (!r.ok) throw new Error(`Placement quizzes failed to load (${r.status}).`);
@@ -114,6 +128,7 @@ const ROUTES = [
   [/^#\/lesson\/([\w-]+)$/, (m) => lessonView(app, m[1]), "home"],
   [/^#\/placement\/(\w+)$/, (m) => placementView(app, m[1]), "home"],
   [/^#\/months$/, () => monthsView(app), "paths"],
+  [/^#\/role\/([\w-]+)$/, (m) => roleView(app, m[1]), "paths"],
   [/^#\/month\/([\w-]+)$/, (m) => monthView(app, m[1]), "paths"],
   [/^#\/interview$/, () => interviewView(app), "interview"],
   [/^#\/interview\/drill$/, () => drillView(app), "interview"],

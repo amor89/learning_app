@@ -1,0 +1,254 @@
+# Role plan: Senior Data Scientist, Talent Data Strategy (EY UK). Built from the working job
+# description in your brief, version 0.1. It is not the official EY text: every statement
+# about EY systems is an assumption until you confirm it.
+#
+# Each module names the app lessons that teach it and says how well they cover it:
+# full, partial or gap. learnkit/loader.py checks every lesson, prerequisite and phase.
+id: ey-talent
+title: Senior Data Scientist, Talent Data Strategy (EY UK)
+version: "0.1"
+status: Working draft from your own brief, not the official EY text. Treat every EY-specific item as an assumption until you confirm it.
+start: 2026-12-10
+pathway: ey-talent
+levels:
+  - {level: 1, name: Aware, meaning: "Explains the concept and names the risks."}
+  - {level: 2, name: Working, meaning: "Applies the concept with guidance on a defined task."}
+  - {level: 3, name: Proficient, meaning: "Delivers independently and reviews others."}
+  - {level: 4, name: Lead, meaning: "Sets the standard and owns the decision record."}
+streams: [Infrastructure, Architecture, Security, Governance and standards, AI enablement]
+
+phases:
+  - id: P1
+    name: Orient
+    days: [1, 30]
+    modules: [SEC-01, GOV-01, ARC-01, INF-01]
+    success: Current-state map of talent data sources, owners and access routes, validated by two stakeholders.
+  - id: P2
+    name: Design
+    days: [31, 60]
+    modules: [ARC-02, ARC-03, SEC-02, GOV-02, GOV-03]
+    success: Draft canonical model, RACI and first data quality rules for one domain.
+  - id: P3
+    name: Prove
+    days: [61, 90]
+    modules: [ARC-04, SEC-03, SEC-04, INF-02, AI-03]
+    success: One domain runs bronze to gold with a data contract, masking, lineage and an audit trail.
+  - id: P4
+    name: Enable
+    days: [91, 180]
+    modules: [INF-03, AI-01, AI-02, AI-04]
+    success: One AI-ready data product passes a data protection impact assessment and a bias review.
+
+modules:
+  - id: INF-01
+    stream: Infrastructure
+    title: Fabric capacity, workspaces and environments
+    target: 3
+    assumed: [1, 2]
+    hours: 6
+    outcomes: [Choose capacity SKU and workspace layout, "Separate dev, test and production"]
+    assessment: Write a workspace and environment standard of two pages.
+    lessons: [C1-L1, C1-L3, C5-L2, C10-L2, A4-L1]
+    coverage: partial
+    gaps: The lessons cover capacities, workspace roles and environment separation. They do not cover choosing a capacity SKU size for a given load.
+  - id: INF-02
+    stream: Infrastructure
+    title: CI/CD for Fabric items
+    target: 3
+    prerequisites: [INF-01]
+    assumed: [1, 2]
+    hours: 8
+    outcomes: [Connect workspaces to Git, Promote items with deployment pipelines]
+    assessment: Promote a notebook and a semantic model from dev to test with a passing check.
+    lessons: [C10-L1, C10-L2, A10-L1, A10-L3]
+    coverage: full
+  - id: INF-03
+    stream: Infrastructure
+    title: Capacity monitoring and cost control
+    target: 3
+    prerequisites: [INF-01]
+    assumed: [1, 2]
+    hours: 5
+    outcomes: [Read capacity metrics, Set cost and throttling thresholds]
+    assessment: Build a capacity use report with three alert thresholds.
+    lessons: [C10-L3, C8-L1, A7-L3]
+    coverage: partial
+    gaps: The lessons cover smoothing, throttling, the Metrics app and alerting. They do not build a cost report with alert thresholds.
+
+  - id: ARC-01
+    stream: Architecture
+    title: OneLake, Lakehouse and Warehouse
+    target: 3
+    assumed: [3]
+    hours: 8
+    outcomes: [Choose Lakehouse or Warehouse per workload, Use shortcuts and Delta tables]
+    assessment: Justify a storage choice for three talent workloads.
+    lessons: [C0-L1, C1-L2, C2-L1, C2-L2, C2-L3, C3-L1]
+    coverage: full
+  - id: ARC-02
+    stream: Architecture
+    title: Medallion layers for talent data
+    target: 4
+    prerequisites: [ARC-01]
+    assumed: [3]
+    hours: 8
+    outcomes: ["Define bronze, silver and gold contracts", Place PII handling per layer]
+    assessment: Architecture decision record for layer design.
+    lessons: [A0-L3, A2-L1, A2-L2, A2-L3, B18-L3]
+    coverage: partial
+    gaps: The lessons cover layer contracts and decision logs. They do not cover where to pseudonymise or mask personal data in each layer.
+  - id: ARC-03
+    stream: Architecture
+    title: Canonical talent model and people master data
+    target: 4
+    prerequisites: [ARC-02]
+    assumed: [3]
+    hours: 12
+    outcomes: ["Model person, position, organisation and event entities", Define match and survivorship rules]
+    assessment: Entity relationship model with keys and survivorship rules for the person entity.
+    lessons: [A2-L2, C6-L1, A3-L1]
+    coverage: partial
+    gaps: The lessons cover canonical names, star schemas and deduplication before MERGE. They do not cover entity matching or survivorship rules for master data.
+  - id: ARC-04
+    stream: Architecture
+    title: Data contracts with source HR systems
+    target: 3
+    prerequisites: [ARC-03]
+    assumed: [3]
+    hours: 6
+    outcomes: ["Specify schema, freshness and quality terms", Agree change notification]
+    assessment: One signed-off contract template with a worked example on synthetic data.
+    lessons: [A6-L1, B5-L1, B5-L3, A3-L2]
+    coverage: partial
+    gaps: The lessons cover contracts as code, schema checks and schema evolution. They do not cover freshness terms or change notification agreed with a source owner.
+
+  - id: SEC-01
+    stream: Security
+    title: UK GDPR and special category data in HR
+    target: 3
+    hours: 6
+    outcomes: [Identify lawful basis per use, Apply Article 9 conditions]
+    assessment: Classify 20 synthetic talent attributes by sensitivity and lawful basis.
+    lessons: []
+    coverage: gap
+    gaps: No lesson covers UK GDPR, lawful basis or special category data yet.
+  - id: SEC-02
+    stream: Security
+    title: Fabric access models
+    target: 3
+    prerequisites: [SEC-01, ARC-01]
+    hours: 8
+    outcomes: ["Apply workspace roles, item permissions, row and column security", Design attribute-based access]
+    assessment: Access matrix for four personas, tested on a synthetic dataset.
+    lessons: [C1-L3, C9-L2, A4-L2, A4-L3]
+    coverage: partial
+    gaps: The lessons cover role-based access down to rows and columns. They do not design attribute-based access.
+  - id: SEC-03
+    stream: Security
+    title: Purview classification, labels and audit
+    target: 3
+    prerequisites: [SEC-02]
+    assumed: [1, 2]
+    hours: 8
+    outcomes: [Apply sensitivity labels, Produce audit evidence]
+    assessment: Scan a synthetic lakehouse and report classification coverage.
+    lessons: [C9-L3, C9-L1]
+    coverage: partial
+    gaps: The lessons cover sensitivity labels, inheritance and lineage. They do not cover Purview scans or producing audit evidence.
+  - id: SEC-04
+    stream: Security
+    title: Cross-border transfers and works councils
+    target: 2
+    prerequisites: [SEC-01]
+    hours: 5
+    outcomes: [Select a transfer mechanism, Identify consultation triggers]
+    assessment: Decision tree for when AI use on people data needs consultation.
+    lessons: []
+    coverage: gap
+    gaps: No lesson covers international transfers or works council consultation yet.
+
+  - id: GOV-01
+    stream: Governance and standards
+    title: DAMA-DMBOK applied to talent domains
+    target: 4
+    assumed: [3]
+    hours: 5
+    outcomes: [Map knowledge areas to talent data, Rate maturity per area]
+    assessment: Maturity baseline across the six talent domains.
+    lessons: []
+    coverage: gap
+    gaps: No lesson covers DAMA-DMBOK yet. Your brief names DAMA work at Ofcom as your starting point.
+  - id: GOV-02
+    stream: Governance and standards
+    title: Ownership, stewardship, glossary and naming
+    target: 4
+    prerequisites: [GOV-01]
+    assumed: [3]
+    hours: 8
+    outcomes: [Draft RACI, Write glossary entries, Set naming conventions]
+    assessment: RACI, 15 glossary entries and a naming standard.
+    lessons: [C9-L1, A1-L1, B18-L3]
+    coverage: partial
+    gaps: The lessons cover domains, endorsement, naming in code and decision logs. They do not cover RACI, stewardship roles or a business glossary.
+  - id: GOV-03
+    stream: Governance and standards
+    title: Data quality rules and lineage
+    target: 3
+    prerequisites: [GOV-02, ARC-02]
+    assumed: [3]
+    hours: 8
+    outcomes: [Write rules per dimension, Capture lineage in Purview]
+    assessment: Rule set with thresholds and automated tests in PySpark.
+    lessons: [A6-L1, A6-L2, A6-L3, D4-L1, A9-L3, C9-L3]
+    coverage: full
+
+  - id: AI-01
+    stream: AI enablement
+    title: Copilot readiness for Fabric and Power BI
+    target: 3
+    prerequisites: [SEC-02, GOV-02]
+    hours: 6
+    outcomes: [Prepare semantic models for Copilot, Check oversharing risk]
+    assessment: Readiness checklist applied to one semantic model.
+    lessons: [C8-L1, C8-L2, C8-L3, C6-L1, C9-L2]
+    coverage: full
+  - id: AI-02
+    stream: AI enablement
+    title: EYQ integration (assumption)
+    target: 2
+    prerequisites: [AI-01]
+    assumed: [1, 2]
+    hours: 4
+    outcomes: [Identify the approved data route into EYQ, Define permitted data classes]
+    assessment: Confirmed integration route, documented with the platform owner.
+    lessons: []
+    coverage: gap
+    gaps: EYQ is internal to EY, so the app cannot teach it. Confirm the route with the platform owner.
+  - id: AI-03
+    stream: AI enablement
+    title: Responsible AI and bias controls on people data
+    target: 3
+    prerequisites: [SEC-01]
+    hours: 8
+    outcomes: [Run a fairness test on protected attributes, Write a DPIA section]
+    assessment: Bias report on a synthetic hiring dataset with disparity metrics.
+    lessons: [B13-L3, B12-L3, B18-L2]
+    coverage: partial
+    gaps: The lessons cover subgroup rates, the fairness trade-offs and model cards. They do not cover writing a data protection impact assessment.
+  - id: AI-04
+    stream: AI enablement
+    title: AI-ready data products and use case selection
+    target: 4
+    prerequisites: [AI-03, GOV-03, ARC-04]
+    hours: 8
+    outcomes: ["Score use cases on value, risk and data readiness", Package a data product]
+    assessment: Ranked use case list and one data product specification.
+    lessons: [B18-L2, B22-L3, C9-L1]
+    coverage: partial
+    gaps: The lessons cover model cards, release gates and endorsement. They do not cover scoring use cases or specifying a data product.
+
+assumptions:
+  - EY runs talent data on Fabric with a central capacity.
+  - EYQ exposes governed data through a defined integration route.
+  - A global HR system of record exists per region.
+  - Works council obligations apply in several member firms.
