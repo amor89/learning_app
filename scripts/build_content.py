@@ -442,13 +442,20 @@ def all_exercises(course: Course) -> list[Exercise]:
     return [ex for lesson in course.lessons() for ex in lesson.exercises]
 
 
+APP_FILES = ["site/index.html", "site/sw.js", "site/app/*.js", "site/app/styles.css"]
+
+
 def content_version() -> str:
-    """Hash of every content, checker and renderer file, so the app can spot new builds."""
+    """Hash of every content, checker, renderer and app file, so the app can spot new deploys.
+
+    The app compares this with the version it loaded and offers a reload when they differ.
+    """
     digest = hashlib.sha256()
     sources = [
         *ROOT.glob("content/**/*.yaml"),
         *ROOT.glob("checkers/*.py"),
         *ROOT.glob("learnkit/*.py"),
+        *(path for pattern in APP_FILES for path in ROOT.glob(pattern)),
         Path(__file__),
     ]
     for path in sorted(sources):
