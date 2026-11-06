@@ -1,0 +1,121 @@
+# Placement quiz for Track A. Score pass_mark or more to skip A0 and start at A1.
+track: A
+module: A0
+pass_mark: 8
+questions:
+  - id: A-1
+    lessons: [A0-L1]
+    question: |
+      What does `df.show()` print after these two lines?
+
+      ```python
+      df.withColumn("w2", F.col("w") * 2)
+      df.show()
+      ```
+    options:
+      - {id: a, text: "The rows with a new column `w2`"}
+      - {id: b, text: "The rows without `w2`, because the new DataFrame was thrown away"}
+      - {id: c, text: "An error, because `w2` does not exist yet"}
+      - {id: d, text: "The rows with `w2` filled with NULL"}
+    answer: b
+    explanation: |
+      DataFrames are immutable. `withColumn` returns a new DataFrame and leaves `df` unchanged, so use the result: `df = df.withColumn("w2", F.col("w") * 2)`.
+  - id: A-2
+    lessons: [A0-L1]
+    question: Which call makes Spark run the plan?
+    options:
+      - {id: a, text: "`df.select(\"region\")`"}
+      - {id: b, text: "`df.filter(F.col(\"w\") > 0)`"}
+      - {id: c, text: "`df.count()`"}
+      - {id: d, text: "`df.withColumn(\"n\", F.lit(1))`"}
+    answer: c
+    explanation: |
+      `count()` is an action. `select`, `filter` and `withColumn` are transformations: they describe a new DataFrame and run nothing until an action such as `show`, `count`, `collect` or `write`.
+  - id: A-3
+    lessons: [A0-L1]
+    question: Why import Spark's functions as `from pyspark.sql import functions as F` instead of `from pyspark.sql.functions import sum`?
+    options:
+      - {id: a, text: "Importing `sum` by name hides Python's own `sum`"}
+      - {id: b, text: "Spark functions run faster through the `F` prefix"}
+      - {id: c, text: "`sum` cannot be imported by name in PySpark 4.0"}
+      - {id: d, text: "`F.sum` returns a number, the other returns a column"}
+    answer: a
+    explanation: |
+      A name import of `sum`, `max` or `min` replaces Python's built-in of the same name in that file, so plain Python code that calls `sum(...)` breaks in confusing ways. The `F.` prefix keeps both.
+  - id: A-4
+    lessons: [A0-L1]
+    question: You call `collect()` on a table with 500 million rows. What goes wrong?
+    options:
+      - {id: a, text: "Nothing. `collect()` streams rows one at a time"}
+      - {id: b, text: "It pulls every row onto one machine, which can run out of memory"}
+      - {id: c, text: "It writes the rows back to the table"}
+      - {id: d, text: "It returns only the first 20 rows"}
+    answer: b
+    explanation: |
+      `collect()` returns every row to Python as a list of `Row` objects on one machine. Collect only small results, and keep large work in DataFrames.
+  - id: A-5
+    lessons: [A0-L2]
+    question: You want only the regions whose total weight is above 100. Which clause keeps them?
+    options:
+      - {id: a, text: "`WHERE final_weight > 100`"}
+      - {id: b, text: "`WHERE SUM(final_weight) > 100`"}
+      - {id: c, text: "`HAVING SUM(final_weight) > 100`"}
+      - {id: d, text: "`ORDER BY SUM(final_weight) > 100`"}
+    answer: c
+    explanation: |
+      `WHERE` filters rows before grouping. `HAVING` filters groups after they are summarised, so it can test an aggregate such as `SUM(final_weight)`.
+  - id: A-6
+    lessons: [A0-L2]
+    question: What does `SELECT * FROM respondents WHERE final_weight = NULL` return?
+    options:
+      - {id: a, text: "The rows where the weight is missing"}
+      - {id: b, text: "No rows"}
+      - {id: c, text: "Every row"}
+      - {id: d, text: "An error"}
+    answer: b
+    explanation: |
+      Any comparison with NULL is unknown, never true, so no row matches. Use `WHERE final_weight IS NULL`.
+  - id: A-7
+    lessons: [A0-L2]
+    question: A delivery repeats some respondents with a newer `delivery_version`. How do you keep only the newest row per respondent and wave?
+    options:
+      - {id: a, text: "`SELECT DISTINCT *`"}
+      - {id: b, text: "`ROW_NUMBER() OVER (PARTITION BY respondent_id, wave_id ORDER BY delivery_version DESC)`, then keep row number 1"}
+      - {id: c, text: "`LEFT ANTI JOIN` the table to itself"}
+      - {id: d, text: "`GROUP BY respondent_id, wave_id` alone"}
+    answer: b
+    explanation: |
+      The window function numbers the rows within each key, newest first, and `WHERE rn = 1` keeps exactly one. `DISTINCT` keeps both versions, because their values differ.
+  - id: A-8
+    lessons: [A0-L3]
+    question: In Unity Catalog, what does each part of `research_prod.research_silver.nat_respondents` name?
+    options:
+      - {id: a, text: "Workspace, cluster, table"}
+      - {id: b, text: "Catalog, schema, table"}
+      - {id: c, text: "Schema, catalog, volume"}
+      - {id: d, text: "Database, folder, file"}
+    answer: b
+    explanation: |
+      Unity Catalog uses three-level names: a catalog per environment, a schema per layer, then the table. Files live in volumes under the same names and permissions.
+  - id: A-9
+    lessons: [A0-L3]
+    question: What makes a folder of data files a Delta table?
+    options:
+      - {id: a, text: "The files are CSV with a header row"}
+      - {id: b, text: "A transaction log, `_delta_log`, that records each write as a numbered version"}
+      - {id: c, text: "The table sits in the gold layer"}
+      - {id: d, text: "The files are compressed with gzip"}
+    answer: b
+    explanation: |
+      A Delta table is Parquet data files plus `_delta_log`. Each write adds a numbered commit, so the table has versions you can list with `DESCRIBE HISTORY` and read with `VERSION AS OF`.
+  - id: A-10
+    lessons: [A0-L3]
+    question: You find a bug in the logic that builds a silver table. What do you do?
+    options:
+      - {id: a, text: "Edit the affected bronze rows so silver comes out right"}
+      - {id: b, text: "Fix the silver logic and rebuild silver from bronze"}
+      - {id: c, text: "Patch the gold table by hand"}
+      - {id: d, text: "Delete bronze and reload it from silver"}
+    answer: b
+    explanation: |
+      Data moves forward only. Bronze keeps every delivery as received, so a fix to silver logic means rebuilding silver from bronze, never editing bronze.

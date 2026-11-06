@@ -409,3 +409,13 @@ details.drills .plain-list { margin-top: 8px; }
 }
 .follow-ups { display: grid; gap: 0; }
 .interview .editor { margin-top: 4px; }
+
+/* Placement quiz */
+.placement-card { margin: 12px 0; border-left: 4px solid var(--accent); }
+.placement-card .actions { margin: 4px 0 0; }
+.placement-list { padding-left: 1.4em; display: grid; gap: 18px; }
+.placement-q .prompt p { margin: 4px 0 8px; }
+.placement-why .feedback { margin: 8px 0 4px; }
+.review-lessons { margin: 6px 0 10px; }
+.review-lessons a { color: var(--accent); }
+#placement-result { margin-bottom: 8px; }

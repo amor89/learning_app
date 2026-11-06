@@ -16,6 +16,7 @@ from learnkit.models import (
     ModuleMeta,
     Pathway,
     Pathways,
+    PlacementQuiz,
     Roadmap,
     TheoryFile,
     TheoryQuestion,
@@ -184,3 +185,28 @@ def load_interview(course: Course, content_dir: Path = CONTENT_DIR) -> Interview
         if unknown:
             raise ValueError(f"{item.id}: names lessons that do not exist: {unknown}")
     return Interview(index.topics, questions, tasks)
+
+
+def load_placement(course: Course, content_dir: Path = CONTENT_DIR) -> list[PlacementQuiz]:
+    """Load content/placement/<track>.yaml, one quiz per track, in track order.
+
+    Raises:
+        ValueError: If a file name does not match its track, the quiz's module is not
+            the first module of the track, or a question names a lesson outside it.
+    """
+    quizzes: list[PlacementQuiz] = []
+    order = {track.id: i for i, track in enumerate(course.tracks)}
+    for path in sorted((content_dir / "placement").glob("*.yaml")):
+        quiz = PlacementQuiz.model_validate(read_yaml(path))
+        track = next((t for t in course.tracks if t.id == quiz.track), None)
+        if track is None or path.stem != quiz.track:
+            raise ValueError(f"{path}: track {quiz.track} does not match a track and the file name")
+        if track.modules[0].id != quiz.module:
+            raise ValueError(f"{path}: {quiz.module} is not the first module of track {track.id}")
+        lesson_ids = {lesson.id for lesson in course.modules[quiz.module].lessons}
+        for question in quiz.questions:
+            outside = sorted(set(question.lessons) - lesson_ids)
+            if outside:
+                raise ValueError(f"{question.id}: names lessons outside {quiz.module}: {outside}")
+        quizzes.append(quiz)
+    return sorted(quizzes, key=lambda q: order[q.track])

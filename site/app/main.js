@@ -1,6 +1,7 @@
 // App entry: loads the content index, routes hash URLs and owns the progress state.
 import * as store from "./store.js";
 import { drillView, interviewView, taskView } from "./interview-view.js";
+import { placementView } from "./placement-view.js";
 import { clear, h, toast } from "./ui.js";
 import {
   dashboard,
@@ -19,6 +20,7 @@ const root = document.getElementById("app");
 const lessons = new Map();
 const sheets = new Map();
 let interviewBank = null;
+let placementBank = null;
 
 const app = {
   index: null,
@@ -40,6 +42,18 @@ const app = {
     applyTheme();
   },
   drill: null,
+  async placement() {
+    placementBank ??= fetch("content/placement.json").then((r) => {
+      if (!r.ok) throw new Error(`Placement quizzes failed to load (${r.status}).`);
+      return r.json();
+    });
+    try {
+      return await placementBank;
+    } catch (error) {
+      placementBank = null;
+      throw error;
+    }
+  },
   async interview() {
     interviewBank ??= fetch("content/interview.json").then((r) => {
       if (!r.ok) throw new Error(`Interview practice failed to load (${r.status}).`);
@@ -97,6 +111,7 @@ const ROUTES = [
   [/^#\/track\/(\w+)$/, (m) => trackView(app, m[1]), "home"],
   [/^#\/module\/(\w+)$/, (m) => moduleView(app, m[1]), "home"],
   [/^#\/lesson\/([\w-]+)$/, (m) => lessonView(app, m[1]), "home"],
+  [/^#\/placement\/(\w+)$/, (m) => placementView(app, m[1]), "home"],
   [/^#\/interview$/, () => interviewView(app), "interview"],
   [/^#\/interview\/drill$/, () => drillView(app), "interview"],
   [/^#\/interview\/task\/([\w-]+)$/, (m) => taskView(app, m[1]), "interview"],

@@ -18,6 +18,14 @@ The app never links straight to a file. In an iPhone home-screen app, a PDF open
 
 `scripts/build_cheatsheets.py` builds the PDFs into `site/downloads/cheatsheets/`, and `scripts/build_content.py` writes the same points for the in-app view to `site/content/sheets/`. Both read the lesson files, so the sheets never hold text of their own. `python scripts/build_all.py` runs it after the handbook.
 
+## Placement quizzes
+
+Each track with a start-here module (A0, B0, C0 and D0) has a ten-question placement quiz on it. Score 8 or more and the app offers to skip that module. Skipping takes it out of your route: **Continue** on the dashboard passes over it, and the pathway marks it **Skipped**. Score less and the result lists the start-here lessons behind the questions you missed. You can undo a skip or retake the quiz at any time, and a retake clears an earlier skip until you choose again.
+
+The dashboard offers the quiz when **Continue** points into a start-here module you have not been placed on. The track page and the start-here module page offer it too, and show your last result.
+
+The questions live in `content/placement/<track>.yaml`. Each names the start-here lessons that teach it. The loader rejects a quiz whose module is not the first of its track, or a question that names a lesson outside that module. `tests/content/test_placement.py` checks that every start-here module has a quiz and that each of its lessons has at least two questions. `scripts/build_content.py` writes `site/content/placement.json`.
+
 ## Interview practice
 
 The **Interview** tab holds timed practice for senior data science interviews, the "running throughout" strand of `reference/roadmap.md`.
@@ -92,7 +100,7 @@ pip install -e . --group dev
 python scripts/build_all.py
 ruff check . && ruff format --check . && mypy
 pytest                                   # Python checkers: solutions pass, seeded bugs fail
-node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs
+node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs
 ```
 
 WeasyPrint needs Pango. On macOS: `brew install pango`. On Ubuntu: `apt install libpango-1.0-0 libpangoft2-1.0-0`.

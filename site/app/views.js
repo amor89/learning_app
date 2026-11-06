@@ -1,6 +1,7 @@
 // Page views. Each view returns a DOM node for #app.
 import { renderExercise } from "./exercises.js";
 import * as paths from "./pathways.js";
+import { placementCard } from "./placement-view.js";
 import * as store from "./store.js";
 import {
   codeBlock,
@@ -57,6 +58,13 @@ function stageLink(app, pathway, stage, modules, current) {
   ));
 }
 
+// When Continue points into a start-here module whose quiz you have not taken, offer it.
+function placementPrompt(app, step) {
+  const track = step?.module.track;
+  if (!track?.placement || track.placement.module !== step.module.id || app.state.placement?.[track.id]) return null;
+  return placementCard(app, track, track.placement);
+}
+
 export function dashboard(app) {
   const { index, state } = app;
   const modules = paths.moduleIndex(index);
@@ -66,6 +74,7 @@ export function dashboard(app) {
   const due = store.dueCards(state).length;
   const streak = store.currentStreak(state);
   const badges = Object.keys(state.badges).length;
+  const next = paths.nextStep(state, pathway, modules);
 
   return h(
     "section",
@@ -79,7 +88,8 @@ export function dashboard(app) {
       h("div", { class: "stat" }, h("span", { class: "stat-value" }, badges), h("span", { class: "stat-label" }, "Badges")),
       h("a", { class: "stat link", href: "#/review" }, h("span", { class: "stat-value" }, due), h("span", { class: "stat-label" }, "Cards due")),
     ),
-    nextUpCard(paths.nextStep(state, pathway, modules), "Continue"),
+    nextUpCard(next, "Continue"),
+    placementPrompt(app, next),
     h("div", { class: "card pathway-card" },
       h("span", { class: "track-id" }, "Your pathway"),
       h("strong", {}, pathway.title),
@@ -131,10 +141,11 @@ function lessonRow(app, lesson) {
 
 function moduleBlock(app, module) {
   const mastery = store.masteryOf(app.state, store.moduleExercises(module));
+  const skipped = store.skippedModules(app.state).has(module.id);
   return h("li", { class: "card path-module" },
     h("a", { class: "module-head", href: `#/module/${module.id}` },
       h("strong", {}, `${module.id} ${module.title}`),
-      h("span", { class: "muted small" }, module.lessons.length ? pct(mastery) : "soon"),
+      skipped ? h("span", { class: "pill" }, "Skipped") : h("span", { class: "muted small" }, module.lessons.length ? pct(mastery) : "soon"),
     ),
     module.lessons.length
       ? h("ol", { class: "path-lessons" }, module.lessons.map((l) => lessonRow(app, l)))
@@ -318,6 +329,7 @@ export function trackView(app, trackId) {
     h("p", {}, track.summary),
     progressBar(p.share, "Track progress"),
     h("p", { class: "muted small" }, `${p.done} of ${p.total} published exercises done`),
+    track.placement ? placementCard(app, track, track.placement) : null,
     downloadButtons(track.downloads, `Track ${track.id} handbook`),
     h(
       "ol",
@@ -347,6 +359,7 @@ export function moduleView(app, moduleId) {
     h("h1", {}, `${module.id} ${module.title}`),
     h("p", {}, module.summary),
     tagChips(module.tags, app.index.bands),
+    track.placement?.module === module.id ? placementCard(app, track, track.placement) : null,
     h("h2", {}, "Cheat sheet"),
     h("p", { class: "muted small" }, "Every lesson's takeaway, key code and recap cards on one page, with a PDF to save."),
     h("div", { class: "actions" }, sheetLink(module.cheatsheet && `#/sheet/${module.id}`, `${module.id} cheat sheet`, "btn")),

@@ -37,9 +37,12 @@ export function pathwayProgress(state, pathway, modules) {
 }
 
 // The first unfinished lesson in pathway order, with its stage and module.
+// Modules skipped after a placement quiz are passed over.
 export function nextStep(state, pathway, modules) {
+  const skipped = store.skippedModules(state);
   for (const stage of pathway.stages) {
     for (const module of stageModules(stage, modules)) {
+      if (skipped.has(module.id)) continue;
       const lesson = module.lessons.find((l) => !store.lessonComplete(state, l));
       if (lesson) return { stage, module, lesson };
     }

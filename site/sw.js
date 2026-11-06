@@ -1,5 +1,5 @@
 // Service worker: offline app shell, fresh content when online, cached Pyodide.
-const SHELL_CACHE = "shell-v4";
+const SHELL_CACHE = "shell-v5";
 const CONTENT_CACHE = "content-v1";
 const PYODIDE_CACHE = "pyodide-v1";
 const SHELL = [
@@ -11,6 +11,8 @@ const SHELL = [
   "app/pathways.js",
   "app/interview.js",
   "app/interview-view.js",
+  "app/placement.js",
+  "app/placement-view.js",
   "app/exercises.js",
   "app/checkers.js",
   "app/store.js",

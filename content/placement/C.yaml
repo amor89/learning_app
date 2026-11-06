@@ -1,0 +1,115 @@
+# Placement quiz for Track C. Score pass_mark or more to skip C0 and start at C1.
+track: C
+module: C0
+pass_mark: 8
+questions:
+  - id: C-1
+    lessons: [C0-L1]
+    question: A postcode `01234` comes back as the number `1234` after a load. Which file format most likely carried it?
+    options:
+      - {id: a, text: "CSV"}
+      - {id: b, text: "Parquet"}
+      - {id: c, text: "Delta"}
+      - {id: d, text: "Any of them"}
+    answer: a
+    explanation: |
+      CSV is plain text and stores no types, so the reader guesses them. Parquet and Delta store each column's type.
+  - id: C-2
+    lessons: [C0-L1]
+    question: You read two columns of a 200-column Parquet table. How much of the table does the reader scan?
+    options:
+      - {id: a, text: "Every column, because rows are stored together"}
+      - {id: b, text: "Only the two columns, because Parquet stores data by column"}
+      - {id: c, text: "Only the first row group"}
+      - {id: d, text: "It depends on the file name"}
+    answer: b
+    explanation: |
+      Parquet is columnar, typed and compressed. A query that needs two columns reads only those two.
+  - id: C-3
+    lessons: [C0-L1]
+    question: What is a lakehouse?
+    options:
+      - {id: a, text: "A data lake with no tables"}
+      - {id: b, text: "A warehouse that stores CSV files"}
+      - {id: c, text: "Tables in an open format, such as Delta, in a lake, read by both Spark and SQL engines"}
+      - {id: d, text: "A copy of the warehouse kept for backups"}
+    answer: c
+    explanation: |
+      A lake holds files with structure applied on read, a warehouse holds typed tables for SQL, and a lakehouse keeps open-format tables in the lake so several engines read the same data.
+  - id: C-4
+    lessons: [C0-L1]
+    question: What does ELT mean?
+    options:
+      - {id: a, text: "Load raw data first, then transform it inside the platform"}
+      - {id: b, text: "Transform data before it reaches the platform, then load it"}
+      - {id: c, text: "Export, link and test"}
+      - {id: d, text: "Load data only through streaming"}
+    answer: a
+    explanation: |
+      Extract, load, transform: the raw data lands first, as bronze, and transformations inside the platform build silver and gold from it.
+  - id: C-5
+    lessons: [C0-L2]
+    question: In Power BI, what is the difference between a calculated column and a measure?
+    options:
+      - {id: a, text: "There is none, they are two names for one thing"}
+      - {id: b, text: "A column is worked out per row and stored, a measure is worked out when a visual asks, in that visual's filter context"}
+      - {id: c, text: "A measure is stored per row, a column is worked out per visual"}
+      - {id: d, text: "Columns hold text, measures hold numbers"}
+    answer: b
+    explanation: |
+      That is why ratios belong in measures: the same measure gives a region's figure in the region's row and the total in the total row.
+  - id: C-6
+    lessons: [C0-L2]
+    question: Which gives the right weighted reach percentage at every level of a report?
+    options:
+      - {id: a, text: "The average of a per-row percentage column"}
+      - {id: b, text: "`DIVIDE ( SUM ( fact[reach] ), SUM ( fact[base] ) )` as a measure"}
+      - {id: c, text: "A calculated column `fact[reach] / fact[base]`, summed"}
+      - {id: d, text: "The maximum of the per-row percentages"}
+    answer: b
+    explanation: |
+      Dividing two totals is right for a region, a wave or everything. Averaging per-row percentages weights a row with 2 respondents the same as a row with 2,000. `DIVIDE` returns blank when the denominator is 0 or blank.
+  - id: C-7
+    lessons: [C0-L2]
+    question: What does Direct Lake storage mode do in Fabric?
+    options:
+      - {id: a, text: "Copies the data into the model and refreshes it on a schedule"}
+      - {id: b, text: "Sends every query to the source database"}
+      - {id: c, text: "Reads Delta tables in OneLake directly, without an import copy"}
+      - {id: d, text: "Streams events into the report as they arrive"}
+    answer: c
+    explanation: |
+      Import copies and refreshes, DirectQuery queries the source each time, and Direct Lake (GA) reads the OneLake Delta tables directly.
+  - id: C-8
+    lessons: [C0-L3]
+    question: You run `INSERT INTO dbo.respondents ...` on a lakehouse's SQL analytics endpoint. What happens?
+    options:
+      - {id: a, text: "The rows are added"}
+      - {id: b, text: "It fails: the endpoint is read-only for table data"}
+      - {id: c, text: "The rows go to a staging table"}
+      - {id: d, text: "The rows appear only in Power BI"}
+    answer: b
+    explanation: |
+      The SQL analytics endpoint answers T-SQL queries over the lakehouse tables but does not write table data. Write with Spark, or use a Warehouse when you need T-SQL writes.
+  - id: C-9
+    lessons: [C0-L3]
+    question: How do you add new rows to the lakehouse table `respondents` from a Spark notebook?
+    options:
+      - {id: a, text: "`df.write.mode(\"append\").saveAsTable(\"respondents\")`"}
+      - {id: b, text: "`df.write.mode(\"overwrite\").saveAsTable(\"respondents\")`"}
+      - {id: c, text: "`spark.read.table(\"respondents\").union(df)`"}
+      - {id: d, text: "`df.show()`"}
+    answer: a
+    explanation: |
+      `mode("append")` adds rows to the managed table. `mode("overwrite")` replaces them. Reading and unioning builds a DataFrame but writes nothing.
+  - id: C-10
+    lessons: [C0-L3]
+    question: In a Fabric notebook, which call runs the Spark plan?
+    options:
+      - {id: a, text: "`groupBy(\"region\")`"}
+      - {id: b, text: "`agg(F.sum(\"final_weight\"))`"}
+      - {id: c, text: "`select(\"region\")`"}
+      - {id: d, text: "`show()`"}
+    answer: d
+    explanation: |
+      `show`, `count` and `collect` are actions that run the plan. `groupBy`, `agg` and `select` are transformations that only describe a new DataFrame.
