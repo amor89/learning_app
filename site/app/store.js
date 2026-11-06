@@ -28,6 +28,7 @@ export function emptyState() {
     lessons: {},
     badges: {},
     cards: {},
+    interview: { theory: {}, tasks: {}, drills: [], prefs: { topic: "all", count: 10 } },
     settings: { theme: "auto" },
   };
 }

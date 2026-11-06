@@ -37,7 +37,7 @@ function seededShuffle(items, seed) {
   return out;
 }
 
-async function gradeCode(checker, code, packages) {
+export async function gradeCode(checker, code, packages) {
   if (needsPython(checker)) {
     const result = await checkPython(checker, code, packages ?? []);
     return { passed: result.passed, feedback: result.passed ? "All checks passed." : result.feedback, stdout: result.stdout };
@@ -212,7 +212,7 @@ const BUILDERS = {
 
 // What to do before you type: steps, the behaviour the checks test, and
 // opt-in examples (test code, the shape of the answer, the full checklist).
-function briefPanel(brief, example, title = "Before you start") {
+export function briefPanel(brief, example, title = "Before you start") {
   if (!brief) return null;
   const list = (tag, items) => h(tag, {}, items.map((html) => h("li", { html })));
   const more = (summary, ...content) => h("details", { class: "more" }, h("summary", {}, summary), ...content);

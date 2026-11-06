@@ -1,0 +1,231 @@
+id: split
+title: A train/test split, with stratification
+lessons: [B11-L1, B10-L2]
+minutes: 20
+prompt: |
+  Write `train_test_split(n_rows, test_share, seed, stratify=None)` with NumPy only. It splits the row positions `0` to `n_rows - 1` and returns `(train_idx, test_idx)` as two integer arrays.
+
+  - Shuffle with `np.random.default_rng(seed)`, so the same seed gives the same split.
+  - The test set holds `math.ceil(test_share * n_rows)` rows.
+  - With `stratify`, an array of one label per row, split each class on its own: `math.ceil(test_share * class_count)` of its rows go to test.
+  - Raise `ValueError` when `test_share` is not strictly between 0 and 1, when either set would be empty, and when a class has fewer than 2 rows.
+primer: |
+  `rng.permutation(positions)` returns the positions in a random order. `np.flatnonzero(labels == "b")` returns the positions where a condition holds: for labels `["a", "b", "b"]` it gives `[1, 2]`. `np.concatenate([a, b])` joins arrays end to end.
+starter: |
+  import math
+
+  import numpy as np
+
+
+  def train_test_split(
+      n_rows: int, test_share: float, seed: int, stratify: np.ndarray | None = None
+  ) -> tuple[np.ndarray, np.ndarray]:
+      """Split row positions into shuffled train and test index arrays."""
+      raise NotImplementedError
+packages: [numpy]
+checker:
+  kind: python
+  ast_rules:
+    - id: numpy_only
+      kind: forbids_pattern
+      pattern: "^\\s*(from|import)\\s+sklearn"
+      message: Write the split yourself with NumPy. scikit-learn is off limits.
+  setup: |
+    import numpy as np
+  tests:
+    - id: cover
+      code: |
+        train, test = train_test_split(10, 0.25, seed=0)
+        assert isinstance(train, np.ndarray) and isinstance(test, np.ndarray)
+        assert np.issubdtype(train.dtype, np.integer) and np.issubdtype(test.dtype, np.integer)
+        assert sorted(np.concatenate([train, test]).tolist()) == list(range(10))
+      message: Return two integer arrays that hold every position once, with no overlap.
+    - id: sizes
+      code: |
+        for n, share, expected in [(10, 0.25, 3), (7, 0.2, 2), (100, 0.3, 30)]:
+            train, test = train_test_split(n, share, seed=1)
+            assert len(test) == expected, (n, share, len(test))
+            assert len(train) == n - expected
+      message: Put `math.ceil(test_share * n_rows)` rows in test, the rest in train.
+    - id: seeded
+      code: |
+        a = train_test_split(100, 0.2, seed=3)
+        b = train_test_split(100, 0.2, seed=3)
+        c = train_test_split(100, 0.2, seed=4)
+        assert np.array_equal(a[1], b[1]), "same seed, different split"
+        assert set(a[1].tolist()) != set(c[1].tolist()), "different seeds, same split"
+        assert set(a[1].tolist()) != set(range(80, 100)) and set(a[1].tolist()) != set(range(20))
+      message: Shuffle with `np.random.default_rng(seed)`. The same seed gives the same split, and a new seed a new one.
+    - id: invalid
+      code: |
+        for args in [(10, 0.0), (10, 1.0), (10, 1.5), (10, -0.1), (2, 0.6)]:
+            try:
+                train_test_split(*args, seed=0)
+            except ValueError:
+                continue
+            raise AssertionError(f"no ValueError for {args}")
+      message: Raise ValueError when `test_share` is outside (0, 1) or a set would be empty.
+    - id: stratified
+      code: |
+        labels = np.array([0] * 90 + [1] * 10)
+        train, test = train_test_split(100, 0.2, seed=5, stratify=labels)
+        assert sorted(np.concatenate([train, test]).tolist()) == list(range(100))
+        assert (labels[test] == 0).sum() == 18 and (labels[test] == 1).sum() == 2, labels[test]
+        labels = np.array(["b", "a", "b", "a", "b", "a", "b", "b"])
+        train, test = train_test_split(8, 0.4, seed=0, stratify=labels)
+        assert (labels[test] == "a").sum() == 2 and (labels[test] == "b").sum() == 2
+      message: With `stratify`, split each class on its own and put `math.ceil(test_share * class_count)` of its rows in test.
+    - id: rare_class
+      code: |
+        labels = np.array([0, 0, 0, 0, 1])
+        try:
+            train_test_split(5, 0.4, seed=0, stratify=labels)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("no ValueError for a class with one row")
+      message: Raise ValueError when a class has fewer than 2 rows. It cannot sit in both sets.
+solution: |
+  import math
+
+  import numpy as np
+
+
+  def train_test_split(
+      n_rows: int, test_share: float, seed: int, stratify: np.ndarray | None = None
+  ) -> tuple[np.ndarray, np.ndarray]:
+      """Split row positions into shuffled train and test index arrays.
+
+      Args:
+          n_rows: Number of rows to split.
+          test_share: Share of rows for the test set, strictly between 0 and 1.
+          seed: Seed for the random generator.
+          stratify: Optional label per row. Each class is split on its own.
+
+      Returns:
+          Train positions and test positions.
+
+      Raises:
+          ValueError: If the share is out of range, a set would be empty, or a
+              class has fewer than 2 rows.
+      """
+      if not 0 < test_share < 1:
+          raise ValueError(f"test_share must be between 0 and 1, got {test_share}")
+      rng = np.random.default_rng(seed)
+      labels = np.zeros(n_rows, dtype=int) if stratify is None else np.asarray(stratify)
+      train_parts, test_parts = [], []
+      for label in np.unique(labels):
+          positions = rng.permutation(np.flatnonzero(labels == label))
+          if stratify is not None and len(positions) < 2:
+              raise ValueError(f"class {label!r} has fewer than 2 rows")
+          n_test = math.ceil(test_share * len(positions))
+          test_parts.append(positions[:n_test])
+          train_parts.append(positions[n_test:])
+      train, test = np.concatenate(train_parts), np.concatenate(test_parts)
+      if len(train) == 0 or len(test) == 0:
+          raise ValueError("the split leaves an empty set")
+      return train, test
+seeded_bugs:
+  - |
+    import math
+
+    import numpy as np
+
+
+    def train_test_split(n_rows, test_share, seed, stratify=None):
+        if not 0 < test_share < 1:
+            raise ValueError("bad share")
+        positions = np.arange(n_rows)
+        n_test = math.ceil(test_share * n_rows)
+        if n_test >= n_rows:
+            raise ValueError("empty train")
+        return positions[n_test:], positions[:n_test]
+  - |
+    import numpy as np
+
+
+    def train_test_split(n_rows, test_share, seed, stratify=None):
+        if not 0 < test_share < 1:
+            raise ValueError("bad share")
+        positions = np.random.default_rng(seed).permutation(n_rows)
+        n_test = int(test_share * n_rows)
+        if n_test == 0 or n_test >= n_rows:
+            raise ValueError("empty set")
+        return positions[n_test:], positions[:n_test]
+  - |
+    import math
+
+    import numpy as np
+
+
+    def train_test_split(n_rows, test_share, seed, stratify=None):
+        if not 0 < test_share < 1:
+            raise ValueError("bad share")
+        positions = np.random.default_rng(seed).permutation(n_rows)
+        n_test = math.ceil(test_share * n_rows)
+        if n_test >= n_rows:
+            raise ValueError("empty train")
+        return positions[n_test:], positions[:n_test]
+  - |
+    import math
+
+    import numpy as np
+
+
+    def train_test_split(n_rows, test_share, seed, stratify=None):
+        rng = np.random.default_rng(seed)
+        positions = rng.permutation(n_rows)
+        n_test = math.ceil(test_share * n_rows)
+        return positions[n_test:], positions[:n_test]
+wrong_answers:
+  - triggers: seeded
+    answer: |
+      import math
+
+      import numpy as np
+
+
+      def train_test_split(n_rows, test_share, seed, stratify=None):
+          if not 0 < test_share < 1:
+              raise ValueError("bad share")
+          positions = np.arange(n_rows)
+          n_test = math.ceil(test_share * n_rows)
+          if n_test >= n_rows:
+              raise ValueError("empty train")
+          return positions[n_test:], positions[:n_test]
+  - triggers: sizes
+    answer: |
+      import numpy as np
+
+
+      def train_test_split(n_rows, test_share, seed, stratify=None):
+          if not 0 < test_share < 1:
+              raise ValueError("bad share")
+          positions = np.random.default_rng(seed).permutation(n_rows)
+          n_test = int(test_share * n_rows)
+          if n_test == 0 or n_test >= n_rows:
+              raise ValueError("empty set")
+          return positions[n_test:], positions[:n_test]
+  - triggers: numpy_only
+    answer: |
+      from sklearn.model_selection import train_test_split as split
+
+
+      def train_test_split(n_rows, test_share, seed, stratify=None):
+          return split(range(n_rows), test_size=test_share, random_state=seed, stratify=stratify)
+hints:
+  - "Start without `stratify`: shuffle the positions once, then slice the shuffled array into test and train."
+  - "Stratification is the same slice, done per class: loop over `np.unique(stratify)`, shuffle that class's positions, slice, then join the pieces with `np.concatenate`."
+  - "Treat the unstratified case as one class: `labels = np.zeros(n_rows, dtype=int)` when `stratify` is None. Check the share first and the empty sets last."
+explanation: |
+  Shuffle positions, not rows: the function never touches the data, so the same split applies to `X`, `y` and any group columns. Treating "no stratify" as a single class keeps one code path. `math.ceil` on the test count matches the rule in the prompt, and the guards turn silent nonsense, such as an empty training set, into an error you see at once.
+follow_ups:
+  - question: Your rows repeat per customer. What breaks, and what do you change?
+    answer: |
+      A random split puts the same customer in train and test, so the model scores well by recognising people. Split by group instead: shuffle the unique customer IDs, assign whole customers to a set, as GroupShuffleSplit does. In B11-L1, random CV scored 0.995 against 0.468 for GroupKFold on a label unrelated to the features.
+  - question: Why stratify, and when is it not enough?
+    answer: |
+      With a rare class, an unstratified split can leave the test set with a handful of positives, or none, so its metrics swing. Stratifying keeps the class share in each set. It does not help when rows are not independent: grouped rows need a group split, and forward-looking models need a split by time.
+  - question: When is a random split the wrong choice altogether?
+    answer: |
+      When the model predicts the future. Train before a cut-off date and test after it, so no feature or row from the future leaks into training (B10-L3). Use TimeSeriesSplit for cross-validation.

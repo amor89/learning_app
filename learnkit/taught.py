@@ -22,7 +22,7 @@ import builtins
 import re
 from collections.abc import Iterable
 
-from learnkit.loader import Course
+from learnkit.loader import Course, Interview
 from learnkit.models import (
     CodeExercise,
     Exercise,
@@ -206,3 +206,24 @@ def untaught(course: Course) -> dict[str, list[str]]:
 def primers(exercises: Iterable[Exercise]) -> str:
     """All primer text of a lesson's exercises."""
     return "\n".join(ex.primer for ex in exercises)
+
+
+def untaught_tasks(interview: Interview, course: Course) -> dict[str, list[str]]:
+    """Map each interview task to the names its solution uses that nothing taught.
+
+    Interview practice comes after the lessons, so every lesson in the course
+    counts, plus the task's own primer.
+
+    Returns:
+        Only tasks with at least one untaught name.
+    """
+    taught = "\n".join(
+        lesson_text(lesson) + primers(lesson.exercises) for lesson in course.lessons()
+    )
+    gaps: dict[str, list[str]] = {}
+    for task in interview.tasks:
+        names = python_names(task.solution) - defined_names(task.checker.setup)
+        missing = sorted(n for n in names if not explained(n, taught + "\n" + task.primer))
+        if missing:
+            gaps[task.id] = missing
+    return gaps

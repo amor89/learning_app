@@ -1,0 +1,69 @@
+topic: transformers
+questions:
+  - id: transformers-1
+    lessons: [B25-L3]
+    seconds: 100
+    question: Explain scaled dot-product attention.
+    points:
+      - "Scores: Q @ K^T / sqrt(d)"
+      - A softmax across the keys, with the row maximum subtracted for stability
+      - The output is the weights times V, a weighted average of the values
+      - Scaling keeps the softmax out of saturation
+    model_answer: |
+      Each query is compared with every key by a dot product, divided by `sqrt(d)`. A softmax across the keys turns the scores into weights that sum to 1, and the output is those weights times the values. Without the scale, dot products grow like `sqrt(d)` and push the softmax towards one-hot, where gradients vanish.
+  - id: transformers-2
+    lessons: [B25-L5]
+    seconds: 60
+    question: Why does a transformer need position information?
+    options:
+      - {id: a, text: "Attention ignores order, so shuffled inputs give the same outputs, shuffled"}
+      - {id: b, text: "It reduces the memory that attention needs"}
+      - {id: c, text: "It tells the model which tokens are padding"}
+      - {id: d, text: "It replaces the token embeddings in later layers"}
+    answer: a
+    model_answer: |
+      Attention treats its inputs as a set: permute the tokens and the outputs permute the same way. Adding learned or sinusoidal position vectors to the embeddings gives the model word order.
+  - id: transformers-3
+    lessons: [B25-L5]
+    seconds: 60
+    question: How many parameters does `nn.MultiheadAttention(embed_dim=512, num_heads=8)` have?
+    options:
+      - {id: a, text: "131,328"}
+      - {id: b, text: "262,656"}
+      - {id: c, text: "1,050,624"}
+      - {id: d, text: "8,404,992"}
+    answer: c
+    model_answer: |
+      `4 * d * d + 4 * d = 4 * 262,144 + 2,048 = 1,050,624`: query, key, value and output projections, each with a bias. The number of heads does not change it, because the heads split d into 8 slices of 64 instead of adding weights.
+  - id: transformers-4
+    lessons: [B25-L2]
+    seconds: 90
+    question: What are the two limits of recurrent networks that attention removes?
+    points:
+      - Gradients fade or explode over long sequences
+      - The steps run one after another, so a sequence cannot be processed in parallel
+    model_answer: |
+      A recurrent network passes its hidden state step by step, multiplying by the same weights each time, so the signal from early tokens fades or explodes: `0.9 ** 50 = 0.0052`. And step t needs step t - 1, so there is no parallelism along the sequence. Attention connects every pair of positions directly and computes them all at once.
+  - id: transformers-5
+    lessons: [B25-L6]
+    seconds: 100
+    question: Describe a pre-norm transformer block.
+    points:
+      - "x = x + attention(norm_1(x))"
+      - "x = x + feed_forward(norm_2(x))"
+      - Layer norm works per token, across its features
+      - Residual connections let gradients pass straight through deep stacks
+    model_answer: |
+      Two sub-layers, each inside a residual: `x = x + attention(norm_1(x))`, then `x = x + feed_forward(norm_2(x))`. Layer norm normalises each token across its features. The residuals let each sub-layer add a correction to its input, and give gradients a direct path through many blocks.
+  - id: transformers-6
+    lessons: [B25-L4]
+    seconds: 60
+    question: In PyTorch 2.15, what does True mean in a boolean `attn_mask` for `F.scaled_dot_product_attention`, and in `key_padding_mask` for `nn.MultiheadAttention`?
+    options:
+      - {id: a, text: "Take part, and ignore"}
+      - {id: b, text: "Ignore, and take part"}
+      - {id: c, text: "Take part in both"}
+      - {id: d, text: "Ignore in both"}
+    answer: a
+    model_answer: |
+      The two functions use opposite conventions. In `scaled_dot_product_attention`, True means the key takes part. In `MultiheadAttention`'s `key_padding_mask`, True means ignore. Test masks by changing a later token or adding padding and checking that earlier outputs stay the same.

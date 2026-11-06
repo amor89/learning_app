@@ -18,6 +18,17 @@ The app never links straight to a file. In an iPhone home-screen app, a PDF open
 
 `scripts/build_cheatsheets.py` builds the PDFs into `site/downloads/cheatsheets/`, and `scripts/build_content.py` writes the same points for the in-app view to `site/content/sheets/`. Both read the lesson files, so the sheets never hold text of their own. `python scripts/build_all.py` runs it after the handbook.
 
+## Interview practice
+
+The **Interview** tab holds timed practice for senior data science interviews, the "running throughout" strand of `reference/roadmap.md`.
+
+- **Theory drill.** Pick a topic and a length of 5, 10 or 20 questions. Each question has its own countdown, from 45 seconds to 2 minutes. Multiple-choice answers are marked for you. For an open question, answer aloud or jot notes, open the model answer, then tick the key points you covered: your score is the share you ticked. When the clock runs out, the answer locks and the model answer shows. Questions you have not seen come first, then those you scored lowest on. The bank holds 62 questions in 11 topics, from statistics to MLOps.
+- **Build it from scratch.** Six tasks with a time limit of 10 to 30 minutes: a stratified train/test split, logistic regression by gradient descent, k-means, scaled dot-product attention with masks, cross-entropy from logits, and layer norm. You write NumPy only. The checker runs hidden tests in your browser through Pyodide, as lesson exercises do. The clock starts when you tap **Start the clock**, keeps running if you leave or reload, and stops at the first pass. The best time counts only runs where the solution stayed hidden, and it records the hints and the algorithm reminder you used. Once the task ends, interviewers' follow-up questions appear with model answers.
+
+Every question and task names the lessons that teach it, and links back to them. Progress lives with the rest of your progress, so export and import include it.
+
+The bank lives in `content/interview/`: `index.yaml` sets the topic and task order, `theory/<topic>.yaml` holds the questions and `tasks/<id>.yaml` holds each task. `scripts/build_content.py` writes `site/content/interview.json`. `tests/content/test_interview.py` checks that each reference solution passes, the starter and every seeded bug fail, each listed wrong answer hits its rule, solutions use only names a lesson or the task's primer explains, and every named lesson exists.
+
 ## Install on your iPhone
 
 1. Open the site in **Safari**.
@@ -48,7 +59,7 @@ The `deploy` job in `.github/workflows/ci.yml` publishes `site/` after every gat
 
 | Path | What it holds |
 |---|---|
-| `content/` | Lesson YAML. The only place lesson text lives. |
+| `content/` | Lesson YAML, the only place lesson text lives, plus pathways and the interview practice bank |
 | `learnkit/` | Content schema, loader, renderers for the app bundle and the handbook |
 | `checkers/` | Python exercise checkers. The browser runs them in Pyodide, the tests in CPython. |
 | `site/` | The static app served by GitHub Pages, plus generated content and downloads |
@@ -81,7 +92,7 @@ pip install -e . --group dev
 python scripts/build_all.py
 ruff check . && ruff format --check . && mypy
 pytest                                   # Python checkers: solutions pass, seeded bugs fail
-node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs
+node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs
 ```
 
 WeasyPrint needs Pango. On macOS: `brew install pango`. On Ubuntu: `apt install libpango-1.0-0 libpangoft2-1.0-0`.

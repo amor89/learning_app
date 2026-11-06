@@ -1,0 +1,178 @@
+id: layer-norm
+title: Layer normalisation
+lessons: [B25-L6]
+minutes: 10
+prompt: |
+  Write `layer_norm(x, gamma, beta, eps=1e-5)` with NumPy only.
+
+  - Normalise each token, that is, along the last axis of `x`: subtract its mean and divide by `sqrt(variance + eps)`, with the population variance.
+  - Then scale by `gamma` and shift by `beta`, both of shape `(d,)` where `d` is the size of the last axis.
+  - Return an array of the same shape as `x`, which may have any number of leading axes.
+  - Raise `ValueError` when `gamma` or `beta` does not have shape `(d,)`.
+primer: |
+  `x.mean(axis=-1, keepdims=True)` averages along the last axis and keeps it with size 1, so the result broadcasts against `x`. `x.var(axis=-1, keepdims=True)` gives the population variance, which divides by the number of values. Pass `ddof=1` only when you want the sample variance.
+starter: |
+  import numpy as np
+
+
+  def layer_norm(x: np.ndarray, gamma: np.ndarray, beta: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+      """Normalise each token along the last axis, then scale and shift."""
+      raise NotImplementedError
+packages: [numpy]
+checker:
+  kind: python
+  ast_rules:
+    - id: numpy_only
+      kind: forbids_pattern
+      pattern: "^\\s*(from|import)\\s+(torch|scipy|sklearn)"
+      message: Write layer norm yourself with NumPy. PyTorch, SciPy and scikit-learn are off limits.
+  setup: |
+    import numpy as np
+
+    _RNG = np.random.default_rng(11)
+  tests:
+    - id: values
+      code: |
+        x = np.array([[1.0, 2.0, 3.0, 4.0]])
+        out = layer_norm(x, np.ones(4), np.zeros(4), eps=0.0)
+        expected = (x - 2.5) / np.sqrt(1.25)
+        assert np.allclose(out, expected), out
+      message: Divide by the square root of the population variance, which divides by n, not n - 1.
+    - id: normalised
+      code: |
+        x = _RNG.normal(loc=3.0, scale=4.0, size=(2, 5, 8))
+        out = layer_norm(x, np.ones(8), np.zeros(8))
+        assert out.shape == x.shape, out.shape
+        assert np.allclose(out.mean(axis=-1), 0.0, atol=1e-7)
+        assert np.allclose(out.std(axis=-1), 1.0, atol=1e-3)
+      message: With gamma 1 and beta 0, every token has mean 0 and standard deviation about 1 along the last axis, and the shape stays the same.
+    - id: eps_inside
+      code: |
+        x = np.full((1, 4), 7.0)
+        out = layer_norm(x, np.ones(4), np.zeros(4))
+        assert np.all(np.isfinite(out)) and np.allclose(out, 0.0), out
+        x = np.array([[0.0, 0.002]])
+        out = layer_norm(x, np.ones(2), np.zeros(2), eps=1e-5)
+        assert np.allclose(out, [[-0.001 / np.sqrt(1e-6 + 1e-5), 0.001 / np.sqrt(1e-6 + 1e-5)]]), out
+      message: Add eps to the variance inside the square root. A constant token then gives zeros instead of 0 / 0.
+    - id: scale_shift
+      code: |
+        x = _RNG.normal(size=(3, 4))
+        gamma = np.array([1.0, 2.0, 0.5, -1.0])
+        beta = np.array([0.0, 1.0, -1.0, 3.0])
+        base = layer_norm(x, np.ones(4), np.zeros(4))
+        assert np.allclose(layer_norm(x, gamma, beta), base * gamma + beta)
+      message: Scale by gamma and shift by beta after normalising, one value per feature.
+    - id: shapes_checked
+      code: |
+        x = np.zeros((2, 4))
+        for gamma, beta in [(np.ones(3), np.zeros(4)), (np.ones(4), np.zeros(2)), (np.ones((2, 4)), np.zeros(4))]:
+            try:
+                layer_norm(x, gamma, beta)
+            except ValueError:
+                continue
+            raise AssertionError(f"no ValueError for gamma {gamma.shape}, beta {beta.shape}")
+      message: Raise ValueError when gamma or beta does not have shape (d,).
+solution: |
+  import numpy as np
+
+
+  def layer_norm(x: np.ndarray, gamma: np.ndarray, beta: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+      """Normalise each token along the last axis, then scale and shift.
+
+      Args:
+          x: Input of shape (..., d).
+          gamma: Scale, shape (d,).
+          beta: Shift, shape (d,).
+          eps: Added to the variance for numerical safety.
+
+      Returns:
+          An array of the same shape as x.
+
+      Raises:
+          ValueError: If gamma or beta does not have shape (d,).
+      """
+      d = x.shape[-1]
+      if gamma.shape != (d,) or beta.shape != (d,):
+          raise ValueError(f"gamma and beta need shape ({d},)")
+      mean = x.mean(axis=-1, keepdims=True)
+      var = x.var(axis=-1, keepdims=True)
+      return gamma * (x - mean) / np.sqrt(var + eps) + beta
+seeded_bugs:
+  - |
+    import numpy as np
+
+
+    def layer_norm(x, gamma, beta, eps=1e-5):
+        if gamma.shape != (x.shape[-1],) or beta.shape != (x.shape[-1],):
+            raise ValueError("bad shape")
+        mean = x.mean(axis=0, keepdims=True)
+        var = x.var(axis=0, keepdims=True)
+        return gamma * (x - mean) / np.sqrt(var + eps) + beta
+  - |
+    import numpy as np
+
+
+    def layer_norm(x, gamma, beta, eps=1e-5):
+        if gamma.shape != (x.shape[-1],) or beta.shape != (x.shape[-1],):
+            raise ValueError("bad shape")
+        mean = x.mean(axis=-1, keepdims=True)
+        var = x.var(axis=-1, ddof=1, keepdims=True)
+        return gamma * (x - mean) / np.sqrt(var + eps) + beta
+  - |
+    import numpy as np
+
+
+    def layer_norm(x, gamma, beta, eps=1e-5):
+        if gamma.shape != (x.shape[-1],) or beta.shape != (x.shape[-1],):
+            raise ValueError("bad shape")
+        mean = x.mean(axis=-1, keepdims=True)
+        std = x.std(axis=-1, keepdims=True)
+        return gamma * (x - mean) / (std + eps) + beta
+  - |
+    import numpy as np
+
+
+    def layer_norm(x, gamma, beta, eps=1e-5):
+        mean = x.mean(axis=-1, keepdims=True)
+        var = x.var(axis=-1, keepdims=True)
+        return gamma * (x - mean) / np.sqrt(var + eps) + beta
+wrong_answers:
+  - triggers: values
+    answer: |
+      import numpy as np
+
+
+      def layer_norm(x, gamma, beta, eps=1e-5):
+          if gamma.shape != (x.shape[-1],) or beta.shape != (x.shape[-1],):
+              raise ValueError("bad shape")
+          mean = x.mean(axis=-1, keepdims=True)
+          var = x.var(axis=-1, ddof=1, keepdims=True)
+          return gamma * (x - mean) / np.sqrt(var + eps) + beta
+  - triggers: eps_inside
+    answer: |
+      import numpy as np
+
+
+      def layer_norm(x, gamma, beta, eps=1e-5):
+          if gamma.shape != (x.shape[-1],) or beta.shape != (x.shape[-1],):
+              raise ValueError("bad shape")
+          mean = x.mean(axis=-1, keepdims=True)
+          std = x.std(axis=-1, keepdims=True)
+          return gamma * (x - mean) / (std + eps) + beta
+hints:
+  - "Everything happens along the last axis: use `axis=-1` with `keepdims=True` for the mean and the variance."
+  - "`x.var` without `ddof` is the population variance, which is what layer norm uses."
+  - "Put eps inside the square root: `np.sqrt(var + eps)`. Check the shapes of gamma and beta before you compute anything."
+explanation: |
+  Layer norm works per token, across its features, so it does not depend on the batch and behaves the same in training and at prediction. Batch norm, by contrast, normalises each feature across the batch. Eps inside the square root is the standard form, as in PyTorch's `nn.LayerNorm`, and keeps a constant token finite.
+follow_ups:
+  - question: How does layer norm differ from batch norm?
+    answer: |
+      Batch norm normalises each feature across the batch and keeps running statistics for prediction, so it behaves differently in train and eval mode and depends on batch size. Layer norm normalises each token across its features, with no running statistics, which suits variable-length sequences and small batches.
+  - question: Where does layer norm sit in a pre-norm transformer block, and why does it matter?
+    answer: |
+      Before each sub-layer, inside the residual: x = x + attention(norm_1(x)), then x = x + feed_forward(norm_2(x)) (B25-L6). The residual path stays an identity, which keeps gradients flowing through deep stacks and makes training more stable than post-norm.
+  - question: Why learn gamma and beta at all?
+    answer: |
+      Normalising forces mean 0 and variance 1, which might not suit the next layer. Gamma and beta let the model learn the scale and shift it needs, including undoing the normalisation.

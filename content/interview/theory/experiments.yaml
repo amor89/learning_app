@@ -1,0 +1,58 @@
+topic: experiments
+questions:
+  - id: experiments-1
+    lessons: [B9-L1]
+    seconds: 90
+    question: Name the inputs to a sample-size calculation, and say what halving the effect you want to detect does to the sample.
+    points:
+      - The baseline rate
+      - The minimum detectable effect
+      - Alpha and power
+      - Halving the effect needs about four times the sample
+    model_answer: |
+      You need the baseline, the minimum detectable effect, alpha and power, fixed before fieldwork. The required n grows with one over the effect squared, so halving the effect needs about four times the sample. Multiply by the design effect for weighted reads, and give each subgroup you will report the full n.
+  - id: experiments-2
+    lessons: [B9-L2]
+    seconds: 90
+    question: An A/B test has just finished. What do you check first, and how do you analyse it?
+    points:
+      - "Sample ratio mismatch: a chi-square test on the arm counts against the planned split"
+      - "Intention to treat: everyone stays in the arm they were assigned"
+      - Analyse per unit of randomisation, usually the user
+      - Report the lift with its interval, against the planned minimum effect
+    model_answer: |
+      First the split: a chi-square test on the arm counts against the plan. A very small p-value means something lost users from one arm, and no effect estimate is trustworthy until you find out why. Then analyse everyone in the arm they were assigned to, per randomised unit, and report the lift with its interval beside the minimum effect you planned for.
+  - id: experiments-3
+    lessons: [B9-L3]
+    seconds: 60
+    question: A team checks the p-value every day and stops the test the first time it drops below 0.05. What happens to the false positive rate?
+    options:
+      - {id: a, text: "It stays at 5%, because each look uses the 5% level"}
+      - {id: b, text: "It falls below 5%, because the test stops early"}
+      - {id: c, text: "It rises well above 5%, because each look is another chance for noise to cross the line"}
+      - {id: d, text: "It depends only on the final sample size"}
+    answer: c
+    model_answer: |
+      Every look is another chance for noise to cross p < 0.05, and stopping at the first crossing keeps the lucky one. In the lesson's simulation, ten looks gave an 18.4% false positive rate. Fix the horizon and analyse once, or plan group-sequential looks with stricter thresholds.
+  - id: experiments-4
+    lessons: [B9-L3]
+    seconds: 90
+    question: A new feature shows a strong lift in its first week, which fades over the next three. What is going on, and how do you design around it?
+    points:
+      - "A novelty effect: users react to the change itself"
+      - Run full weeks and compare week 1 with later weeks
+      - Plan the duration before launch and analyse at that horizon
+    model_answer: |
+      Likely a novelty effect: users try something new, then settle back. Run whole weeks so weekday patterns balance, compare the first week with later weeks, and judge the feature on the planned horizon, not the first days.
+  - id: experiments-5
+    lessons: [B9-L3]
+    seconds: 60
+    question: Treated users in a referral test share their discount codes with friends who sit in the control arm. What is the problem, and the fix?
+    options:
+      - {id: a, text: "Peeking. Analyse once at the planned horizon"}
+      - {id: b, text: "Interference. Randomise at a level that contains the interaction"}
+      - {id: c, text: "A sample ratio mismatch. Rerun the chi-square test"}
+      - {id: d, text: "Low power. Double the sample"}
+    answer: b
+    model_answer: |
+      Treated units affect control units, so the arms are not independent and the measured lift is biased. Randomise at a level that contains the interaction, such as city, store or friendship cluster, and analyse at that level.

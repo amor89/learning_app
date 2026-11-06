@@ -1,0 +1,70 @@
+topic: finetune
+questions:
+  - id: finetune-1
+    lessons: [B26-L2]
+    seconds: 90
+    question: Why warm up the learning rate when you fine-tune a pretrained model, and how do you schedule it?
+    points:
+      - Early gradients are noisy, with a new random head, and can damage the pretrained weights
+      - Raise the rate from 0 in a straight line, then decay it to 0 at the last step
+      - Count steps as batches per epoch times epochs, and step the scheduler after the optimiser every batch
+    model_answer: |
+      At the start the new head is random, so early gradients are noisy, and a full learning rate can damage the pretrained weights. Warm up linearly from 0 over the first steps, then decay linearly to 0 at the last step. Total steps are batches per epoch, rounded up, times epochs, and `scheduler.step()` runs after `optimizer.step()` on every batch.
+  - id: finetune-2
+    lessons: [B26-L3]
+    seconds: 60
+    question: LoRA with rank r = 8 on a 768 by 768 linear layer trains how many values?
+    options:
+      - {id: a, text: "6,144"}
+      - {id: b, text: "12,288"}
+      - {id: c, text: "589,824"}
+      - {id: d, text: "4,718,592"}
+    answer: b
+    model_answer: |
+      `r * (d_in + d_out) = 8 * (768 + 768) = 12,288`, against 589,824 for the full matrix. A has shape (8, 768) and B has (768, 8).
+  - id: finetune-3
+    lessons: [B26-L3]
+    seconds: 100
+    question: How does LoRA work, and why does training start from the pretrained model?
+    points:
+      - The pretrained weight W stays frozen
+      - Two small matrices, A and B, learn a low-rank update scaled by alpha / r
+      - B starts at zero, so the update starts at zero
+      - After training, merge W + (alpha / r) * B @ A into one matrix
+    model_answer: |
+      LoRA freezes W and adds a low-rank path: `y = x @ W.T + (alpha / r) * x @ A.T @ B.T`. A starts random and B starts at zero, so the update is zero and the first forward pass equals the pretrained model. After training, merge `W + (alpha / r) * B @ A` into one plain layer, which costs nothing extra at prediction.
+  - id: finetune-4
+    lessons: [B26-L1]
+    seconds: 60
+    question: You load a backbone with `load_state_dict(strict=False)`. `missing_keys` lists every backbone layer. What does that mean?
+    options:
+      - {id: a, text: "It is expected: strict=False always reports every layer"}
+      - {id: b, text: "The backbone did not load: its parameter names did not match"}
+      - {id: c, text: "The shapes did not match, so PyTorch skipped them"}
+      - {id: d, text: "The layers are frozen"}
+    answer: b
+    model_answer: |
+      With `strict=False`, nothing raises when names fail to match, so a backbone can silently keep its random weights. The only expected missing keys are the new head's. Check `missing_keys` and `unexpected_keys` every time, and fix a prefix mismatch before training.
+  - id: finetune-5
+    lessons: [B26-L6]
+    seconds: 100
+    question: How do you evaluate a fine-tuned named-entity model honestly?
+    points:
+      - Compare with a trivial baseline, such as all O, and a simple model
+      - Run at least three seeds and report the mean and range
+      - Score the test set once, at the end
+      - Use entity-level F1, where spans must match exactly
+    model_answer: |
+      Put it beside a trivial baseline and a simple model on the same validation set. Run at least three seeds and report the mean and range, since the best seed reports luck. Use entity-level F1, where type, start and end must all match, and score the test set once at the end.
+  - id: finetune-6
+    lessons: [B26-L5]
+    seconds: 60
+    question: The tokeniser splits the word "Hamburg", tagged B-LOC, into two pieces. What label does the second piece get?
+    options:
+      - {id: a, text: "B-LOC"}
+      - {id: b, text: "I-LOC"}
+      - {id: c, text: "-100"}
+      - {id: d, text: "O"}
+    answer: c
+    model_answer: |
+      Label the first piece of each word and give later pieces -100, the default `ignore_index` of `nn.CrossEntropyLoss`, so they add nothing to the loss. Align with `word_ids()`, which returns None for special tokens, and test for None with `is None`.

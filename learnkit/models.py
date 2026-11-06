@@ -477,6 +477,126 @@ class Pathways(Strict):
     pathways: list[Pathway] = Field(min_length=1)
 
 
+# Interview practice -------------------------------------------------------
+
+MIN_POINTS = 2
+MAX_POINTS = 5
+MIN_OPTIONS = 3
+TASK_PRIMER_MAX_WORDS = 150
+
+
+class InterviewTopic(Strict):
+    """A group of theory questions, such as statistics or transformers."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9-]*$")
+    title: str
+
+
+class TheoryQuestion(Strict):
+    """One timed theory question.
+
+    A question with ``options`` is multiple choice and graded by the app. A
+    question with ``points`` is open: you answer aloud, then tick the key points
+    your answer covered. ``lessons`` name the lessons that teach the answer.
+    """
+
+    id: str
+    lessons: list[str] = Field(min_length=1)
+    seconds: int = Field(ge=20, le=300)
+    question: str
+    options: list[Option] = []
+    answer: str | None = None
+    points: list[str] = []
+    model_answer: str
+
+    @model_validator(mode="after")
+    def _one_format(self) -> TheoryQuestion:
+        if self.options:
+            if len(self.options) < MIN_OPTIONS:
+                raise ValueError(f"{self.id}: needs at least {MIN_OPTIONS} options")
+            if self.answer not in {o.id for o in self.options}:
+                raise ValueError(f"{self.id}: answer {self.answer} is not an option")
+            if self.points:
+                raise ValueError(f"{self.id}: a multiple-choice question has no points")
+        else:
+            if self.answer is not None:
+                raise ValueError(f"{self.id}: an open question has no answer key")
+            if not MIN_POINTS <= len(self.points) <= MAX_POINTS:
+                raise ValueError(f"{self.id}: needs {MIN_POINTS} to {MAX_POINTS} points")
+        return self
+
+    @property
+    def kind(self) -> Literal["mcq", "open"]:
+        """Multiple choice or open."""
+        return "mcq" if self.options else "open"
+
+
+class TheoryFile(Strict):
+    """The questions of one topic, in content/interview/theory/<topic>.yaml."""
+
+    topic: str
+    questions: list[TheoryQuestion] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _ids(self) -> TheoryFile:
+        ids = [q.id for q in self.questions]
+        if len(ids) != len(set(ids)) or not all(i.startswith(f"{self.topic}-") for i in ids):
+            prefix = f"{self.topic}-"
+            raise ValueError(f"{self.topic}: question ids must be unique and prefixed {prefix}")
+        return self
+
+
+class FollowUp(Strict):
+    """A question an interviewer asks once your code works, with a model answer."""
+
+    question: str
+    answer: str
+
+
+class InterviewTask(Strict):
+    """A timed "implement it from scratch" task, checked by the Python checker.
+
+    ``primer`` reminds you of the algorithm, not the code. The app hides it
+    until you ask, and records that you did.
+    """
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9-]*$")
+    title: str
+    lessons: list[str] = Field(min_length=1)
+    minutes: int = Field(ge=5, le=60)
+    prompt: str
+    primer: str = ""
+    starter: str
+    packages: list[str] = []
+    checker: PythonChecker
+    solution: str
+    seeded_bugs: list[str] = Field(min_length=1)
+    wrong_answers: list[CodeWrong] = []
+    hints: list[str]
+    explanation: str
+    follow_ups: list[FollowUp] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def _task_rules(self) -> InterviewTask:
+        if len(self.hints) != HINT_TIERS:
+            raise ValueError(f"{self.id}: needs exactly {HINT_TIERS} hints")
+        if word_count(self.primer) > TASK_PRIMER_MAX_WORDS:
+            raise ValueError(f"{self.id}: primer prose over {TASK_PRIMER_MAX_WORDS} words")
+        ids = {r.id for r in self.checker.ast_rules} | {t.id for t in self.checker.tests}
+        ids |= {"syntax", "runtime_error"}
+        for wrong in self.wrong_answers:
+            if wrong.triggers not in ids:
+                raise ValueError(f"{self.id}: triggers {wrong.triggers} is not a rule id")
+        return self
+
+
+class InterviewIndex(Strict):
+    """content/interview/index.yaml: topic order and task order."""
+
+    topics: list[InterviewTopic] = Field(min_length=1)
+    tasks: list[str] = Field(min_length=1)
+
+
 def exercise_summary(exercise: Any) -> dict[str, Any]:
     """Short dict used in indexes and tests."""
     return {"id": exercise.id, "type": exercise.type, "difficulty": exercise.difficulty}

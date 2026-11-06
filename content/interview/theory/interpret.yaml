@@ -1,0 +1,57 @@
+topic: interpret
+questions:
+  - id: interpret-1
+    lessons: [B13-L1]
+    seconds: 100
+    question: Why prefer permutation importance on held-out data to a tree model's impurity importance?
+    points:
+      - Impurity importance favours high-cardinality features and is measured on training data
+      - Permutation importance shuffles one column on held-out data and measures the score drop, with its spread
+      - Correlated features share credit, so permute and report them as a group
+      - Importance says what the model relies on, not what causes the outcome
+    model_answer: |
+      Impurity importance comes from training splits and rewards features with many distinct values: a random ID scored 0.335 in the lesson. Permutation importance shuffles one column on held-out data and measures how much the reported metric drops, repeated to give a spread. Correlated features split the credit, so permute them together, and remember importance describes the model, not causes.
+  - id: interpret-2
+    lessons: [B13-L2]
+    seconds: 60
+    question: You explain a scikit-learn GradientBoostingClassifier with SHAP's TreeExplainer. The base value plus a row's SHAP values equals what?
+    options:
+      - {id: a, text: "The predicted probability of class 1"}
+      - {id: b, text: "The model's log-odds output for that row"}
+      - {id: c, text: "The predicted class"}
+      - {id: d, text: "1"}
+    answer: b
+    model_answer: |
+      SHAP is additive in the explainer's output space. For this model that space is the log-odds, the `decision_function`, not the probability. State the output space whenever you show SHAP values, or readers will read them as probability changes.
+  - id: interpret-3
+    lessons: [B13-L2]
+    seconds: 90
+    question: What can SHAP values not tell you?
+    points:
+      - What causes the outcome
+      - A stable split of credit between correlated features
+      - How the model behaves outside the training range
+    model_answer: |
+      SHAP explains how this model arrived at one prediction. It says nothing about causes in the world, it can split credit between correlated features differently from fit to fit, and it cannot describe behaviour where the training data had no examples.
+  - id: interpret-4
+    lessons: [B13-L3]
+    seconds: 100
+    question: Two groups have different base rates. Can one model be calibrated in both groups and have equal error rates in both?
+    points:
+      - "No, except in special cases: an impossibility result (Kleinberg et al. 2016, Chouldechova 2017)"
+      - "Choose the property from the harm: TPR for missed help, FPR for wrong flags, calibration when scores are used directly"
+      - Report rates per group with counts, and document the gaps
+    model_answer: |
+      Not in general. With different base rates, calibration and equal false positive and false negative rates cannot all hold. Choose the property that matches the harm: equal TPR when a miss denies help, equal FPR when a wrong flag hurts, calibration when people act on the score. Report the rates per group with counts and write down the trade-off.
+  - id: interpret-5
+    lessons: [B13-L3]
+    seconds: 45
+    question: You remove a protected attribute from the features. What is the effect?
+    options:
+      - {id: a, text: "The model can no longer treat the groups differently"}
+      - {id: b, text: "Proxies keep its influence, and you lose the means to measure the gap"}
+      - {id: c, text: "Accuracy always falls"}
+      - {id: d, text: "Calibration is guaranteed across groups"}
+    answer: b
+    model_answer: |
+      Other features, such as postcode, correlate with the attribute and carry its influence. Dropping it also removes the column you need to measure differences. Keep it for measurement where the law allows, and report rates per group.

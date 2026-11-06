@@ -14,7 +14,7 @@ Status: the topic sequence below is confirmed. The month ranges are a proposed s
 | 16-18 | MLOps and deployment | MLflow tracking and registry, FastAPI endpoint, Azure deployment, monitoring | One deployed model with README |
 
 Running throughout:
-- Senior interview preparation: theory depth and practical coding (from-scratch implementations, trade-offs).
+- Senior interview preparation: theory depth and practical coding (from-scratch implementations, trade-offs). The app's Interview tab runs timed theory drills and timed from-scratch tasks from `content/interview/`.
 - Monthly learning documentation: quick reference plus deep dive per month.
 
 Tagging rule for the learning app:

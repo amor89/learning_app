@@ -1,0 +1,69 @@
+topic: evaluation
+questions:
+  - id: evaluation-1
+    lessons: [B12-L1]
+    seconds: 45
+    question: Positives are 2.4% of rows. A model predicts negative for everyone. What is its accuracy?
+    options:
+      - {id: a, text: "0.024"}
+      - {id: b, text: "0.5"}
+      - {id: c, text: "0.976"}
+      - {id: d, text: "It is undefined"}
+    answer: c
+    model_answer: |
+      It is right on every negative, 97.6% of rows. That is why accuracy is useless as a headline for rare classes. Report metrics tied to the decision, such as precision and recall at a chosen threshold, with the prevalence and counts beside them.
+  - id: evaluation-2
+    lessons: [B12-L1]
+    seconds: 90
+    question: How do you choose a classification threshold?
+    points:
+      - From the decision, such as review capacity or the costs of each error
+      - Not the 0.5 default
+      - Report precision and recall at that threshold, with prevalence and counts
+    model_answer: |
+      The threshold is a business choice. If a team can review 200 cases a week, flag the top 200. If errors have costs, pick the threshold that minimises expected cost. Report precision, the share of flags that are real, and recall, the share of real cases flagged, at that threshold with the counts behind them.
+  - id: evaluation-3
+    lessons: [B12-L2]
+    seconds: 100
+    question: What does it mean for a model to be calibrated, and how do you check and fix it?
+    points:
+      - Of cases scored p, about a share p are positive
+      - Check with a calibration table or curve
+      - Compare the Brier score with a constant prevalence baseline
+      - Recalibrate on held-out data, with sigmoid by default and isotonic only with plenty of data
+    model_answer: |
+      Calibrated means the scores behave like probabilities: of all cases scored 0.2, about 20% are positive. Check with a calibration table or `calibration_curve`, and compare the Brier score with that of always predicting the prevalence. Fix it with `CalibratedClassifierCV` on held-out folds: sigmoid by default, isotonic only with plenty of data.
+  - id: evaluation-4
+    lessons: [B12-L2]
+    seconds: 60
+    question: You set `class_weight="balanced"` on a problem with 2.4% positives. What happens to the predicted probabilities?
+    options:
+      - {id: a, text: "Nothing. Class weights change only the ranking"}
+      - {id: b, text: "They move towards 0.5, so they overstate risk"}
+      - {id: c, text: "They move towards 0"}
+      - {id: d, text: "They become calibrated"}
+    answer: b
+    model_answer: |
+      Balancing the weights trains the model as if the classes were equal, so the probabilities drift towards 0.5. In the lesson, the mean predicted probability went from 0.024 to 0.42. If you use the probability as a number, recalibrate, or train normally and choose the threshold from the decision.
+  - id: evaluation-5
+    lessons: [B12-L3]
+    seconds: 90
+    question: Overall recall is 0.7. Why might that be misleading, and what do you do next?
+    points:
+      - A pooled metric weights large segments, so it can hide a weak one
+      - Report metrics per segment, with counts
+      - Read the most confident errors
+    model_answer: |
+      Pooling weights each segment by its size, so 0.7 overall can hide a small segment at 0.2. Break the metrics down by segment with the counts beside them, then read the errors the model was most confident about. They show what the model gets wrong and often point to a data problem.
+  - id: evaluation-6
+    lessons: [B12-L1]
+    seconds: 45
+    question: What score does a random classifier get for average precision?
+    options:
+      - {id: a, text: "0.5"}
+      - {id: b, text: "The prevalence of the positive class"}
+      - {id: c, text: "0"}
+      - {id: d, text: "The accuracy of predicting the majority class"}
+    answer: b
+    model_answer: |
+      A random ranking has precision equal to the prevalence at every recall level, so its average precision is the prevalence. An average precision of 0.21 at 2.4% prevalence is good, and at 20% prevalence it is no better than chance. Report the prevalence beside the score.

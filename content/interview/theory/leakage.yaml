@@ -1,0 +1,67 @@
+topic: leakage
+questions:
+  - id: leakage-1
+    lessons: [B10-L1]
+    seconds: 90
+    question: What is target leakage, and how do you screen for it?
+    points:
+      - A feature that would not be known at prediction time, or that encodes the outcome
+      - "Ask of every feature: would I know this value at prediction time?"
+      - Screen single-feature AUCs and treat one near 1 as a suspect
+      - Keep a feature timeline, reviewed with the data owner
+    model_answer: |
+      Leakage is a feature that carries information you will not have when you predict, such as a consequence of the outcome or a value measured after the prediction date. Ask of each feature when it becomes known, and keep that timeline with the data owner. A quick screen: the AUC of each feature alone, flagging `max(auc, 1 - auc)` near 1.
+  - id: leakage-2
+    lessons: [B10-L2]
+    seconds: 60
+    question: You pick the 20 best features on the full dataset, then cross-validate a model on them. On pure noise data the CV accuracy is 0.85. Why?
+    options:
+      - {id: a, text: "The model found a real signal in the noise"}
+      - {id: b, text: "Feature selection saw the rows that later served as test folds"}
+      - {id: c, text: "Twenty features is too many for five folds"}
+      - {id: d, text: "The folds were not stratified"}
+    answer: b
+    model_answer: |
+      Selection is a learning step. Run on all rows, it picked features that happen to fit the test folds' noise too. Inside the folds, the same experiment scored 0.48. Split first, and fit every learning step, selection included, on training rows only, ideally inside a Pipeline.
+  - id: leakage-3
+    lessons: [B11-L1]
+    seconds: 90
+    question: Your data has several rows per customer. How do you split it, and why?
+    points:
+      - Split by customer, with GroupKFold or GroupShuffleSplit
+      - A random split lets the model recognise people instead of learning the pattern
+      - "The lesson's demonstration: random CV 0.995, GroupKFold 0.468 on an unrelated label"
+    model_answer: |
+      Split by the unit that will be new in production: the customer. With a random split, the same customer sits in train and test, and the model scores well by memorising people. In the lesson, random CV scored 0.995 against 0.468 for GroupKFold on a label unrelated to the features.
+  - id: leakage-4
+    lessons: [B11-L3]
+    seconds: 90
+    question: Why is `best_score_` from a grid search not an honest estimate of performance, and what do you report instead?
+    points:
+      - It is the best of many configurations on the same folds, so it is biased upwards
+      - Use nested cross-validation or an untouched test set
+      - Report the mean and the spread across folds, for the metric you care about
+    model_answer: |
+      The search picks the configuration that did best on those folds, partly by luck, so its score is optimistic. On noise data the lesson saw 0.598 for `best_score_` against 0.515 nested. Estimate performance with nested CV or a test set the search never saw, and report the mean with its spread.
+  - id: leakage-5
+    lessons: [B10-L2]
+    seconds: 45
+    question: Which step is safe to run on all rows before the train/test split?
+    options:
+      - {id: a, text: "Standard scaling"}
+      - {id: b, text: "Imputing missing values with the column mean"}
+      - {id: c, text: "Converting weights from pounds to kilograms"}
+      - {id: d, text: "Target encoding a category"}
+    answer: c
+    model_answer: |
+      A unit conversion learns nothing from the rows, so it gives the same result whichever rows it sees. Scaling, mean imputation and target encoding all estimate something from the data, so they must be fitted on training rows and applied to the rest.
+  - id: leakage-6
+    lessons: [B10-L3]
+    seconds: 100
+    question: You build features from event history for a model that predicts churn next month. How do you keep them honest?
+    points:
+      - Compute every feature as of the row's date, from earlier events only
+      - Join with a point-in-time join such as merge_asof, excluding same-time rows that would not be known yet
+      - Split by time, training before a cut-off and testing after it
+    model_answer: |
+      Every feature must use only what was known at the row's date. Use prior-only aggregates and a point-in-time join, `pd.merge_asof` with `allow_exact_matches=False` when same-time rows would not be known yet. Then split by time and cross-validate with TimeSeriesSplit, so the model never trains on the future.
