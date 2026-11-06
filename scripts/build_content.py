@@ -6,6 +6,7 @@ Writes:
     site/content/sheets/<id>.json    one module cheat sheet per file, for the in-app view
     site/content/interview.json      timed theory questions and from-scratch tasks
     site/content/placement.json      the placement quiz for each track's start-here module
+    site/content/roles.json          role plans: phases, competencies, lesson maps and gaps
     site/py/checkers/*.py            the checker package for Pyodide
     site/app/highlight.css           Pygments styles for light and dark themes
 
@@ -37,6 +38,7 @@ from learnkit.loader import (  # noqa: E402
     load_interview,
     load_months,
     load_placement,
+    load_roles,
 )
 from learnkit.models import (  # noqa: E402
     CodeExercise,
@@ -49,6 +51,7 @@ from learnkit.models import (  # noqa: E402
     McqExercise,
     PlacementQuiz,
     PredictOutputExercise,
+    Role,
     SpotBugExercise,
     TheoryQuestion,
 )
@@ -329,6 +332,7 @@ def build_index(
         "tracks": tracks,
         "pathways": pathway_index(course),
         "months": months_index(course),
+        "roles": [{"id": r.id, "title": r.title, "pathway": r.pathway} for r in load_roles(course)],
         "downloads": download_links("handbook-full"),
     }
 
@@ -435,6 +439,43 @@ def build_placement(course: Course, quizzes: list[PlacementQuiz]) -> dict[str, A
     return {"quizzes": out}
 
 
+def build_roles(course: Course, roles: list[Role]) -> dict[str, Any]:
+    """Role plans as the app reads them, with lesson titles and modules for the links."""
+    lessons = {
+        lesson.id: {"id": lesson.id, "title": lesson.title, "module": module.meta.id}
+        for module in course.modules.values()
+        for lesson in module.lessons
+    }
+    return {
+        "roles": [
+            {
+                "id": role.id,
+                "title": role.title,
+                "version": role.version,
+                "status_html": md_inline(role.status),
+                "start": role.start.isoformat(),
+                "pathway": role.pathway,
+                "levels": [lv.model_dump() for lv in role.levels],
+                "streams": role.streams,
+                "phases": [
+                    {**ph.model_dump(), "success_html": md_inline(ph.success)} for ph in role.phases
+                ],
+                "modules": [
+                    {
+                        **m.model_dump(exclude={"lessons"}),
+                        "lessons": [lessons[lid] for lid in m.lessons],
+                        "assessment_html": md_inline(m.assessment),
+                        "gaps_html": md_inline(m.gaps) if m.gaps else "",
+                    }
+                    for m in role.modules
+                ],
+                "assumptions": role.assumptions,
+            }
+            for role in roles
+        ]
+    }
+
+
 def copy_checkers() -> None:
     """Copy the checker package where the Pyodide worker can fetch it."""
     target = SITE / "py" / "checkers"
@@ -511,6 +552,9 @@ def main() -> None:
     interview = build_interview(course, load_interview(course))
     check_html(interview, "interview")
     write_json(OUT / "interview.json", interview)
+    roles = build_roles(course, load_roles(course))
+    check_html(roles, "roles")
+    write_json(OUT / "roles.json", roles)
     quizzes = load_placement(course)
     placement = build_placement(course, quizzes)
     check_html(placement, "placement")

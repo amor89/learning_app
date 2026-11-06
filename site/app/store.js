@@ -31,6 +31,7 @@ export function emptyState() {
     interview: { theory: {}, tasks: {}, drills: [], prefs: { topic: "all", count: 10 } },
     placement: {},
     notes: {},
+    roles: {},
     settings: { theme: "auto" },
   };
 }

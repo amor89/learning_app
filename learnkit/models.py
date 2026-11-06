@@ -7,6 +7,7 @@ three hint tiers, a recap of three to five cards and rising difficulty.
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -655,6 +656,106 @@ class Months(Strict):
     def _unique(self) -> Months:
         if len(self.stages) != len(set(self.stages)):
             raise ValueError("month stages must be unique")
+        return self
+
+
+# Role plans ---------------------------------------------------------------
+
+ROLE_LEVELS = (1, 2, 3, 4)
+
+
+class RoleLevel(Strict):
+    """One competency level, such as 3 Proficient."""
+
+    level: int = Field(ge=1, le=4)
+    name: str
+    meaning: str
+
+
+class RolePhase(Strict):
+    """A phase of the role plan: a day range, its modules and a success criterion."""
+
+    id: str
+    name: str
+    days: tuple[int, int]
+    modules: list[str] = Field(min_length=1)
+    success: str
+
+    @model_validator(mode="after")
+    def _days_rise(self) -> RolePhase:
+        if not 1 <= self.days[0] <= self.days[1]:
+            raise ValueError(f"{self.id}: days must rise from 1 or later")
+        return self
+
+
+class RoleModule(Strict):
+    """One competency of the role, mapped to the app lessons that teach it.
+
+    ``coverage`` says how much of it those lessons teach: ``full``, ``partial`` or
+    ``gap`` (no lesson yet). ``gaps`` says what the lessons leave out. ``assumed``
+    is the day-one level the brief infers, as a single level or a range.
+    """
+
+    id: str
+    stream: str
+    title: str
+    target: int = Field(ge=1, le=4)
+    prerequisites: list[str] = []
+    assumed: list[int] = []
+    hours: int = Field(gt=0)
+    outcomes: list[str] = Field(min_length=1)
+    assessment: str
+    lessons: list[str] = []
+    coverage: Literal["full", "partial", "gap"]
+    gaps: str = ""
+
+    @model_validator(mode="after")
+    def _coverage_matches(self) -> RoleModule:
+        if (self.coverage == "gap") != (not self.lessons):
+            raise ValueError(f"{self.id}: a gap has no lessons, and only a gap")
+        if self.coverage != "full" and not self.gaps:
+            raise ValueError(f"{self.id}: say what the lessons leave out in gaps")
+        if self.assumed and not all(level in ROLE_LEVELS for level in self.assumed):
+            raise ValueError(f"{self.id}: assumed levels must be 1 to 4")
+        return self
+
+
+class Role(Strict):
+    """content/roles/<id>.yaml: a target role with phases, competencies and assumptions."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9-]*$")
+    title: str
+    version: str
+    status: str
+    start: date
+    pathway: str
+    levels: list[RoleLevel] = Field(min_length=4, max_length=4)
+    streams: list[str] = Field(min_length=1)
+    phases: list[RolePhase] = Field(min_length=1)
+    modules: list[RoleModule] = Field(min_length=1)
+    assumptions: list[str] = []
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Role:
+        ids = [m.id for m in self.modules]
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"{self.id}: module ids repeat")
+        phase_of = {}
+        for index, phase in enumerate(self.phases):
+            for module_id in phase.modules:
+                if module_id in phase_of:
+                    raise ValueError(f"{module_id}: in more than one phase")
+                phase_of[module_id] = index
+        if set(phase_of) != set(ids):
+            raise ValueError(f"{self.id}: every module sits in exactly one phase")
+        for module in self.modules:
+            if module.stream not in self.streams:
+                raise ValueError(f"{module.id}: unknown stream {module.stream}")
+            for pre in module.prerequisites:
+                if pre not in phase_of:
+                    raise ValueError(f"{module.id}: unknown prerequisite {pre}")
+                if phase_of[pre] > phase_of[module.id]:
+                    raise ValueError(f"{module.id}: prerequisite {pre} comes in a later phase")
         return self
 
 
