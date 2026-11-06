@@ -5,6 +5,7 @@ Writes:
     site/content/lessons/<id>.json   one rendered lesson per file
     site/content/sheets/<id>.json    one module cheat sheet per file, for the in-app view
     site/content/interview.json      timed theory questions and from-scratch tasks
+    site/content/placement.json      the placement quiz for each track's start-here module
     site/py/checkers/*.py            the checker package for Pyodide
     site/app/highlight.css           Pygments styles for light and dark themes
 
@@ -34,6 +35,7 @@ from learnkit.loader import (  # noqa: E402
     ModuleContent,
     load_course,
     load_interview,
+    load_placement,
 )
 from learnkit.models import (  # noqa: E402
     CodeExercise,
@@ -44,6 +46,7 @@ from learnkit.models import (  # noqa: E402
     InterviewTask,
     Lesson,
     McqExercise,
+    PlacementQuiz,
     PredictOutputExercise,
     SpotBugExercise,
     TheoryQuestion,
@@ -248,8 +251,11 @@ def pathway_index(course: Course) -> list[dict[str, Any]]:
     ]
 
 
-def build_index(course: Course, version: str) -> dict[str, Any]:
-    """Syllabus index with lesson summaries and download links."""
+def build_index(
+    course: Course, version: str, placement: dict[str, PlacementQuiz] | None = None
+) -> dict[str, Any]:
+    """Syllabus index with lesson summaries, download links and placement quizzes."""
+    placement = placement or {}
     tracks = []
     for track in course.tracks:
         modules = []
@@ -280,6 +286,15 @@ def build_index(course: Course, version: str) -> dict[str, Any]:
                 "title": track.title,
                 "summary": track.summary,
                 "downloads": download_links(f"handbook-{track.id}"),
+                "placement": (
+                    {
+                        "module": placement[track.id].module,
+                        "pass_mark": placement[track.id].pass_mark,
+                        "count": len(placement[track.id].questions),
+                    }
+                    if track.id in placement
+                    else None
+                ),
                 "modules": modules,
             }
         )
@@ -361,6 +376,39 @@ def build_interview(course: Course, interview: Interview) -> dict[str, Any]:
     }
 
 
+def build_placement(course: Course, quizzes: list[PlacementQuiz]) -> dict[str, Any]:
+    """Each track's placement quiz, with the module you skip to on a pass."""
+    titles = {lesson.id: lesson.title for lesson in course.lessons()}
+    tracks = {track.id: track for track in course.tracks}
+    out = []
+    for quiz in quizzes:
+        start, after = tracks[quiz.track].modules[0], tracks[quiz.track].modules[1]
+        out.append(
+            {
+                "track": quiz.track,
+                "track_title": tracks[quiz.track].title,
+                "module": {"id": start.id, "title": start.title},
+                "next": {"id": after.id, "title": after.title},
+                "pass_mark": quiz.pass_mark,
+                "lessons": lesson_refs(
+                    [lesson.id for lesson in course.modules[start.id].lessons], titles
+                ),
+                "questions": [
+                    {
+                        "id": q.id,
+                        "lessons": lesson_refs(q.lessons, titles),
+                        "question_html": md_to_html(q.question),
+                        "options": [{"id": o.id, "html": md_inline(o.text)} for o in q.options],
+                        "answer": q.answer,
+                        "explanation_html": md_to_html(q.explanation),
+                    }
+                    for q in quiz.questions
+                ],
+            }
+        )
+    return {"quizzes": out}
+
+
 def copy_checkers() -> None:
     """Copy the checker package where the Pyodide worker can fetch it."""
     target = SITE / "py" / "checkers"
@@ -430,8 +478,12 @@ def main() -> None:
     interview = build_interview(course, load_interview(course))
     check_html(interview, "interview")
     write_json(OUT / "interview.json", interview)
+    quizzes = load_placement(course)
+    placement = build_placement(course, quizzes)
+    check_html(placement, "placement")
+    write_json(OUT / "placement.json", placement)
     version = content_version()
-    write_json(OUT / "index.json", build_index(course, version))
+    write_json(OUT / "index.json", build_index(course, version, {q.track: q for q in quizzes}))
     write_json(TEST_FIXTURE, [ex.model_dump(mode="json") for ex in all_exercises(course)])
     copy_checkers()
     write_highlight_css()

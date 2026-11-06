@@ -240,6 +240,50 @@ const xp = await page.locator(".stat-value").first().textContent();
 check(Number(xp) > 0, `dashboard shows earned XP (${xp})`);
 await page.screenshot({ path: `${shots}/08-dashboard-after.png`, fullPage: true });
 
+// Placement quiz: the dashboard offers it, a pass skips B0 and moves Continue on, a fail lists lessons
+const placement = JSON.parse(readFileSync(new URL("../../site/content/placement.json", import.meta.url), "utf8"));
+const quizB = placement.quizzes.find((q) => q.track === "B");
+await page.goto(`${base}${query}#/`);
+await page.getByRole("heading", { name: "Dashboard" }).waitFor();
+check(await page.locator(".placement-card").count() === 1, "dashboard offers the placement quiz while Continue points into B0");
+await page.goto(`${base}${query}#/module/B0`);
+await page.getByRole("heading", { name: /^B0 / }).waitFor();
+check(await page.locator(".placement-card").count() === 1, "the start-here module page offers the placement quiz");
+await page.locator(".placement-card a", { hasText: "Take the placement quiz" }).click();
+await page.getByRole("heading", { name: /^Placement quiz/ }).waitFor();
+check(await page.locator(".placement-q").count() === 10, "placement quiz shows ten questions");
+await page.getByRole("button", { name: "See my result" }).click();
+check((await page.locator("[role=status].feedback").textContent()).includes("10 left"), "the quiz asks for every answer first");
+for (const q of quizB.questions) await page.locator(`input[name="pq-${q.id}"][value="${q.answer}"]`).check();
+await page.getByRole("button", { name: "See my result" }).click();
+await page.locator("#placement-result").waitFor();
+check((await page.locator(".drill-score").textContent()) === "10 of 10", "a perfect quiz scores 10 of 10");
+check(await page.locator(".placement-why .feedback.ok").count() === 10, "each answer shows as correct with its explanation");
+await noHorizontalScroll("placement result");
+await page.screenshot({ path: `${shots}/08b-placement.png`, fullPage: false });
+await page.getByRole("button", { name: `Skip B0 and go to ${quizB.next.id}` }).click();
+await page.waitForFunction((id) => location.hash === `#/module/${id}`, quizB.next.id);
+await page.goto(`${base}${query}#/`);
+await page.getByRole("heading", { name: "Dashboard" }).waitFor();
+const continueHref = await page.locator(".card.continue").getAttribute("href");
+check(!continueHref.includes("B0-"), `after the skip, Continue passes over B0 (${continueHref})`);
+check(await page.locator(".placement-card").count() === 0, "the dashboard stops offering the quiz once taken");
+await page.goto(`${base}${query}#/path/${first.id}/${first.stages[0].id}`);
+await page.waitForFunction((title) => document.querySelector("h1")?.textContent === title, first.title);
+check((await page.locator(".path-module", { hasText: "B0 " }).locator(".pill").textContent()) === "Skipped", "the pathway marks B0 as skipped");
+const quizD = placement.quizzes.find((q) => q.track === "D");
+await page.goto(`${base}${query}#/placement/D`);
+await page.getByRole("heading", { name: /^Placement quiz/ }).waitFor();
+for (const q of quizD.questions) {
+  const wrong = q.options.find((o) => o.id !== q.answer).id;
+  await page.locator(`input[name="pq-${q.id}"][value="${wrong}"]`).check();
+}
+await page.getByRole("button", { name: "See my result" }).click();
+await page.locator("#placement-result").waitFor();
+check((await page.locator("#placement-result").textContent()).includes("Start with D0"), "a failed quiz says to start at D0");
+check(await page.locator("#placement-result .review-lessons li").count() === quizD.lessons.length, "a failed quiz lists the lessons to focus on");
+check(await page.getByRole("button", { name: /^Skip D0/ }).count() === 0, "a failed quiz offers no skip");
+
 // Interview practice: the hub, a timed drill to the end, and a timed task whose clock survives a reload
 const bank = JSON.parse(readFileSync(new URL("../../site/content/interview.json", import.meta.url), "utf8"));
 await page.getByRole("link", { name: "Interview" }).click();

@@ -6,6 +6,8 @@ Standards for every file in this repository. They come from `reference/pipelines
 
 A static, offline-capable learning web app (GitHub Pages, PWA, Pyodide) with four tracks: A Databricks pipeline engineering, B Python for data science, C Microsoft Fabric, D Finding errors in code. Lesson content lives in `content/` and drives both the app and the handbook. Never write lesson text twice. Add every new module to a stage in `content/pathways.yaml`: the loader rejects a module that sits in no pathway.
 
+Placement quizzes live in `content/placement/<track>.yaml`: ten multiple-choice questions on the track's start-here module, each naming the start-here lessons that teach it, with at least two questions per lesson.
+
 Interview practice lives in `content/interview/`. Every theory question and from-scratch task names the lessons that teach it in `lessons`, and the loader rejects a lesson ID that does not exist. A task's `primer` reminds you of the algorithm, never the code. Tasks follow the same gates as code exercises: the solution passes, the starter and every seeded bug fail, and every wrong answer triggers its rule.
 
 ## Writing style for lesson content

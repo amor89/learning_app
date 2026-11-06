@@ -597,6 +597,54 @@ class InterviewIndex(Strict):
     tasks: list[str] = Field(min_length=1)
 
 
+# Placement quizzes ---------------------------------------------------------
+
+PLACEMENT_QUESTIONS = 10
+
+
+class PlacementQuestion(Strict):
+    """One multiple-choice question on a track's start-here module."""
+
+    id: str
+    lessons: list[str] = Field(min_length=1)
+    question: str
+    options: list[Option] = Field(min_length=MIN_OPTIONS)
+    answer: str
+    explanation: str
+
+    @model_validator(mode="after")
+    def _answer_is_option(self) -> PlacementQuestion:
+        ids = [o.id for o in self.options]
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"{self.id}: option ids repeat")
+        if self.answer not in ids:
+            raise ValueError(f"{self.id}: answer {self.answer} is not an option")
+        return self
+
+
+class PlacementQuiz(Strict):
+    """content/placement/<track>.yaml: ten questions that decide whether to skip ``module``.
+
+    You may skip the module when you score at least ``pass_mark``.
+    """
+
+    track: str
+    module: str
+    pass_mark: int = Field(ge=1, le=PLACEMENT_QUESTIONS)
+    questions: list[PlacementQuestion]
+
+    @model_validator(mode="after")
+    def _ten_questions(self) -> PlacementQuiz:
+        if len(self.questions) != PLACEMENT_QUESTIONS:
+            raise ValueError(f"{self.track}: needs exactly {PLACEMENT_QUESTIONS} questions")
+        ids = [q.id for q in self.questions]
+        if len(ids) != len(set(ids)) or not all(i.startswith(f"{self.track}-") for i in ids):
+            raise ValueError(
+                f"{self.track}: question ids must be unique and prefixed {self.track}-"
+            )
+        return self
+
+
 def exercise_summary(exercise: Any) -> dict[str, Any]:
     """Short dict used in indexes and tests."""
     return {"id": exercise.id, "type": exercise.type, "difficulty": exercise.difficulty}

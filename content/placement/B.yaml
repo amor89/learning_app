@@ -1,0 +1,121 @@
+# Placement quiz for Track B. Score pass_mark or more to skip B0 and start at B1.
+track: B
+module: B0
+pass_mark: 8
+questions:
+  - id: B-1
+    lessons: [B0-L1]
+    question: |
+      What is wrong with this test for a missing share?
+
+      ```python
+      if not share:
+          print("missing")
+      ```
+    options:
+      - {id: a, text: "Nothing. It catches `None` and nothing else"}
+      - {id: b, text: "It also treats a real share of `0.0` as missing"}
+      - {id: c, text: "It raises an error when `share` is `None`"}
+      - {id: d, text: "It treats every negative share as missing"}
+    answer: b
+    explanation: |
+      In an `if`, Python treats `0`, `0.0`, `""`, empty collections and `None` as false. A share of 0.0 is real data, so test with `if share is None:`.
+  - id: B-2
+    lessons: [B0-L1]
+    question: What does `f"{0.125:.1%}"` produce?
+    options:
+      - {id: a, text: "`0.125%`"}
+      - {id: b, text: "`12.5%`"}
+      - {id: c, text: "`13%`"}
+      - {id: d, text: "`0.1%`"}
+    answer: b
+    explanation: |
+      The `%` format multiplies by 100 and adds a percent sign. `.1` keeps one decimal place.
+  - id: B-3
+    lessons: [B0-L1]
+    question: What does `[w for w in [1.5, -2.0, 0.0, 3.0] if w > 0]` return?
+    options:
+      - {id: a, text: "`[1.5, 3.0]`"}
+      - {id: b, text: "`[1.5, 0.0, 3.0]`"}
+      - {id: c, text: "`[True, False, False, True]`"}
+      - {id: d, text: "`4.5`"}
+    answer: a
+    explanation: |
+      The comprehension keeps each `w` for which `w > 0` holds. 0.0 is not greater than 0, so it drops out with -2.0.
+  - id: B-4
+    lessons: [B0-L1]
+    question: A function receives a negative weight, which should never happen. What should it do?
+    options:
+      - {id: a, text: "Return `None` and carry on"}
+      - {id: b, text: "Print a warning and use 0.0"}
+      - {id: c, text: "`raise ValueError(\"negative weight for R2\")`"}
+      - {id: d, text: "Wrap the body in `try: ... except Exception: pass`"}
+    answer: c
+    explanation: |
+      Raise early with a message that names the bad input. The caller can catch the `ValueError` where it can handle it, and nothing carries on with bad data.
+  - id: B-5
+    lessons: [B0-L2]
+    question: Which line keeps the rows where `w` is above 0 and `in_scope` is true?
+    options:
+      - {id: a, text: "`df[df[\"w\"] > 0 and df[\"in_scope\"]]`"}
+      - {id: b, text: "`df[(df[\"w\"] > 0) & df[\"in_scope\"]]`"}
+      - {id: c, text: "`df[df[\"w\"] > 0 & df[\"in_scope\"]]`"}
+      - {id: d, text: "`df.where(\"w > 0 and in_scope\")`"}
+    answer: b
+    explanation: |
+      Combine masks with `&` and put each comparison in brackets. Python's `and` raises an error on a Series, and without brackets `&` binds before `>`.
+  - id: B-6
+    lessons: [B0-L2]
+    question: A region has 5 rows, and 2 of them have a missing `w`. What do `("w", "size")` and `("w", "count")` give for it in `groupby(...).agg(...)`?
+    options:
+      - {id: a, text: "size 5, count 3"}
+      - {id: b, text: "size 3, count 5"}
+      - {id: c, text: "size 5, count 5"}
+      - {id: d, text: "size 3, count 3"}
+    answer: a
+    explanation: |
+      `size` counts rows, missing or not. `count` counts non-missing values. `sum` and `mean` also skip missing values.
+  - id: B-7
+    lessons: [B0-L2]
+    question: "`df.merge(regions, on=\"region_code\")` returns fewer rows than `df`. Why?"
+    options:
+      - {id: a, text: "The default `how=\"inner\"` drops rows with no match in `regions`"}
+      - {id: b, text: "merge removes duplicate rows"}
+      - {id: c, text: "merge keeps only the columns of `regions`"}
+      - {id: d, text: "merge sorts and truncates the result"}
+    answer: a
+    explanation: |
+      The default inner merge keeps only matching rows. `how="left"` keeps every row of `df` and fills the new columns with missing values where there is no match.
+  - id: B-8
+    lessons: [B0-L3]
+    question: A share of 50% comes from a simple random sample of 1,000 people. What is its standard error?
+    options:
+      - {id: a, text: "About 0.5"}
+      - {id: b, text: "About 0.0158, or 1.6 points"}
+      - {id: c, text: "About 0.05, or 5 points"}
+      - {id: d, text: "About 0.25"}
+    answer: b
+    explanation: |
+      `sqrt(p * (1 - p) / n) = sqrt(0.25 / 1000) ≈ 0.0158`. A rough 95% interval is plus or minus 1.96 of those: about 3.1 points.
+  - id: B-9
+    lessons: [B0-L3]
+    question: A test gives p = 0.03. What does that mean?
+    options:
+      - {id: a, text: "There is a 3% chance the hypothesis is true"}
+      - {id: b, text: "There is a 97% chance the difference is real"}
+      - {id: c, text: "A difference at least this large would happen 3% of the time if there were no true difference"}
+      - {id: d, text: "The difference is 3% of the mean"}
+    answer: c
+    explanation: |
+      A p-value is the probability of a difference at least this large if nothing were going on. It is not the probability that a hypothesis is true, and it says nothing about how big the difference is.
+  - id: B-10
+    lessons: [B0-L3]
+    question: On the same data, `np.std(x)` gives 2.0 and `pd.Series(x).std()` gives 2.138. Why?
+    options:
+      - {id: a, text: "pandas rounds differently"}
+      - {id: b, text: "NumPy divides by n, pandas by n - 1"}
+      - {id: c, text: "pandas skips the largest value"}
+      - {id: d, text: "NumPy uses float32"}
+    answer: b
+    explanation: |
+      NumPy 2's `np.std` gives the population SD and pandas 3's `Series.std` gives the sample SD. Use `np.std(x, ddof=1)` when you want the sample SD from NumPy.

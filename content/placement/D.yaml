@@ -1,0 +1,122 @@
+# Placement quiz for Track D. Score pass_mark or more to skip D0 and start at D1.
+track: D
+module: D0
+pass_mark: 8
+questions:
+  - id: D-1
+    lessons: [D0-L1]
+    question: Which kind of problem usually costs the most?
+    options:
+      - {id: a, text: "A syntax error"}
+      - {id: b, text: "An exception with a traceback"}
+      - {id: c, text: "A wrong result that raises nothing"}
+      - {id: d, text: "A slow test"}
+    answer: c
+    explanation: |
+      A syntax error stops Python at once, and an exception crashes with a traceback that names the line. A silent wrong result finishes normally, so nobody knows to look.
+  - id: D-2
+    lessons: [D0-L1]
+    question: A report's total is 3% too high. In debugging terms, what is that?
+    options:
+      - {id: a, text: "The defect"}
+      - {id: b, text: "The failure"}
+      - {id: c, text: "The root cause"}
+      - {id: d, text: "The hypothesis"}
+    answer: b
+    explanation: |
+      The failure is what someone sees. The defect is the mistake in the code, and the root cause is the first place it went wrong, often far from where the failure shows.
+  - id: D-3
+    lessons: [D0-L1]
+    question: What is the first step when you meet a bug?
+    options:
+      - {id: a, text: "Change the line that looks suspicious and rerun"}
+      - {id: b, text: "Reproduce it, then shrink the input to the smallest one that still fails"}
+      - {id: c, text: "Add a try/except around the failing call"}
+      - {id: d, text: "Rewrite the function from scratch"}
+    answer: b
+    explanation: |
+      Reproduce small first: three rows beat three million. Then read the evidence, form one hypothesis and test it with one check.
+  - id: D-4
+    lessons: [D0-L1]
+    question: "Why is `except Exception: return 0.0` dangerous?"
+    options:
+      - {id: a, text: "It is slower than letting the error through"}
+      - {id: b, text: "It turns a loud, specific failure into a silent wrong result"}
+      - {id: c, text: "It cannot catch a ValueError"}
+      - {id: d, text: "Python rejects it as a syntax error"}
+    answer: b
+    explanation: |
+      The program carries on with 0.0 as if it were real data, and the traceback that would have named the problem is gone.
+  - id: D-5
+    lessons: [D0-L1]
+    question: You change three things at once and the bug goes away. What is the problem?
+    options:
+      - {id: a, text: "None, the bug is fixed"}
+      - {id: b, text: "You do not know which change fixed it, or whether the other two broke something"}
+      - {id: c, text: "Three changes always reintroduce the bug"}
+      - {id: d, text: "The tests will no longer run"}
+    answer: b
+    explanation: |
+      Change one thing at a time, so you learn which change mattered. Then write a test that fails because of the bug and fix the root cause.
+  - id: D-6
+    lessons: [D0-L2]
+    question: You open a function someone else wrote. What do you read first?
+    options:
+      - {id: a, text: "The longest loop"}
+      - {id: b, text: "Its contract: the name, the signature and the docstring"}
+      - {id: c, text: "The test file"}
+      - {id: d, text: "The git history"}
+    answer: b
+    explanation: |
+      The order is contract, inputs and outputs, side effects, a hand trace on a tiny input, edges and assumptions. Only then run it on a known answer.
+  - id: D-7
+    lessons: [D0-L2]
+    question: A function called `get_unprocessed_waves(waves)` contains `waves.remove(w)`. Why is that a warning sign?
+    options:
+      - {id: a, text: "`remove` is slow on long lists"}
+      - {id: b, text: "It changes the caller's list, a side effect that a `get_` function should not have"}
+      - {id: c, text: "`remove` only works on strings"}
+      - {id: d, text: "It is not a warning sign"}
+    answer: b
+    explanation: |
+      Changing an argument is a side effect, like writing a file or a table. A function named `get_` or `check_` should have none.
+  - id: D-8
+    lessons: [D0-L2]
+    question: |
+      What is left in `weights` after this loop?
+
+      ```python
+      weights = [1, 2, 3, 4]
+      for w in weights:
+          weights.remove(w)
+      ```
+    options:
+      - {id: a, text: "`[]`"}
+      - {id: b, text: "`[2, 4]`"}
+      - {id: c, text: "`[1, 3]`"}
+      - {id: d, text: "`[4]`"}
+    answer: b
+    explanation: |
+      Each removal shifts the rest left, so the loop skips the next element. It removes 1, skips 2, removes 3, then reaches the end.
+  - id: D-9
+    lessons: [D0-L2]
+    question: Your hand trace on three typical values works. What do you try next?
+    options:
+      - {id: a, text: "A million random rows"}
+      - {id: b, text: "The edges: an empty input, a zero, a None, a duplicate key and one row"}
+      - {id: c, text: "Nothing, three values are enough"}
+      - {id: d, text: "The same three values in a different order"}
+    answer: b
+    explanation: |
+      Most bugs live at the edges. Each assumption the code makes, such as sorted input or unique IDs, is also a question for its author or a check to add.
+  - id: D-10
+    lessons: [D0-L2]
+    question: The code is hard to follow. What helps you find the bug?
+    options:
+      - {id: a, text: "Add comments that repeat each line"}
+      - {id: b, text: "Restate it with the same behaviour: rename variables, add type hints and split it into small functions"}
+      - {id: c, text: "Run it on production data and compare totals"}
+      - {id: d, text: "Ask an assistant to optimise it"}
+    answer: b
+    explanation: |
+      Rewriting code clearly, without changing what it does, makes each step visible, and that is often how the bug shows itself.

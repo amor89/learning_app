@@ -29,6 +29,7 @@ export function emptyState() {
     badges: {},
     cards: {},
     interview: { theory: {}, tasks: {}, drills: [], prefs: { topic: "all", count: 10 } },
+    placement: {},
     settings: { theme: "auto" },
   };
 }
@@ -145,6 +146,11 @@ export function masteryOf(state, exerciseIds) {
   if (exerciseIds.length === 0) return null;
   const total = exerciseIds.reduce((sum, id) => sum + (state.ex[id]?.passed ? state.ex[id].score : 0), 0);
   return total / exerciseIds.length;
+}
+
+// Start-here modules you chose to skip after passing their placement quiz.
+export function skippedModules(state) {
+  return new Set(Object.values(state.placement ?? {}).filter((p) => p.skipped).map((p) => p.module));
 }
 
 export function moduleExercises(module) {
