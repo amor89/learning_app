@@ -92,6 +92,7 @@ code { font-family: var(--mono); font-size: 0.88em; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .skip { position: absolute; left: -999px; }
 .skip:focus { left: 16px; top: 8px; z-index: 10; background: var(--surface); padding: 8px; }
+[hidden] { display: none !important; }
 .muted { color: var(--muted); }
 .small { font-size: 0.85rem; }
 .ok-text { color: var(--ok); font-weight: 600; }
@@ -107,7 +108,6 @@ code { font-family: var(--mono); font-size: 0.88em; }
   grid-column: 1; display: inline-flex; align-items: center; gap: 2px; min-height: 44px; padding: 0 8px;
   color: var(--accent); font-weight: 600; text-decoration: none;
 }
-.topbar .back[hidden] { display: none; }
 .back-icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .topbar-title {
   grid-column: 2; text-align: center; font-weight: 700;
@@ -379,9 +379,10 @@ select { font-family: var(--sans); padding: 8px; min-height: 44px; width: 100%; 
 .brief .more { border-top: 1px solid var(--border); padding: 4px 0; }
 .brief .more summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--accent); font-weight: 600; }
 .brief .shape, .brief .check { margin-bottom: 8px; }
-/* Short reference snippets wrap instead of scrolling, so a phone shows the whole line. */
-.brief .code .ln { min-width: 0; }
-.brief .code .ln code { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+/* Short reference snippets, in briefs and cheat sheets, wrap instead of scrolling, so a
+   phone shows the whole line, end-of-line comments included. */
+.brief .code .ln, .sheet .code .ln { min-width: 0; }
+.brief .code .ln code, .sheet .code .ln code { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 .brief .shape p, .brief .check p { margin: 4px 0; }
 
 .recap { display: grid; gap: 8px; }
@@ -435,6 +436,8 @@ fieldset { min-width: 0; }
 .drill-results .result-head { display: flex; gap: 8px; align-items: center; }
 .drill-results .result-question p { margin: 4px 0; }
 details.drills { margin: 12px 0; }
+details.how { margin: 4px 0 12px; }
+details.how summary { cursor: pointer; color: var(--accent); font-size: 0.92rem; min-height: 32px; }
 details.drills .plain-list { margin-top: 8px; }
 .reminder, .solution-box, .follow-up {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -450,6 +453,11 @@ details.drills .plain-list { margin-top: 8px; }
 .placement-card { margin: 12px 0; }
 .placement-card .actions { margin: 4px 0 0; }
 .placement-list { padding-left: 1.4em; display: grid; gap: 18px; }
+.placement-list.paging { list-style: none; padding-left: 0; }
+.placement-head { margin: 12px 0 8px; }
+.placement-head .drill-head { margin: 0 0 6px; }
+.placement .pager { justify-content: space-between; }
+.placement .pager .btn { flex: 1; }
 .placement-q .prompt p { margin: 4px 0 8px; }
 .placement-why .feedback { margin: 8px 0 4px; }
 .review-lessons { margin: 6px 0 10px; }

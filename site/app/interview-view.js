@@ -55,25 +55,21 @@ export async function interviewView(app) {
     "section",
     { class: "page interview" },
     h("h1", {}, "Interview practice"),
-    h("p", {}, "Timed practice for senior data science interviews: theory questions against the clock, and models you build from scratch. Each item links to the lessons that teach it."),
+    h("p", {}, "Theory questions against the clock, and models you build from scratch."),
     app.drill && !app.drill.done
       ? h("a", { class: "card continue", href: "#/interview/drill" }, h("span", { class: "muted small" }, "Drill in progress"), h("strong", {}, `Question ${app.drill.i + 1} of ${app.drill.questions.length}`))
       : null,
     h("h2", {}, "Theory drill"),
-    h("p", { class: "muted small" }, "Answer aloud, or jot notes, before the clock runs out. Multiple choice is marked for you. For an open question you see the model answer, then tick the key points you covered. Questions you have not seen, or scored lowest on, come first."),
+    h("details", { class: "how" },
+      h("summary", {}, "How the drill works"),
+      h("p", { class: "muted small" }, "Answer aloud, or jot notes, before the clock runs out. Multiple choice is marked for you. For an open question you see the model answer, then tick the key points you covered. Questions you have not seen, or scored lowest on, come first. Each question links to the lessons that teach it."),
+    ),
     h("div", { class: "drill-setup" },
       h("label", { class: "field-label", for: "drill-topic" }, "Topic"), topicSelect,
       h("label", { class: "field-label", for: "drill-length" }, "Length"), lengthSelect,
     ),
     h("div", { class: "actions" }, h("button", { type: "button", class: "btn", onclick: start }, "Start drill")),
-    h("ul", { class: "mastery" }, bank.topics.map((t) => {
-      const p = iv.topicProgress(bank.questions, state.theory, t.id);
-      return h("li", {},
-        h("span", { class: "mastery-label" }, `${t.title} · ${p.answered} of ${p.total} answered`),
-        progressBar(p.mean ?? 0, `${t.title} average score`),
-        h("span", { class: "mastery-value" }, pct(p.mean)),
-      );
-    })),
+    topicScores(bank, state),
     recent.length
       ? h("details", { class: "path-stage drills" },
           h("summary", {}, h("strong", {}, "Recent drills")),
@@ -81,7 +77,7 @@ export async function interviewView(app) {
         )
       : null,
     h("h2", {}, "Build it from scratch"),
-    h("p", { class: "muted small" }, "Write a model or metric with NumPy alone, against a time limit. The checker runs hidden tests in your browser. The clock stops when every check passes."),
+    h("p", { class: "muted small" }, "NumPy only, against a time limit. Hidden tests run in your browser."),
     h("ol", { class: "module-list" }, bank.tasks.map((task) => {
       const status = iv.taskStatus(state.tasks[task.id], task.minutes * 60_000);
       return h("li", {}, h("a", { class: "card", href: `#/interview/task/${task.id}` },
@@ -90,6 +86,23 @@ export async function interviewView(app) {
       ));
     })),
   );
+}
+
+// Scores only for topics you have answered in. Empty bars before your first drill
+// say nothing, so a short line takes their place.
+function topicScores(bank, state) {
+  const rows = bank.topics
+    .map((t) => ({ t, p: iv.topicProgress(bank.questions, state.theory, t.id) }))
+    .filter(({ p }) => p.answered > 0);
+  if (!rows.length) return h("p", { class: "muted small topic-empty" }, "Your score per topic shows here after your first drill.");
+  return [
+    h("h3", {}, "Your scores by topic"),
+    h("ul", { class: "mastery" }, rows.map(({ t, p }) => h("li", {},
+      h("span", { class: "mastery-label" }, `${t.title} · ${p.answered} of ${p.total} answered`),
+      progressBar(p.mean ?? 0, `${t.title} average score`),
+      h("span", { class: "mastery-value" }, pct(p.mean)),
+    ))),
+  ];
 }
 
 function round(x) {
