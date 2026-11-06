@@ -9,3 +9,4 @@ bands:
   - {id: M16-18, label: "Months 16 to 18: MLOps and deployment"}
   - {id: current-work, label: "Current work"}
   - {id: all-months, label: "Every month"}
+  - {id: role-ey, label: "EY Talent Data Strategy role"}

@@ -1,0 +1,15 @@
+id: E
+title: Data protection and governance
+summary: The law and the frameworks that govern people data, for the engineer who builds the platform.
+checklist:
+  - Treat every talent attribute as personal data. Flag special category data, including what a model infers.
+  - Every use of personal data has a lawful basis. Every use of special category data also has an Article 9 condition.
+  - Employers rarely rely on consent. Record a legitimate interests assessment when you use legitimate interests.
+  - Keep an appropriate policy document for the employment and substantial public interest conditions.
+  - Screen every new use of people data for a DPIA. Large-scale special category data always needs one.
+  - Govern with a frame everyone shares. Map each knowledge area to the talent domains, with an owner.
+  - Score maturity with evidence, per knowledge area and domain. Never average a gap away.
+  - The legal team and the data protection officer decide on compliance. These lessons teach you to ask the right questions.
+modules:
+  - {id: E1, title: "UK GDPR and special category data in HR", tags: [role-ey, current-work], summary: "Personal and special category data, lawful bases for talent data, Article 9 conditions, appropriate policy documents and DPIA screening."}
+  - {id: E2, title: "DAMA-DMBOK applied to talent data", tags: [role-ey, current-work], summary: "The eleven knowledge areas, governance at the hub, and an evidence-based maturity baseline across talent domains."}

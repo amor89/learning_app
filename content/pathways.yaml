@@ -129,7 +129,7 @@ pathways:
       - id: p1
         title: "Phase 1, days 1 to 30: Orient"
         summary: "Success: a current-state map of talent data sources, owners and access routes, validated by two stakeholders."
-        modules: [C0, C1, C2, C3, C5, C10, A4]
+        modules: [E1, E2, C0, C1, C2, C3, C5, C10, A4]
       - id: p2
         title: "Phase 2, days 31 to 60: Design"
         summary: "Success: a draft canonical model, a RACI and a first set of data quality rules for one domain."

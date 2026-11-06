@@ -1,0 +1,367 @@
+id: E1-L3
+title: Article 9 conditions, policy documents and DPIA screening in HR
+
+concept: |
+  Article 9(2) of the UK GDPR lists ten conditions for special category data. Two carry most HR work, and in the UK both need an extra condition from **Schedule 1 of the Data Protection Act 2018**.
+
+  **Article 9(2)(b), employment, social security and social protection.** It covers duties and rights in employment law, such as recording sickness absence or making reasonable adjustments. The UK condition is Schedule 1, Part 1, **paragraph 1**. It does not cover purely contractual rights.
+
+  **Article 9(2)(g), substantial public interest.** It needs one of the 23 conditions in Schedule 1, **paragraphs 6 to 28**. Diversity monitoring usually relies on **paragraph 8, equality of opportunity or treatment**. Paragraph 8 supports reviewing equality across groups. It cannot support a decision about one person, so keep monitoring data apart from promotion or hiring decisions.
+
+  Both routes need an **appropriate policy document** (APD). The ICO says it needs no set form. It names the Schedule 1 condition, explains how you meet the principles, and sets your retention and erasure rules. One APD can cover several purposes. Your record of processing activities also names the condition.
+
+  Before you start processing likely to result in **high risk**, carry out a **data protection impact assessment** (DPIA) under Article 35. Three cases always need one, including **large-scale special category data** and extensive profiling with significant effects. The ICO's list adds others, such as innovative technology like AI combined with another risk factor. Two risk factors usually mean a DPIA. If you cannot reduce a high risk, consult the ICO before you start.
+
+why_it_matters: |
+  A retailer used its equal opportunities survey, collected under paragraph 8, to pick candidates for a leadership programme that favoured under-represented groups. The survey data now drove decisions about individuals, which paragraph 8 does not support. The programme paused while the team rebuilt it on aggregate statistics and a separate, voluntary application form.
+
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      # Special category register
+      sickness_absence: {article_9: 9(2)(b)}
+      ethnicity: {article_9: 9(2)(g), used_for: [diversity_report, promotion_shortlist]}
+      dpia: not needed, internal data only
+    annotations:
+      - find: "sickness_absence: {article_9: 9(2)(b)}"
+        note: "No Schedule 1 condition and no appropriate policy document."
+      - find: "ethnicity: {article_9: 9(2)(g), used_for: [diversity_report, promotion_shortlist]}"
+        note: "Paragraph 8 supports monitoring, not decisions about individuals."
+      - find: "dpia: not needed, internal data only"
+        note: "Large-scale special category data needs a DPIA, internal or not."
+  strong:
+    code: |
+      # Special category register
+      sickness_absence: {article_9: 9(2)(b), schedule_1: "Part 1 para 1", apd: APD-HR-01}
+      ethnicity: {article_9: 9(2)(g), schedule_1: "Part 2 para 8", apd: APD-HR-01, used_for: [diversity_report]}
+      dpia: DPIA-014, screened for large-scale special category data and profiling
+    annotations:
+      - find: 'sickness_absence: {article_9: 9(2)(b), schedule_1: "Part 1 para 1", apd: APD-HR-01}'
+        note: "Article 9 condition, Schedule 1 condition and the policy document, side by side."
+      - find: 'ethnicity: {article_9: 9(2)(g), schedule_1: "Part 2 para 8", apd: APD-HR-01, used_for: [diversity_report]}'
+        note: "Monitoring only. No individual decisions."
+      - find: "dpia: DPIA-014, screened for large-scale special category data and profiling"
+        note: "The screening reason is recorded with the assessment."
+  takeaway: |
+    Pair each Article 9 condition with its Schedule 1 condition and an appropriate policy document, keep monitoring data away from individual decisions, and screen every new use for a DPIA.
+
+exercises:
+  - id: E1-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which conditions does diversity monitoring of employees usually rely on?
+    options:
+      - {id: a, text: "Article 9(2)(g) with Schedule 1 paragraph 8, equality of opportunity or treatment"}
+      - {id: b, text: "Article 9(2)(b) with Schedule 1 paragraph 1"}
+      - {id: c, text: "Consent from each employee"}
+      - {id: d, text: "No condition, because the data is aggregated afterwards"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "Paragraph 1 covers obligations and rights in employment law. Diversity monitoring uses the equality condition in paragraph 8."
+      - answer: c
+        feedback: "Consent is rarely appropriate for employees, and monitoring has its own condition."
+      - answer: d
+        feedback: "You process individual records before you aggregate them, so you need a condition."
+    hints:
+      - "Monitoring equality is a substantial public interest."
+      - "Which Schedule 1 paragraph names equality?"
+      - "Paragraph 8."
+    explanation: |
+      Article 9(2)(g) with Schedule 1 paragraph 8 covers reviewing equality of opportunity or treatment between groups.
+
+  - id: E1-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A team wants to use the ethnicity answers from the equal opportunities survey to shortlist candidates for a promotion programme. What is the problem?
+    options:
+      - {id: a, text: "None, the data is already collected"}
+      - {id: b, text: "Paragraph 8 supports monitoring equality across groups, not decisions about one person"}
+      - {id: c, text: "Ethnicity is not special category data"}
+      - {id: d, text: "The survey must be repeated each year"}
+    answer: b
+    reasons:
+      - {id: r1, text: "The ICO says the equality condition cannot be relied on when processing is for decisions about a particular individual."}
+      - {id: r2, text: "Survey data expires after six months."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Purpose limitation: the data was collected for monitoring, under a condition that does not cover decisions."
+      - answer: c
+        feedback: "Racial or ethnic origin is a special category."
+      - answer: d
+        feedback: "Frequency is not the issue. The use is."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. Retention periods are set in your policy, but the problem here is using monitoring data for individual decisions."
+    hints:
+      - "What does paragraph 8 allow you to do?"
+      - "Is a shortlist a decision about a person?"
+      - "Monitoring and decisions need separate data and separate conditions."
+    explanation: |
+      Keep equality monitoring data apart from decisions about individuals. Paragraph 8 does not cover them.
+
+  - id: E1-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the documentation rule for the employment condition.
+    template: |
+      Article 9(2)(b) in the UK needs Schedule 1, Part 1, paragraph [[g1]]
+      and an appropriate [[g2]] document that names the condition and the retention rules.
+    gaps:
+      g1: {accepted: ["1"]}
+      g2: {accepted: [policy], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: "8"}
+        feedback: "Paragraph 8 is equality of opportunity or treatment, a substantial public interest condition. The employment condition is paragraph 1."
+    hints:
+      - "Part 1 of Schedule 1 starts with the employment condition."
+      - "APD stands for appropriate ... document."
+      - "Paragraph `1`, and `policy`."
+    explanation: |
+      The employment condition is Schedule 1, Part 1, paragraph 1, and it needs an appropriate policy document.
+
+  - id: E1-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `check_register(entries: list[dict]) -> list[str]` for a processing register. Each entry has `"attribute"`, `"special"` (a bool), `"lawful_basis"`, `"condition"`, `"schedule1"` and `"apd"` (a bool). `"condition"` and `"schedule1"` may be None. Return one message per problem, in register order:
+
+      - `"<attribute>: no lawful basis"` when `lawful_basis` is not one of the six bases (`"consent"`, `"contract"`, `"legal_obligation"`, `"vital_interests"`, `"public_task"`, `"legitimate_interests"`)
+      - `"<attribute>: no Article 9 condition"` when the attribute is special and `condition` is None
+      - `"<attribute>: no Schedule 1 condition"` when `condition` is `"9(2)(b)"` or `"9(2)(g)"` and `schedule1` is None
+      - `"<attribute>: no appropriate policy document"` when `condition` is one of those two and `apd` is False
+
+      Keep the bases and the two conditions in module constants.
+    primer: |
+      `entry["schedule1"] is None` tests for a missing value without treating an empty string as missing. A list collects messages in order:
+
+      ```python
+      notes = []
+      notes.append("first")
+      notes.append("second")   # ["first", "second"]
+      ```
+    starter: |
+      def check_register(entries):
+          return []
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: check_register
+          typed: true
+          docstring: true
+          message: "Give `check_register` type hints and a docstring."
+      setup: |
+        def _entry(**changes):
+            base = {"attribute": "absence", "special": True, "lawful_basis": "contract", "condition": "9(2)(b)", "schedule1": "Part 1 para 1", "apd": True}
+            base.update(changes)
+            return base
+      tests:
+        - id: clean
+          code: |
+            assert check_register([_entry(), _entry(attribute="salary", special=False, condition=None, schedule1=None, apd=False)]) == []
+          message: "A complete special entry and an ordinary entry raise no problems."
+        - id: basis
+          code: |
+            assert check_register([_entry(attribute="survey", lawful_basis="assumed")]) == ["survey: no lawful basis"]
+          message: "Flag a lawful basis that is not one of the six."
+        - id: condition
+          code: |
+            assert check_register([_entry(attribute="ethnicity", condition=None, schedule1=None, apd=False)]) == ["ethnicity: no Article 9 condition"]
+          message: "A special attribute needs an Article 9 condition."
+        - id: schedule_and_apd
+          code: |
+            got = check_register([_entry(attribute="ethnicity", condition="9(2)(g)", schedule1=None, apd=False)])
+            assert got == ["ethnicity: no Schedule 1 condition", "ethnicity: no appropriate policy document"], got
+          message: "9(2)(b) and 9(2)(g) need a Schedule 1 condition and an appropriate policy document."
+        - id: order
+          code: |
+            got = check_register([
+                _entry(attribute="b_field", lawful_basis="hope"),
+                _entry(attribute="a_field", condition=None, schedule1=None),
+            ])
+            assert got == ["b_field: no lawful basis", "a_field: no Article 9 condition"], got
+          message: "Return the problems in register order, not sorted."
+    solution: |
+      LAWFUL_BASES = frozenset(
+          {
+              "consent",
+              "contract",
+              "legal_obligation",
+              "vital_interests",
+              "public_task",
+              "legitimate_interests",
+          }
+      )
+      NEEDS_SCHEDULE_1 = frozenset({"9(2)(b)", "9(2)(g)"})
+
+
+      def check_register(entries: list[dict]) -> list[str]:
+          """List the documentation gaps in a processing register.
+
+          Args:
+              entries: Register entries with lawful basis, Article 9 condition,
+                  Schedule 1 condition and policy document status.
+
+          Returns:
+              One message per problem, in register order.
+          """
+          problems: list[str] = []
+          for entry in entries:
+              name = entry["attribute"]
+              if entry["lawful_basis"] not in LAWFUL_BASES:
+                  problems.append(f"{name}: no lawful basis")
+              if entry["special"] and entry["condition"] is None:
+                  problems.append(f"{name}: no Article 9 condition")
+              if entry["condition"] in NEEDS_SCHEDULE_1:
+                  if entry["schedule1"] is None:
+                      problems.append(f"{name}: no Schedule 1 condition")
+                  if not entry["apd"]:
+                      problems.append(f"{name}: no appropriate policy document")
+          return problems
+    seeded_bugs:
+      - |
+        LAWFUL_BASES = frozenset({"consent", "contract", "legal_obligation", "vital_interests", "public_task", "legitimate_interests"})
+
+
+        def check_register(entries: list[dict]) -> list[str]:
+            """Forgets the Schedule 1 and policy document checks."""
+            problems: list[str] = []
+            for entry in entries:
+                name = entry["attribute"]
+                if entry["lawful_basis"] not in LAWFUL_BASES:
+                    problems.append(f"{name}: no lawful basis")
+                if entry["special"] and entry["condition"] is None:
+                    problems.append(f"{name}: no Article 9 condition")
+            return problems
+      - |
+        LAWFUL_BASES = frozenset({"consent", "contract", "legal_obligation", "vital_interests", "public_task", "legitimate_interests"})
+        NEEDS_SCHEDULE_1 = frozenset({"9(2)(b)", "9(2)(g)"})
+
+
+        def check_register(entries: list[dict]) -> list[str]:
+            """Sorts the messages."""
+            problems: list[str] = []
+            for entry in entries:
+                name = entry["attribute"]
+                if entry["lawful_basis"] not in LAWFUL_BASES:
+                    problems.append(f"{name}: no lawful basis")
+                if entry["special"] and entry["condition"] is None:
+                    problems.append(f"{name}: no Article 9 condition")
+                if entry["condition"] in NEEDS_SCHEDULE_1:
+                    if entry["schedule1"] is None:
+                        problems.append(f"{name}: no Schedule 1 condition")
+                    if not entry["apd"]:
+                        problems.append(f"{name}: no appropriate policy document")
+            return sorted(problems)
+      - |
+        NEEDS_SCHEDULE_1 = frozenset({"9(2)(b)", "9(2)(g)"})
+
+
+        def check_register(entries: list[dict]) -> list[str]:
+            """Accepts any lawful basis that is filled in."""
+            problems: list[str] = []
+            for entry in entries:
+                name = entry["attribute"]
+                if not entry["lawful_basis"]:
+                    problems.append(f"{name}: no lawful basis")
+                if entry["special"] and entry["condition"] is None:
+                    problems.append(f"{name}: no Article 9 condition")
+                if entry["condition"] in NEEDS_SCHEDULE_1:
+                    if entry["schedule1"] is None:
+                        problems.append(f"{name}: no Schedule 1 condition")
+                    if not entry["apd"]:
+                        problems.append(f"{name}: no appropriate policy document")
+            return problems
+    wrong_answers:
+      - answer: |
+          LAWFUL_BASES = frozenset({"consent", "contract", "legal_obligation", "vital_interests", "public_task", "legitimate_interests"})
+
+
+          def check_register(entries: list[dict]) -> list[str]:
+              """Forgets the Schedule 1 and policy document checks."""
+              problems: list[str] = []
+              for entry in entries:
+                  name = entry["attribute"]
+                  if entry["lawful_basis"] not in LAWFUL_BASES:
+                      problems.append(f"{name}: no lawful basis")
+                  if entry["special"] and entry["condition"] is None:
+                      problems.append(f"{name}: no Article 9 condition")
+              return problems
+        triggers: schedule_and_apd
+    hints:
+      - "Loop over the entries once, appending messages as you go."
+      - "Check the basis, then the Article 9 condition, then the two documentation rules."
+      - "Only 9(2)(b) and 9(2)(g) need Schedule 1 and the policy document."
+    explanation: |
+      Encoding the register rules as a check means every new attribute is tested the same way, and the gaps show up before an auditor finds them.
+
+  - id: E1-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Screen a new use of talent data for a DPIA: a model that ranks all 40,000 employees for promotion readiness, using performance ratings, absence history and inferred health risk.
+    slots:
+      - id: need
+        label: "Is a DPIA needed?"
+        options:
+          - {id: needed, text: "Yes: large-scale special category data and profiling with significant effects"}
+          - {id: not_needed, text: "No: the data is internal and already held"}
+        answer: needed
+      - id: when
+        label: "When"
+        options:
+          - {id: before, text: "Before processing starts"}
+          - {id: after, text: "After the first model run, once results are known"}
+        answer: before
+      - id: residual
+        label: "If a high risk remains after mitigation"
+        options:
+          - {id: ico, text: "Consult the ICO before processing"}
+          - {id: proceed, text: "Proceed and record the risk"}
+        answer: ico
+    model_answer: |
+      - Inferred health risk across 40,000 people is large-scale special category data, and ranking for promotion is profiling with significant effects. Both always need a DPIA.
+      - The DPIA comes before processing, so its findings can change the design, for example by dropping the health inference.
+      - A high risk you cannot reduce means consulting the ICO first.
+    wrong_answers:
+      - answer: {need: not_needed}
+        feedback: "Holding the data already changes nothing. A new use with these risk factors always needs a DPIA."
+      - answer: {when: after}
+        feedback: "A DPIA after the run cannot shape the design. It comes first."
+      - answer: {residual: proceed}
+        feedback: "An unmitigated high risk needs prior consultation with the ICO."
+    hints:
+      - "Count the risk factors: scale, special category data, significant effects."
+      - "What is a DPIA for, if not to shape the design?"
+      - "What does Article 36 prior consultation mean?"
+    explanation: |
+      Screen early, assess before processing, and consult the ICO when a high risk remains.
+
+recap:
+  - front: "Employment condition in the UK"
+    back: "Article 9(2)(b) plus Schedule 1, Part 1, paragraph 1 of the DPA 2018, with an appropriate policy document."
+  - front: "Diversity monitoring"
+    back: "Article 9(2)(g) plus Schedule 1 paragraph 8, equality of opportunity or treatment. Never for decisions about one person."
+  - front: "Appropriate policy document"
+    back: "Names the Schedule 1 condition, how you meet the principles, and retention and erasure. One APD can cover several purposes."
+  - front: "When a DPIA is mandatory"
+    back: "Before high-risk processing, always for large-scale special category data and extensive profiling with significant effects. Consult the ICO if high risk remains."
+
+claims:
+  - claim: "Article 9(2)(b) relies on DPA 2018 Schedule 1 Part 1 paragraph 1 and needs an appropriate policy document; the employment condition does not cover purely contractual rights; APD needs no set form, outlines condition, principles procedures and retention; one APD can cover several purposes; record of processing activities must note the condition."
+    status: search-only
+    source: "ICO guidance 'What are the conditions for processing?', 'What are the rules on special category data?' and 'Data protection and monitoring workers' (ico.org.uk), seen through search results, November 2026."
+  - claim: "23 substantial public interest conditions in Schedule 1 paragraphs 6 to 28; paragraph 8 equality of opportunity or treatment supports monitoring with Article 9(2)(g); it cannot be relied on for decisions about a particular individual; APD required."
+    status: search-only
+    source: "ICO guidance 'What are the substantial public interest conditions?' and 'What about fairness, bias and discrimination?' (ico.org.uk), seen through search results, November 2026. The Data (Use and Access) Act 2025 added a substantial public interest condition, not checked here."
+  - claim: "Article 35(3): large-scale special category data, systematic extensive profiling with significant effects and large-scale public monitoring always need a DPIA; ICO list includes innovative technology such as AI when combined with another criterion; two screening criteria usually indicate a DPIA; consult the ICO if high risk cannot be mitigated."
+    status: search-only
+    source: "ICO guidance 'When do we need to do a DPIA?' and 'Examples of processing likely to result in high risk' (ico.org.uk), seen through search results, November 2026."

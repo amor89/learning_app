@@ -1,0 +1,325 @@
+id: E1-L1
+title: Personal data, special category data and the two-part test
+
+concept: |
+  Everything a talent platform holds is **personal data**: names, grades, salaries, review scores, course completions, skills. It relates to an identifiable person, so the UK GDPR applies. The Data Protection Act 2018 sits beside it and adds UK-specific conditions. These lessons follow the ICO's guidance as of November 2026. Your data protection officer and legal team make the final call.
+
+  Some personal data needs more protection. The UK GDPR names nine **special categories** in Article 9:
+
+  - racial or ethnic origin
+  - political opinions
+  - religious or philosophical beliefs
+  - trade union membership
+  - genetic data
+  - biometric data, when you use it to identify someone uniquely
+  - health
+  - sex life
+  - sexual orientation
+
+  Three details catch engineers out.
+
+  **Biometric data is narrow.** A staff photo on a profile is not special category data. The same photo used to unlock a door by face recognition is.
+
+  **Inferences count.** A model that infers health, ethnicity or sexual orientation from other fields processes special category data, even when no column is called that.
+
+  **Protected characteristics are a different list.** Age and sex are protected under the Equality Act 2010, but they are not special categories. Sexual orientation and religion are both.
+
+  To use any personal data you need a **lawful basis** under Article 6. To use special category data you need a lawful basis **and** an **Article 9 condition**. This is the **two-part test**. Lessons E1-L2 and E1-L3 cover each part.
+
+why_it_matters: |
+  An HR analytics team built an attrition model from absence records, overtime and the free-text reasons managers gave for sick leave. The model's strongest feature was a word count of "stress" and "anxiety" in those reasons. Nobody had flagged the column, because it was called absence_note. It held health data, so the processing needed an Article 9 condition and a data protection impact assessment that nobody had done. The model was withdrawn for three months while the team removed the field and wrote the assessment.
+
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      # Attribute register, talent platform
+      date_of_birth: {sensitive: true}
+      gender: {sensitive: true}
+      absence_note: {sensitive: false}
+      badge_photo: {sensitive: true}
+      union_rep: {sensitive: false}
+    annotations:
+      - find: "date_of_birth: {sensitive: true}"
+        note: "One yes/no flag mixes up two lists. Age is a protected characteristic, not a special category."
+      - find: "absence_note: {sensitive: false}"
+        note: "Free text about sick leave holds health data."
+      - find: "union_rep: {sensitive: false}"
+        note: "Being a union representative reveals trade union membership, a special category."
+  strong:
+    code: |
+      # Attribute register, talent platform
+      date_of_birth: {special_category: null, protected_characteristic: age}
+      gender: {special_category: null, protected_characteristic: sex}
+      absence_note: {special_category: health, protected_characteristic: null}
+      badge_photo: {special_category: null, note: "biometric only if used to identify"}
+      union_rep: {special_category: trade_union_membership, protected_characteristic: null}
+    annotations:
+      - find: "date_of_birth: {special_category: null, protected_characteristic: age}"
+        note: "Two separate fields: the GDPR list and the Equality Act list."
+      - find: "absence_note: {special_category: health, protected_characteristic: null}"
+        note: "Classified by what the content reveals, not by the column name."
+      - find: 'badge_photo: {special_category: null, note: "biometric only if used to identify"}'
+        note: "Records the condition that would change the classification."
+  takeaway: |
+    Classify each attribute by what it reveals. Keep the special categories and the protected characteristics as two separate fields, and treat inferences as data.
+
+exercises:
+  - id: E1-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which attribute is special category data under Article 9 of the UK GDPR?
+    options:
+      - {id: a, text: "Date of birth"}
+      - {id: b, text: "Salary band"}
+      - {id: c, text: "Trade union membership"}
+      - {id: d, text: "Home address"}
+    answer: c
+    wrong_answers:
+      - answer: a
+        feedback: "Age is a protected characteristic under the Equality Act 2010, but it is not one of the nine special categories."
+      - answer: b
+        feedback: "Salary is personal data, and confidential, but it is not a special category."
+      - answer: d
+        feedback: "An address is personal data, not special category data."
+    hints:
+      - "There are nine special categories."
+      - "Think of what membership of an organisation can reveal about someone."
+      - "Trade union membership is on the list."
+    explanation: |
+      Trade union membership is one of the nine special categories. The others are racial or ethnic origin, political opinions, religious or philosophical beliefs, genetic data, biometric data used to identify someone, health, sex life and sexual orientation.
+
+  - id: E1-L1-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A model predicts which employees are likely to go on long-term sick leave, from absence patterns and overtime. No input column holds health data. Does the processing involve special category data?
+    options:
+      - {id: a, text: "No, because no input column is health data"}
+      - {id: b, text: "Yes, because the model infers information about health"}
+      - {id: c, text: "Only if the predictions are shown to managers"}
+      - {id: d, text: "Only if the model uses more than 1,000 records"}
+    answer: b
+    reasons:
+      - {id: r1, text: "Inferring a special category from other data counts as processing that category."}
+      - {id: r2, text: "Absence data is always health data."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Inferences count. A prediction about health is health data."
+      - answer: c
+        feedback: "Producing the inference is processing, whether or not anyone sees it."
+      - answer: d
+        feedback: "Scale matters for whether you need a DPIA, not for whether data is special category."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. A plain count of days absent is not health data. The model's inference about illness is."
+    hints:
+      - "What does the model output say about each person?"
+      - "Does inferring a category count as processing it?"
+      - "The ICO treats inferred special category data as special category data."
+    explanation: |
+      The ICO's guidance says that inferring health, ethnicity, beliefs or sexual orientation means you are processing special category data and need an Article 9 condition.
+
+  - id: E1-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the two-part test for using special category data.
+    template: |
+      Part 1: a lawful basis under Article [[g1]]
+      Part 2: a condition under Article [[g2]]
+    gaps:
+      g1: {accepted: ["6"]}
+      g2: {accepted: ["9"]}
+    wrong_answers:
+      - answer: {g1: "9", g2: "6"}
+        feedback: "The other way round. Every use of personal data needs an Article 6 basis. Special category data also needs an Article 9 condition."
+    hints:
+      - "One article applies to all personal data."
+      - "The other applies only to special categories."
+      - "Article 6, then Article 9."
+    explanation: |
+      Every use of personal data needs an Article 6 lawful basis. Special category data needs an Article 9 condition as well.
+
+  - id: E1-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `is_special_category(field: dict) -> bool` for an attribute register. `field` has a `"category"` key, such as `"health"` or `"age"`, and may have a `"use"` key. Return True for the nine special categories. Biometric data counts only when `field.get("use") == "identify"`. Keep the category names in a module constant.
+
+      The category names are: `"racial_or_ethnic_origin"`, `"political_opinions"`, `"religious_or_philosophical_beliefs"`, `"trade_union_membership"`, `"genetic"`, `"biometric"`, `"health"`, `"sex_life"` and `"sexual_orientation"`.
+    starter: |
+      def is_special_category(field):
+          return field["category"] in {"health", "age", "biometric"}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: is_special_category
+          typed: true
+          docstring: true
+          message: "Give `is_special_category` type hints and a docstring."
+      tests:
+        - id: listed
+          code: |
+            for name in ["health", "trade_union_membership", "sexual_orientation", "genetic", "religious_or_philosophical_beliefs"]:
+                assert is_special_category({"category": name}), name
+          message: "Return True for each of the nine special categories."
+        - id: not_listed
+          code: |
+            for name in ["age", "sex", "salary", "home_address"]:
+                assert not is_special_category({"category": name}), name
+          message: "Age and sex are protected characteristics, not special categories. Salary and address are ordinary personal data."
+        - id: biometric
+          code: |
+            assert is_special_category({"category": "biometric", "use": "identify"})
+            assert not is_special_category({"category": "biometric", "use": "profile_photo"})
+            assert not is_special_category({"category": "biometric"})
+          message: "Biometric data is special category data only when you use it to identify someone uniquely."
+    solution: |
+      SPECIAL_CATEGORIES = frozenset(
+          {
+              "racial_or_ethnic_origin",
+              "political_opinions",
+              "religious_or_philosophical_beliefs",
+              "trade_union_membership",
+              "genetic",
+              "biometric",
+              "health",
+              "sex_life",
+              "sexual_orientation",
+          }
+      )
+
+
+      def is_special_category(field: dict) -> bool:
+          """True when an attribute is special category data under Article 9.
+
+          Args:
+              field: Register entry with a "category" and an optional "use".
+
+          Returns:
+              Whether the attribute needs an Article 9 condition.
+          """
+          category = field["category"]
+          if category == "biometric":
+              return field.get("use") == "identify"
+          return category in SPECIAL_CATEGORIES
+    seeded_bugs:
+      - |
+        SPECIAL_CATEGORIES = frozenset({"health", "age", "sex", "biometric", "trade_union_membership"})
+
+
+        def is_special_category(field: dict) -> bool:
+            """Mixes in protected characteristics."""
+            return field["category"] in SPECIAL_CATEGORIES
+      - |
+        SPECIAL_CATEGORIES = frozenset(
+            {
+                "racial_or_ethnic_origin",
+                "political_opinions",
+                "religious_or_philosophical_beliefs",
+                "trade_union_membership",
+                "genetic",
+                "biometric",
+                "health",
+                "sex_life",
+                "sexual_orientation",
+            }
+        )
+
+
+        def is_special_category(field: dict) -> bool:
+            """Treats every biometric field as special."""
+            return field["category"] in SPECIAL_CATEGORIES
+    wrong_answers:
+      - answer: |
+          SPECIAL_CATEGORIES = frozenset(
+              {
+                  "racial_or_ethnic_origin",
+                  "political_opinions",
+                  "religious_or_philosophical_beliefs",
+                  "trade_union_membership",
+                  "genetic",
+                  "biometric",
+                  "health",
+                  "sex_life",
+                  "sexual_orientation",
+              }
+          )
+
+
+          def is_special_category(field: dict) -> bool:
+              """Treats every biometric field as special."""
+              return field["category"] in SPECIAL_CATEGORIES
+        triggers: biometric
+    hints:
+      - "Put the nine names in a frozenset at module level."
+      - "Handle biometric before the general check."
+      - "`field.get(\"use\") == \"identify\"` is True only when the use is set to identify."
+    explanation: |
+      A constant holds the list, and the one conditional category gets its own branch. Age and sex stay out: they belong to the Equality Act list.
+
+  - id: E1-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Design the classification fields for a talent attribute register that feeds access rules and DPIA screening.
+    slots:
+      - id: fields
+        label: "Fields for sensitivity"
+        options:
+          - {id: two, text: "special_category and protected_characteristic as separate fields"}
+          - {id: one, text: "One sensitive: true/false flag"}
+        answer: two
+      - id: basis
+        label: "How an attribute is classified"
+        options:
+          - {id: content, text: "By what its content can reveal, reviewed with the data owner"}
+          - {id: name, text: "By its column name"}
+        answer: content
+      - id: inferred
+        label: "Model outputs"
+        options:
+          - {id: register, text: "Register each model output that infers a special category as its own attribute"}
+          - {id: skip, text: "Leave model outputs out of the register"}
+        answer: register
+    model_answer: |
+      - Two fields, because the GDPR list and the Equality Act list overlap only in part.
+      - Classify by content: a free-text field can hold health data under any name.
+      - Inferred attributes are special category data, so they belong in the register with their own access rules.
+    wrong_answers:
+      - answer: {fields: one}
+        feedback: "A single flag cannot say whether an attribute needs an Article 9 condition or only a fairness check."
+      - answer: {basis: name}
+        feedback: "A column called absence_note held health data in this lesson's example."
+      - answer: {inferred: skip}
+        feedback: "Inferring a special category is processing it."
+    hints:
+      - "Do the two lists of sensitive attributes match?"
+      - "Can a column name hide what a field holds?"
+      - "Is an inference data?"
+    explanation: |
+      Separate the two lists, classify by content, and register inferences, so access rules and DPIA screening start from the truth.
+
+recap:
+  - front: "The nine special categories"
+    back: "Racial or ethnic origin, political opinions, religious or philosophical beliefs, trade union membership, genetic, biometric (to identify), health, sex life, sexual orientation."
+  - front: "Is an inferred special category special category data?"
+    back: "Yes. A model that infers health or ethnicity processes special category data."
+  - front: "Age and sex"
+    back: "Protected characteristics under the Equality Act 2010. Not special categories."
+  - front: "The two-part test"
+    back: "An Article 6 lawful basis for all personal data, plus an Article 9 condition for special category data."
+
+claims:
+  - claim: "UK GDPR Article 9 lists nine special categories; biometric data is special category only when used to identify someone uniquely; inferring a special category means processing special category data; age is a protected characteristic but not special category data; special category data needs a lawful basis and an Article 9 condition."
+    status: search-only
+    source: "ICO guidance pages 'What is special category data?', 'Biometric recognition: key data protection concepts' and 'What about fairness, bias and discrimination?' (ico.org.uk), seen through search results, November 2026. ico.org.uk was not reachable from the build environment."
+  - claim: "The Data Protection Act 2018 supplements the UK GDPR with UK-specific conditions in Schedule 1."
+    status: search-only
+    source: "ICO guidance 'What are the conditions for processing?' (ico.org.uk), seen through search results, November 2026."

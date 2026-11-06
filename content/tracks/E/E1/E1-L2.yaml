@@ -1,0 +1,230 @@
+id: E1-L2
+title: A lawful basis for each use of talent data
+
+concept: |
+  Article 6 of the UK GDPR gives **six lawful bases**. Each use of personal data needs one that fits it:
+
+  - **consent**
+  - **contract**, to perform a contract with the person, such as paying their salary
+  - **legal obligation**, such as tax reporting or right-to-work checks
+  - **vital interests**, to protect someone's life
+  - **public task**
+  - **legitimate interests**
+
+  Since 5 February 2026, the Data (Use and Access) Act 2025 adds **recognised legitimate interests**: a short, fixed list of purposes, such as safeguarding and crime prevention, that skip the balancing test. Commercial uses are not on it.
+
+  **Employers rarely rely on consent.** The ICO's view is that the power imbalance between employer and worker makes it hard for consent to be freely given. A worker who fears saying no has no genuine choice. Use another basis.
+
+  Workforce analytics usually rests on **legitimate interests**. The ICO describes a **three-part test**, recorded in a **legitimate interests assessment** (LIA) before processing starts:
+
+  1. **Purpose**: is there a legitimate interest?
+  2. **Necessity**: does the processing serve it, and is there a less intrusive way?
+  3. **Balancing**: do the person's interests, rights and freedoms override yours? Ask what a reasonable person would expect.
+
+  Two principles from Article 5 shape the platform. **Purpose limitation**: a basis covers the purposes you specified. Payroll under contract does not cover an attrition model. A new purpose needs its own check. **Data minimisation**: hold only the data each purpose needs.
+
+why_it_matters: |
+  A firm launched an engagement survey and stated that consent was its lawful basis. Two years later it fed the answers into a promotion-readiness model. Staff complained that they had never agreed to that use, and some withdrew consent, which removed their records from every analysis. A legitimate interests assessment for each purpose, done before launch, would have shown that the promotion use failed the balancing test.
+
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      # Processing register, talent platform
+      payroll: {lawful_basis: consent}
+      engagement_survey: {lawful_basis: consent}
+      attrition_model: {lawful_basis: same as payroll}
+    annotations:
+      - find: "payroll: {lawful_basis: consent}"
+        note: "Workers cannot refuse payroll. Consent cannot be freely given here."
+      - find: "attrition_model: {lawful_basis: same as payroll}"
+        note: "A new purpose needs its own basis check. Payroll's basis does not stretch to it."
+  strong:
+    code: |
+      # Processing register, talent platform
+      payroll: {lawful_basis: contract}
+      tax_reporting: {lawful_basis: legal_obligation}
+      engagement_survey: {lawful_basis: legitimate_interests, lia: LIA-007}
+      attrition_model: {lawful_basis: legitimate_interests, lia: LIA-012, fields: minimised}
+    annotations:
+      - find: "payroll: {lawful_basis: contract}"
+        note: "Paying salary performs the employment contract."
+      - find: "engagement_survey: {lawful_basis: legitimate_interests, lia: LIA-007}"
+        note: "Each use of legitimate interests points to its recorded assessment."
+      - find: "attrition_model: {lawful_basis: legitimate_interests, lia: LIA-012, fields: minimised}"
+        note: "Its own assessment, and only the fields the model needs."
+  takeaway: |
+    Give each purpose its own lawful basis, avoid consent for workers, record a legitimate interests assessment for each use of legitimate interests, and keep only the fields each purpose needs.
+
+exercises:
+  - id: E1-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which lawful basis fits paying an employee's salary?
+    options:
+      - {id: a, text: "Consent"}
+      - {id: b, text: "Contract"}
+      - {id: c, text: "Vital interests"}
+      - {id: d, text: "Public task"}
+    answer: b
+    wrong_answers:
+      - answer: a
+        feedback: "The employee cannot refuse payroll, so consent would not be freely given. Payroll performs the contract."
+      - answer: c
+        feedback: "Vital interests protects someone's life. Salary payments do not."
+      - answer: d
+        feedback: "Public task covers official functions set out in law, not paying staff."
+    hints:
+      - "What agreement does a salary come from?"
+      - "The employment contract."
+      - "Contract."
+    explanation: |
+      Paying salary is necessary to perform the employment contract, so the contract basis fits.
+
+  - id: E1-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A team wants to use consent as the lawful basis for a voluntary skills survey of its own employees. What does the ICO's guidance say?
+    options:
+      - {id: a, text: "Consent is the safest basis for any employee data"}
+      - {id: b, text: "Employers rarely rely on consent, because the power imbalance makes it hard to give freely"}
+      - {id: c, text: "Consent is banned for employees"}
+      - {id: d, text: "Consent is required for any survey"}
+    answer: b
+    reasons:
+      - {id: r1, text: "A worker who fears refusing has no genuine choice, so consent is hard to show as freely given."}
+      - {id: r2, text: "Consent expires after one year."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "Consent is the hardest basis to rely on for employees, and it can be withdrawn at any time."
+      - answer: c
+        feedback: "It is not banned. The ICO says it can work where refusing truly has no consequences, but that is rare."
+      - answer: d
+        feedback: "No lawful basis is required for a type of activity. You choose the one that fits the purpose."
+      - answer: b|r2
+        feedback: "Right answer, wrong reason. The problem is the imbalance of power, not an expiry date."
+    hints:
+      - "Who holds the power in employment?"
+      - "Can consent be freely given when refusing feels risky?"
+      - "Look for another basis, such as legitimate interests."
+    explanation: |
+      The ICO treats consent as rarely appropriate for employers, because a worker's choice is not genuinely free. Legitimate interests, with a recorded assessment, usually fits voluntary analytics.
+
+  - id: E1-L2-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Put the steps of a legitimate interests assessment in order.
+    items:
+      - {id: purpose, text: "Purpose: identify the legitimate interest"}
+      - {id: necessity, text: "Necessity: show the processing serves it and nothing less intrusive would"}
+      - {id: balance, text: "Balancing: weigh the person's interests, rights and freedoms against yours"}
+      - {id: record, text: "Record the outcome before processing starts"}
+    answer: [purpose, necessity, balance, record]
+    wrong_answers:
+      - answer: [balance, purpose, necessity, record]
+        feedback: "You cannot weigh an interest you have not named yet. Start with the purpose."
+      - answer: [purpose, necessity, record, balance]
+        feedback: "Record the outcome once all three parts are done, before processing starts."
+    hints:
+      - "What do you need before you can test necessity?"
+      - "The balancing test weighs the interest you named against the person's."
+      - "The record comes last, before processing begins."
+    explanation: |
+      Purpose, necessity, balancing, then a written record before processing starts.
+
+  - id: E1-L2-E4
+    type: fill_gap
+    difficulty: 3
+    language: text
+    prompt: |
+      Complete the two principles that shape a talent platform.
+    template: |
+      Purpose [[g1]]: a lawful basis covers the purposes you specified. A new purpose needs its own check.
+      Data [[g2]]: hold only the data each purpose needs.
+    gaps:
+      g1: {accepted: [limitation], case_sensitive: false}
+      g2: {accepted: [minimisation, minimization], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: minimisation, g2: limitation}
+        feedback: "The other way round: purpose limitation, data minimisation."
+    hints:
+      - "Both principles come from Article 5."
+      - "One limits purposes, the other keeps data to a minimum."
+      - "`limitation`, then `minimisation`."
+    explanation: |
+      Purpose limitation and data minimisation are Article 5 principles. Together they stop one dataset quietly serving every new idea.
+
+  - id: E1-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Choose the lawful basis for each use of a talent platform's data.
+    slots:
+      - id: right_to_work
+        label: "Right-to-work checks before someone starts"
+        options:
+          - {id: legal, text: "Legal obligation"}
+          - {id: consent, text: "Consent"}
+          - {id: li, text: "Legitimate interests"}
+        answer: legal
+      - id: training
+        label: "Recording mandatory training completions"
+        options:
+          - {id: contract, text: "Contract or legitimate interests, as the register records"}
+          - {id: consent, text: "Consent"}
+          - {id: vital, text: "Vital interests"}
+        answer: contract
+      - id: attrition
+        label: "A new attrition prediction model"
+        options:
+          - {id: li_new, text: "Legitimate interests, with its own assessment and minimised fields"}
+          - {id: inherit, text: "The basis already recorded for payroll"}
+          - {id: consent, text: "Consent from each employee"}
+        answer: li_new
+    model_answer: |
+      - Right-to-work checks are required by law, so legal obligation fits.
+      - Training records support the employment relationship. Record which basis you use and why.
+      - The attrition model is a new purpose. It needs its own basis check and assessment, and only the fields it uses.
+    wrong_answers:
+      - answer: {right_to_work: consent}
+        feedback: "The check is a legal duty. Consent would be misleading, because the worker cannot refuse."
+      - answer: {attrition: inherit}
+        feedback: "Purpose limitation: payroll's basis does not cover a new analytics purpose."
+      - answer: {attrition: consent}
+        feedback: "Consent rarely works for employees, and withdrawals would leave holes in the model."
+    hints:
+      - "Which uses does the law require?"
+      - "Which use is a new purpose?"
+      - "A new purpose needs its own basis check."
+    explanation: |
+      Legal duties use legal obligation. Running the employment relationship uses contract or legitimate interests. A new analytics purpose gets its own assessment.
+
+recap:
+  - front: "The six lawful bases"
+    back: "Consent, contract, legal obligation, vital interests, public task, legitimate interests."
+  - front: "Consent for employee data"
+    back: "Rarely appropriate. The power imbalance makes it hard to give freely. Use another basis."
+  - front: "Legitimate interests assessment"
+    back: "Purpose, necessity, balancing, recorded before processing starts."
+  - front: "Purpose limitation"
+    back: "A basis covers the purposes you specified. A new purpose, such as an attrition model, needs its own check."
+  - front: "Recognised legitimate interests"
+    back: "Added by the Data (Use and Access) Act 2025, in force 5 February 2026. A fixed list of purposes with no balancing test. Not for commercial uses."
+
+claims:
+  - claim: "Six Article 6 lawful bases; a new purpose needs a lawful basis that fits it; Article 5(1)(c) data minimisation and purpose limitation."
+    status: search-only
+    source: "ICO guidance 'Principle (b): Purpose limitation', 'Principle (c): Data minimisation' and 'A guide to lawful basis' (ico.org.uk), seen through search results, November 2026."
+  - claim: "Consent is not usually appropriate for employers because of the imbalance of power; not banned where refusing has no adverse consequences."
+    status: search-only
+    source: "ICO guidance 'Data protection and monitoring workers' and 'Data protection and workers' health information' (ico.org.uk), seen through search results, November 2026."
+  - claim: "Legitimate interests three-part test: purpose, necessity, balancing; reasonable expectations judged objectively; record in an LIA before processing."
+    status: search-only
+    source: "ICO guidance 'What is the legitimate interests basis?' and 'Legitimate interests' (ico.org.uk), seen through search results, November 2026."
+  - claim: "Recognised legitimate interests came into force on 5 February 2026 (Data (Use and Access) Act 2025, Commencement No. 6, SI 2026/82); listed purposes skip the balancing test; not for commercial processing."
+    status: search-only
+    source: "Commentary from Alston & Bird (January 2026), Pearl Cohen and bratby.law, seen through search results, November 2026. legislation.gov.uk was not reachable from the build environment."
