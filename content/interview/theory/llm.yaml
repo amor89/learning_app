@@ -1,0 +1,71 @@
+topic: llm
+questions:
+  - id: llm-1
+    lessons: [B20-L2, B20-L3]
+    seconds: 100
+    question: How do you get reliable structured data out of an LLM in a pipeline?
+    points:
+      - Validate every reply against a pydantic model
+      - On failure, retry once with the error added as a turn
+      - After the last attempt, store the item for review and never guess a label
+      - Reject replies whose stop reason is not end_turn
+    model_answer: |
+      Parse and validate each reply against a model of what you need, so broken JSON and bad fields both raise. On failure, add the reply and the error to the conversation and retry, up to a fixed number of attempts. If every attempt fails, store `needs_review` with the raw reply. Also reject replies that did not finish, such as `max_tokens`.
+  - id: llm-2
+    lessons: [B21-L1, B21-L2, B21-L3]
+    seconds: 120
+    question: Walk through a retrieval-augmented generation pipeline, from documents to answer.
+    points:
+      - Chunk on structure, then by size with overlap, keeping metadata for citations
+      - Retrieve with embeddings and keywords, and fuse the rankings
+      - Fill the context budget in rank order without cutting chunks
+      - Answer only from the sources, cite each claim and check the citations
+      - Report that nothing matched when the best score is low
+    model_answer: |
+      Split documents on headings, then into overlapping windows, and keep document, section and chunk IDs. Retrieve with cosine similarity and a keyword ranking, fused with reciprocal rank fusion, after filtering to allowed sources. Add whole chunks in rank order until the budget is full. Instruct the model to answer only from the tagged sources with citations, check every cited ID, and refuse when retrieval finds nothing good.
+  - id: llm-3
+    lessons: [B21-L2]
+    seconds: 60
+    question: In reciprocal rank fusion, what does one ranking add to a chunk's score?
+    options:
+      - {id: a, text: "1 / (k + rank), with ranks from 1"}
+      - {id: b, text: "rank / k"}
+      - {id: c, text: "Its cosine similarity"}
+      - {id: d, text: "1 / rank squared"}
+    answer: a
+    model_answer: |
+      Each ranking adds `1 / (k + rank)`, and the scores are summed across rankings. k = 60 in the original paper. It needs no score calibration between the embedding and keyword rankings, only the ranks.
+  - id: llm-4
+    lessons: [B22-L1]
+    seconds: 45
+    question: For one question, the first relevant section appears at rank 4. What is its reciprocal rank?
+    options:
+      - {id: a, text: "0.25"}
+      - {id: b, text: "0.75"}
+      - {id: c, text: "4"}
+      - {id: d, text: "1"}
+    answer: a
+    model_answer: |
+      Reciprocal rank is `1 / rank` of the first relevant result, ranks from 1, or 0 when none appears. MRR is its mean over the questions in the gold set.
+  - id: llm-5
+    lessons: [B22-L2]
+    seconds: 100
+    question: When can you trust an LLM judge to grade answers?
+    points:
+      - Known biases include position, verbosity and self-enhancement
+      - For pairs, run both orders and call disagreements ties
+      - Compare it with human grades on a sample, criterion by criterion
+      - Re-check after any change to the prompt or model
+    model_answer: |
+      Only after you have measured it. Judges favour the first position, longer answers and their own model's style. Run pairwise comparisons in both orders and call disagreements ties. Grade a sample by hand, compare criterion by criterion, and repeat the comparison whenever the judge's prompt or model changes. Use exact checks first wherever they apply.
+  - id: llm-6
+    lessons: [B22-L3]
+    seconds: 100
+    question: A prompt change raises the average eval score from 81% to 84%. Do you ship it?
+    points:
+      - Compare per item, listing fixed and broken items
+      - Read every broken item
+      - Apply a release gate written before the run, with critical items that must pass
+      - Repeat noisy items and take the majority
+    model_answer: |
+      Not on the average alone. List the items that broke as well as those that improved, and read every broken one. Apply the gate you wrote before the run: every critical item passes, at most N items break, and the pass rate does not drop by more than a set share. Repeat noisy items and use the majority, so one lucky run does not decide.

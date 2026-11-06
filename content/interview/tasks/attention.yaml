@@ -1,0 +1,267 @@
+id: attention
+title: Scaled dot-product attention with a mask
+lessons: [B25-L3, B25-L4]
+minutes: 20
+prompt: |
+  Write `attention(q, k, v, mask=None)` with NumPy only. It returns `(output, weights)`.
+
+  - `q` has shape `(..., L_q, d)`, `k` has `(..., L_k, d)` and `v` has `(..., L_k, d_v)`. Leading batch dimensions, if any, match.
+  - `weights` has shape `(..., L_q, L_k)`: a softmax across the keys of the scores `q @ k^T / sqrt(d)`. `output = weights @ v`.
+  - `mask` is a boolean array that broadcasts to the scores' shape. True means the key takes part, as in PyTorch's `scaled_dot_product_attention`. A masked weight is exactly 0.
+  - Stay finite for large scores, and raise `ValueError` when a query has every key masked.
+primer: |
+  `np.swapaxes(k, -1, -2)` swaps the last two axes, so it transposes every matrix in a batch: shape `(2, 5, 4)` becomes `(2, 4, 5)`. The `@` operator then multiplies matrix by matrix across the batch. `np.broadcast_to(mask, shape)` shows the mask at the full shape without copying it, and `mask.any(axis=-1)` is True for each row with at least one True.
+starter: |
+  import numpy as np
+
+
+  def attention(
+      q: np.ndarray, k: np.ndarray, v: np.ndarray, mask: np.ndarray | None = None
+  ) -> tuple[np.ndarray, np.ndarray]:
+      """Scaled dot-product attention. Return the output and the weights."""
+      raise NotImplementedError
+packages: [numpy]
+checker:
+  kind: python
+  ast_rules:
+    - id: numpy_only
+      kind: forbids_pattern
+      pattern: "^\\s*(from|import)\\s+(torch|scipy|sklearn)"
+      message: Write attention yourself with NumPy. PyTorch, SciPy and scikit-learn are off limits.
+  setup: |
+    import math
+    import warnings
+
+    import numpy as np
+
+    _RNG = np.random.default_rng(3)
+    _Q = _RNG.normal(size=(3, 4))
+    _K = _RNG.normal(size=(5, 4))
+    _V = _RNG.normal(size=(5, 2))
+
+
+    def _reference(q, k, v):
+        out = np.zeros((len(q), v.shape[1]))
+        for i in range(len(q)):
+            scores = [sum(q[i, j] * k[t, j] for j in range(q.shape[1])) / math.sqrt(q.shape[1]) for t in range(len(k))]
+            top = max(scores)
+            exps = [math.exp(s - top) for s in scores]
+            total = sum(exps)
+            out[i] = sum((e / total) * v[t] for t, e in enumerate(exps))
+        return out
+  tests:
+    - id: shapes
+      code: |
+        q = _RNG.normal(size=(2, 3, 4))
+        k = _RNG.normal(size=(2, 5, 4))
+        v = _RNG.normal(size=(2, 5, 6))
+        out, weights = attention(q, k, v)
+        assert out.shape == (2, 3, 6), out.shape
+        assert weights.shape == (2, 3, 5), weights.shape
+      message: Return the output, shape (..., L_q, d_v), and the weights, shape (..., L_q, L_k), with batch dimensions kept.
+    - id: rows_sum_to_one
+      code: |
+        _, weights = attention(_Q, _K, _V)
+        assert np.all(weights >= 0)
+        assert np.allclose(weights.sum(axis=-1), 1.0), weights.sum(axis=-1)
+      message: Each query's weights are a softmax across the keys, so each row sums to 1.
+    - id: reference
+      code: |
+        out, _ = attention(_Q, _K, _V)
+        assert np.allclose(out, _reference(_Q, _K, _V)), "output differs from softmax(q @ k.T / sqrt(d)) @ v"
+      message: Compute softmax(q @ k^T / sqrt(d)) across the keys, then multiply by v. Divide by sqrt(d), the size of the last axis of q.
+    - id: stable
+      code: |
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            out, weights = attention(_Q * 1000, _K, _V)
+        assert np.all(np.isfinite(out)) and np.allclose(weights.sum(axis=-1), 1.0)
+      message: Stay finite for large scores. Subtract each row's maximum before exp.
+    - id: causal_mask
+      code: |
+        q = _RNG.normal(size=(4, 3))
+        kv = _RNG.normal(size=(4, 3))
+        causal = np.tril(np.ones((4, 4), dtype=bool))
+        out, weights = attention(q, kv, kv, mask=causal)
+        assert np.all(weights[~causal] == 0.0), weights
+        assert np.allclose(weights.sum(axis=-1), 1.0)
+        changed = kv.copy()
+        changed[3] += 5.0
+        out2, _ = attention(q, changed, changed, mask=causal)
+        assert np.allclose(out[:3], out2[:3]), "a later token changed an earlier output"
+      message: Masked keys get a weight of exactly 0, and the remaining weights still sum to 1. Set masked scores to minus infinity before the softmax.
+    - id: padding_mask
+      code: |
+        q = _RNG.normal(size=(2, 3, 4))
+        k = _RNG.normal(size=(2, 5, 4))
+        keep = np.array([[True] * 5, [True, True, True, False, False]])[:, None, :]
+        out, weights = attention(q, k, k, mask=keep)
+        assert np.all(weights[1, :, 3:] == 0.0)
+        alone, _ = attention(q[1], k[1, :3], k[1, :3])
+        assert np.allclose(out[1], alone), "padding changed the output"
+      message: A mask that broadcasts, such as one padding row per sequence of shape (batch, 1, L_k), applies to every query.
+    - id: all_masked
+      code: |
+        mask = np.array([[True, False, False, False, False], [False] * 5, [True] * 5])
+        try:
+            attention(_Q, _K, _V, mask=mask)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("no ValueError when a query has every key masked")
+      message: Raise ValueError when a query has every key masked. Its softmax would be 0 / 0.
+solution: |
+  import numpy as np
+
+
+  def attention(
+      q: np.ndarray, k: np.ndarray, v: np.ndarray, mask: np.ndarray | None = None
+  ) -> tuple[np.ndarray, np.ndarray]:
+      """Scaled dot-product attention.
+
+      Args:
+          q: Queries, shape (..., L_q, d).
+          k: Keys, shape (..., L_k, d).
+          v: Values, shape (..., L_k, d_v).
+          mask: Optional boolean array broadcastable to (..., L_q, L_k). True takes part.
+
+      Returns:
+          The output, shape (..., L_q, d_v), and the weights, shape (..., L_q, L_k).
+
+      Raises:
+          ValueError: If a query has every key masked.
+      """
+      scores = q @ np.swapaxes(k, -1, -2) / np.sqrt(q.shape[-1])
+      if mask is not None:
+          mask = np.broadcast_to(mask, scores.shape)
+          if not mask.any(axis=-1).all():
+              raise ValueError("a query has every key masked")
+          scores = np.where(mask, scores, -np.inf)
+      scores = scores - scores.max(axis=-1, keepdims=True)
+      weights = np.exp(scores)
+      weights = weights / weights.sum(axis=-1, keepdims=True)
+      return weights @ v, weights
+seeded_bugs:
+  - |
+    import numpy as np
+
+
+    def attention(q, k, v, mask=None):
+        scores = q @ np.swapaxes(k, -1, -2)
+        if mask is not None:
+            mask = np.broadcast_to(mask, scores.shape)
+            if not mask.any(axis=-1).all():
+                raise ValueError("all masked")
+            scores = np.where(mask, scores, -np.inf)
+        scores = scores - scores.max(axis=-1, keepdims=True)
+        weights = np.exp(scores)
+        weights = weights / weights.sum(axis=-1, keepdims=True)
+        return weights @ v, weights
+  - |
+    import numpy as np
+
+
+    def attention(q, k, v, mask=None):
+        scores = q @ np.swapaxes(k, -1, -2) / np.sqrt(q.shape[-1])
+        if mask is not None:
+            mask = np.broadcast_to(mask, scores.shape)
+            if not mask.any(axis=-1).all():
+                raise ValueError("all masked")
+            scores = np.where(mask, scores, -np.inf)
+        weights = np.exp(scores)
+        weights = weights / weights.sum(axis=-1, keepdims=True)
+        return weights @ v, weights
+  - |
+    import numpy as np
+
+
+    def attention(q, k, v, mask=None):
+        scores = q @ np.swapaxes(k, -1, -2) / np.sqrt(q.shape[-1])
+        scores = scores - scores.max(axis=-1, keepdims=True)
+        weights = np.exp(scores)
+        weights = weights / weights.sum(axis=-1, keepdims=True)
+        if mask is not None:
+            weights = weights * mask
+        return weights @ v, weights
+  - |
+    import numpy as np
+
+
+    def attention(q, k, v, mask=None):
+        scores = q @ np.swapaxes(k, -1, -2) / np.sqrt(q.shape[-1])
+        if mask is not None:
+            scores = np.where(mask, scores, -np.inf)
+        scores = scores - scores.max(axis=-2, keepdims=True)
+        weights = np.exp(scores)
+        weights = weights / weights.sum(axis=-2, keepdims=True)
+        return weights @ v, weights
+  - |
+    import numpy as np
+
+
+    def attention(q, k, v, mask=None):
+        scores = q @ np.swapaxes(k, -1, -2) / np.sqrt(q.shape[-1])
+        if mask is not None:
+            scores = np.where(mask, scores, -np.inf)
+        scores = scores - scores.max(axis=-1, keepdims=True)
+        weights = np.exp(scores)
+        weights = weights / weights.sum(axis=-1, keepdims=True)
+        return weights @ v, weights
+wrong_answers:
+  - triggers: reference
+    answer: |
+      import numpy as np
+
+
+      def attention(q, k, v, mask=None):
+          scores = q @ np.swapaxes(k, -1, -2)
+          if mask is not None:
+              scores = np.where(mask, scores, -np.inf)
+          scores = scores - scores.max(axis=-1, keepdims=True)
+          weights = np.exp(scores)
+          weights = weights / weights.sum(axis=-1, keepdims=True)
+          return weights @ v, weights
+  - triggers: stable
+    answer: |
+      import numpy as np
+
+
+      def attention(q, k, v, mask=None):
+          scores = q @ np.swapaxes(k, -1, -2) / np.sqrt(q.shape[-1])
+          if mask is not None:
+              scores = np.where(mask, scores, -np.inf)
+          weights = np.exp(scores)
+          weights = weights / weights.sum(axis=-1, keepdims=True)
+          return weights @ v, weights
+  - triggers: causal_mask
+    answer: |
+      import numpy as np
+
+
+      def attention(q, k, v, mask=None):
+          scores = q @ np.swapaxes(k, -1, -2) / np.sqrt(q.shape[-1])
+          scores = scores - scores.max(axis=-1, keepdims=True)
+          weights = np.exp(scores)
+          weights = weights / weights.sum(axis=-1, keepdims=True)
+          if mask is not None:
+              weights = weights * mask
+          return weights @ v, weights
+hints:
+  - "Get the unmasked version right first: scores, a stable softmax along the last axis, then `weights @ v`. Use `np.swapaxes(k, -1, -2)` so batches work."
+  - "Mask the scores, not the weights: `np.where(mask, scores, -np.inf)` before the softmax. `exp(-inf)` is exactly 0, and the other weights still sum to 1."
+  - "Check for empty rows before the softmax: `np.broadcast_to(mask, scores.shape).any(axis=-1).all()` must be True, or the row is `-inf - -inf`, which is `nan`."
+explanation: |
+  The scale keeps the scores' spread near 1 whatever `d` is, so the softmax does not saturate. Subtracting the row maximum changes nothing mathematically, because softmax ignores a constant shift, and it keeps `exp` at or below 1. Masking with minus infinity before the softmax gives exact zeros and renormalises the rest. Multiplying weights by the mask afterwards leaves rows that no longer sum to 1.
+follow_ups:
+  - question: Why divide by sqrt(d)?
+    answer: |
+      For independent entries with unit variance, a dot product of length d has variance d, so its typical size grows like sqrt(d): about 2, 8 and 22 at d = 4, 64 and 512 (B25-L3). Large scores push the softmax towards one-hot, where gradients vanish. Dividing by sqrt(d) keeps the spread near 1.
+  - question: What is the cost of attention in time and memory?
+    answer: |
+      The score matrix is L_q by L_k, so time and memory grow with the square of the sequence length for self-attention, times d for the products. That limits context length. Recurrent models are linear in length but cannot run the steps in parallel (B25-L2).
+  - question: How do you test that a causal mask works?
+    answer: |
+      Change a later token and check that earlier outputs stay the same, and add padding and check that outputs at real positions stay the same (B25-L4). Also assert masked weights are exactly 0.
+  - question: Why several heads instead of one?
+    answer: |
+      Each head attends in its own d / h-dimensional projection, so heads can track different relations at the same cost as one full-size head. The outputs are concatenated and projected back to d (B25-L5).

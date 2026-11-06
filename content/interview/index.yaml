@@ -1,0 +1,16 @@
+# Interview practice: timed theory questions by topic, and "implement it from scratch"
+# tasks. The app's Interview tab reads this bank. Every question and task names the
+# lessons that teach it, and learnkit/loader.py checks those lessons exist.
+topics:
+  - {id: stats, title: Statistics}
+  - {id: experiments, title: Experiments and A/B tests}
+  - {id: leakage, title: Splits and leakage}
+  - {id: evaluation, title: Model evaluation}
+  - {id: interpret, title: Interpretability and fairness}
+  - {id: training, title: Training neural networks}
+  - {id: cnn, title: Convolutional networks}
+  - {id: transformers, title: Attention and transformers}
+  - {id: finetune, title: Fine-tuning}
+  - {id: llm, title: "LLMs, RAG and evaluation"}
+  - {id: mlops, title: MLOps and serving}
+tasks: [split, logreg, kmeans, attention, cross-entropy, layer-norm]

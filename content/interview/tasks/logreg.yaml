@@ -1,0 +1,287 @@
+id: logreg
+title: Logistic regression by gradient descent
+lessons: [B23-L2, B23-L3, B23-L5]
+minutes: 30
+prompt: |
+  Write logistic regression with NumPy only, as three functions:
+
+  - `sigmoid(z)`: the sigmoid of an array, stable for any input. `sigmoid(-1000)` must return 0.0 with no overflow warning.
+  - `fit_logistic(X, y, lr=0.1, epochs=1000)`: start from zero weights and a zero bias, then take `epochs` full-batch gradient descent steps on the mean log loss. Return `(w, b)`: an array of shape `(n_features,)` and a float.
+  - `predict_proba(X, w, b)`: the probability of class 1 for each row, shape `(n_rows,)`.
+
+  `y` holds 0 and 1.
+primer: |
+  Logistic regression scores each row with `z = X @ w + b` and turns the score into a probability with `p = 1 / (1 + exp(-z))`. Training lowers the mean log loss, `-mean(y * log(p) + (1 - y) * log(1 - p))`. Its gradients are `X.T @ (p - y) / n` for `w` and `mean(p - y)` for `b`. Each step moves against the gradient: `w = w - lr * grad_w`.
+
+  For a large negative `z`, `exp(-z)` overflows. With `e = np.exp(-np.abs(z))`, the sigmoid is `1 / (1 + e)` where `z >= 0` and `e / (1 + e)` elsewhere, and `e` never exceeds 1. `np.where(condition, a, b)` picks from `a` where the condition holds and from `b` elsewhere.
+starter: |
+  import numpy as np
+
+
+  def sigmoid(z: np.ndarray) -> np.ndarray:
+      """Stable sigmoid."""
+      raise NotImplementedError
+
+
+  def fit_logistic(
+      X: np.ndarray, y: np.ndarray, lr: float = 0.1, epochs: int = 1000
+  ) -> tuple[np.ndarray, float]:
+      """Fit weights and bias by full-batch gradient descent on the mean log loss."""
+      raise NotImplementedError
+
+
+  def predict_proba(X: np.ndarray, w: np.ndarray, b: float) -> np.ndarray:
+      """Probability of class 1 for each row."""
+      raise NotImplementedError
+packages: [numpy]
+checker:
+  kind: python
+  ast_rules:
+    - id: numpy_only
+      kind: forbids_pattern
+      pattern: "^\\s*(from|import)\\s+(sklearn|scipy|torch|statsmodels)"
+      message: Write the model yourself with NumPy. scikit-learn, SciPy, PyTorch and statsmodels are off limits.
+  setup: |
+    import warnings
+
+    import numpy as np
+
+    _RNG = np.random.default_rng(0)
+    _X = _RNG.normal(size=(300, 2))
+    _Z = _X @ np.array([2.0, -3.0]) + 0.5
+    _Y = (_RNG.random(300) < 1 / (1 + np.exp(-_Z))).astype(float)
+
+
+    def _log_loss(p, y):
+        p = np.clip(p, 1e-12, 1 - 1e-12)
+        return float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p)))
+  tests:
+    - id: sigmoid_values
+      code: |
+        out = sigmoid(np.array([0.0, 2.0, -2.0]))
+        assert np.allclose(out, [0.5, 0.880797, 0.119203], atol=1e-6), out
+      message: "`sigmoid` returns 1 / (1 + exp(-z)): 0.5 at 0, about 0.881 at 2 and 0.119 at -2."
+    - id: sigmoid_stable
+      code: |
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            out = sigmoid(np.array([-1000.0, 1000.0, -40.0]))
+        assert np.all(np.isfinite(out)), out
+        assert out[0] == 0.0 and out[1] == 1.0 and 0 < out[2] < 1e-17, out
+      message: "`sigmoid` must not overflow: compute exp only of -|z|, never of a large positive number."
+    - id: one_step
+      code: |
+        X = np.array([[1.0, 2.0], [0.0, -1.0], [3.0, 1.0], [-2.0, 0.5]])
+        y = np.array([1.0, 0.0, 1.0, 1.0])
+        w, b = fit_logistic(X, y, lr=0.5, epochs=1)
+        assert np.allclose(w, 0.5 * X.T @ (y - 0.5) / 4), w
+        assert np.isclose(b, 0.5 * np.mean(y - 0.5)), b
+      message: "Start from zeros, and step with the mean gradient: w -= lr * X.T @ (p - y) / n and b -= lr * mean(p - y)."
+    - id: shapes
+      code: |
+        w, b = fit_logistic(_X, _Y, epochs=5)
+        assert w.shape == (2,), w.shape
+        assert isinstance(float(b), float)
+        p = predict_proba(_X, w, b)
+        assert p.shape == (300,) and np.all((p >= 0) & (p <= 1)), p.shape
+      message: Return w of shape (n_features,) and a float b. `predict_proba` returns one probability per row.
+    - id: learns
+      code: |
+        w, b = fit_logistic(_X, _Y, lr=0.5, epochs=2000)
+        p = predict_proba(_X, w, b)
+        accuracy = np.mean((p >= 0.5) == (_Y == 1))
+        assert w[0] > 0 > w[1], w
+        assert accuracy >= 0.85, accuracy
+        assert _log_loss(p, _Y) < _log_loss(np.full(300, 0.5), _Y) - 0.2
+      message: "On data drawn from known weights [2, -3], the fitted weights have the right signs, accuracy reaches 0.85 and the loss falls well below log(2)."
+    - id: loss_falls
+      code: |
+        early = _log_loss(predict_proba(_X, *fit_logistic(_X, _Y, lr=0.5, epochs=20)), _Y)
+        late = _log_loss(predict_proba(_X, *fit_logistic(_X, _Y, lr=0.5, epochs=400)), _Y)
+        assert late < early, (early, late)
+      message: More epochs lower the training loss.
+solution: |
+  import numpy as np
+
+
+  def sigmoid(z: np.ndarray) -> np.ndarray:
+      """Stable sigmoid: exp is only ever taken of -|z|, which cannot overflow."""
+      e = np.exp(-np.abs(z))
+      return np.where(z >= 0, 1 / (1 + e), e / (1 + e))
+
+
+  def fit_logistic(
+      X: np.ndarray, y: np.ndarray, lr: float = 0.1, epochs: int = 1000
+  ) -> tuple[np.ndarray, float]:
+      """Fit weights and bias by full-batch gradient descent on the mean log loss.
+
+      Args:
+          X: Features, shape (n_rows, n_features).
+          y: Targets of 0 and 1, shape (n_rows,).
+          lr: Learning rate.
+          epochs: Number of full-batch steps.
+
+      Returns:
+          Weights of shape (n_features,) and the bias.
+      """
+      n_rows, n_features = X.shape
+      w = np.zeros(n_features)
+      b = 0.0
+      for _ in range(epochs):
+          error = predict_proba(X, w, b) - y
+          w = w - lr * X.T @ error / n_rows
+          b = b - lr * float(np.mean(error))
+      return w, b
+
+
+  def predict_proba(X: np.ndarray, w: np.ndarray, b: float) -> np.ndarray:
+      """Probability of class 1 for each row."""
+      return sigmoid(X @ w + b)
+seeded_bugs:
+  - |
+    import numpy as np
+
+
+    def sigmoid(z):
+        return 1 / (1 + np.exp(-z))
+
+
+    def fit_logistic(X, y, lr=0.1, epochs=1000):
+        w = np.zeros(X.shape[1])
+        b = 0.0
+        for _ in range(epochs):
+            error = sigmoid(X @ w + b) - y
+            w = w - lr * X.T @ error / len(y)
+            b = b - lr * float(np.mean(error))
+        return w, b
+
+
+    def predict_proba(X, w, b):
+        return sigmoid(X @ w + b)
+  - |
+    import numpy as np
+
+
+    def sigmoid(z):
+        e = np.exp(-np.abs(z))
+        return np.where(z >= 0, 1 / (1 + e), e / (1 + e))
+
+
+    def fit_logistic(X, y, lr=0.1, epochs=1000):
+        w = np.zeros(X.shape[1])
+        b = 0.0
+        for _ in range(epochs):
+            error = sigmoid(X @ w + b) - y
+            w = w - lr * X.T @ error
+            b = b - lr * float(np.sum(error))
+        return w, b
+
+
+    def predict_proba(X, w, b):
+        return sigmoid(X @ w + b)
+  - |
+    import numpy as np
+
+
+    def sigmoid(z):
+        e = np.exp(-np.abs(z))
+        return np.where(z >= 0, 1 / (1 + e), e / (1 + e))
+
+
+    def fit_logistic(X, y, lr=0.1, epochs=1000):
+        w = np.zeros(X.shape[1])
+        b = 0.0
+        for _ in range(epochs):
+            error = y - sigmoid(X @ w + b)
+            w = w - lr * X.T @ error / len(y)
+            b = b - lr * float(np.mean(error))
+        return w, b
+
+
+    def predict_proba(X, w, b):
+        return sigmoid(X @ w + b)
+  - |
+    import numpy as np
+
+
+    def sigmoid(z):
+        e = np.exp(-np.abs(z))
+        return np.where(z >= 0, 1 / (1 + e), e / (1 + e))
+
+
+    def fit_logistic(X, y, lr=0.1, epochs=1000):
+        w = np.zeros(X.shape[1])
+        for _ in range(epochs):
+            error = sigmoid(X @ w) - y
+            w = w - lr * X.T @ error / len(y)
+        return w, 0.0
+
+
+    def predict_proba(X, w, b):
+        return sigmoid(X @ w + b)
+wrong_answers:
+  - triggers: sigmoid_stable
+    answer: |
+      import numpy as np
+
+
+      def sigmoid(z):
+          return 1 / (1 + np.exp(-z))
+
+
+      def fit_logistic(X, y, lr=0.1, epochs=1000):
+          w = np.zeros(X.shape[1])
+          b = 0.0
+          for _ in range(epochs):
+              error = sigmoid(X @ w + b) - y
+              w = w - lr * X.T @ error / len(y)
+              b = b - lr * float(np.mean(error))
+          return w, b
+
+
+      def predict_proba(X, w, b):
+          return sigmoid(X @ w + b)
+  - triggers: one_step
+    answer: |
+      import numpy as np
+
+
+      def sigmoid(z):
+          e = np.exp(-np.abs(z))
+          return np.where(z >= 0, 1 / (1 + e), e / (1 + e))
+
+
+      def fit_logistic(X, y, lr=0.1, epochs=1000):
+          w = np.zeros(X.shape[1])
+          b = 0.0
+          for _ in range(epochs):
+              error = sigmoid(X @ w + b) - y
+              w = w - lr * X.T @ error
+              b = b - lr * float(np.sum(error))
+          return w, b
+
+
+      def predict_proba(X, w, b):
+          return sigmoid(X @ w + b)
+  - triggers: numpy_only
+    answer: |
+      from sklearn.linear_model import LogisticRegression
+hints:
+  - "Write `sigmoid` first and test it on -1000, 0 and 1000. The trick is to take `exp` of `-abs(z)` only."
+  - "Each step: `p = sigmoid(X @ w + b)`, then the gradients `X.T @ (p - y) / n` and `mean(p - y)`. The `p - y` term comes from the chain rule through the sigmoid and the log loss."
+  - "Move against the gradient: `w = w - lr * grad_w` and `b = b - lr * grad_b`. Divide by n, or the step size grows with the data."
+explanation: |
+  The stable sigmoid never exponentiates a large positive number, so it returns exact 0s and 1s at the extremes instead of overflow warnings. The gradient `X.T @ (p - y) / n` is the same shape as for linear regression with `p` in place of the prediction, because the sigmoid's derivative cancels against the log loss. Dividing by n keeps one learning rate valid for any number of rows.
+follow_ups:
+  - question: Why not train logistic regression with mean squared error?
+    answer: |
+      With a sigmoid output, squared error is not convex in the weights, and its gradient carries a factor p(1 - p) that vanishes when the model is confidently wrong. Log loss is convex and its gradient, X.T @ (p - y) / n, stays large for confident mistakes.
+  - question: How do you know your gradient is right without a library?
+    answer: |
+      Compare it with central differences: (loss(w + h) - loss(w - h)) / (2h) for each weight, with h around 1e-5 in float64. Agreement to about 1e-6 means the formula is right (B23-L2).
+  - question: Training is slow, or the loss turns into nan. What do you check?
+    answer: |
+      The learning rate first: too high and the loss grows or becomes nan, too low and it barely falls (B23-L3). Then feature scales: unscaled features need different step sizes, so standardise with statistics from training rows. Then the sigmoid and loss for overflow.
+  - question: The positive class is 2% of rows. What changes?
+    answer: |
+      Train normally and choose the decision threshold from the cost or the review capacity, not 0.5 (B12-L1, B12-L3). Class weights push the probabilities towards 0.5, so recalibrate if the probability itself is used (B12-L2).

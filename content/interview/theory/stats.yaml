@@ -1,0 +1,56 @@
+topic: stats
+questions:
+  - id: stats-1
+    lessons: [B8-L1]
+    seconds: 90
+    question: What is the Kish effective sample size, and where do you use it?
+    points:
+      - "The formula: (sum of weights)^2 / sum of squared weights"
+      - Use it instead of the raw n for intervals and small-base suppression
+      - "Design effect = n / n_eff, and report the raw base as well"
+    model_answer: |
+      Unequal weights lose precision. The Kish effective sample size, `(sum w)^2 / sum(w^2)`, is the number of equally weighted rows that would give the same precision. Use it for confidence intervals and suppression rules, and report the raw base beside it. The design effect, `n / n_eff`, says how much the weighting costs.
+  - id: stats-2
+    lessons: [B8-L3]
+    seconds: 45
+    question: You run 20 independent tests at the 5% level, and every null hypothesis is true. What is the chance of at least one false positive?
+    options:
+      - {id: a, text: "5%"}
+      - {id: b, text: "36%"}
+      - {id: c, text: "64%"}
+      - {id: d, text: "100%"}
+    answer: c
+    model_answer: |
+      `1 - 0.95^20 = 0.64`. Each test has a 95% chance of no false positive, and all 20 must avoid one. Define the family of tests before you look, adjust within it with Holm or Benjamini-Hochberg, and report how many tests ran.
+  - id: stats-3
+    lessons: [B8-L2]
+    seconds: 90
+    question: Why prefer the Wilson interval to the Wald interval for a proportion?
+    points:
+      - Wald has zero width at p = 0 or p = 1
+      - Wald is too narrow for small samples
+      - For a weighted share, use Wilson with the weighted p and n_eff
+    model_answer: |
+      The Wald interval, `p ± z * sqrt(p(1 - p) / n)`, collapses to zero width when p is 0 or 1 and covers too little for small n. The Wilson interval stays sensible at the edges and for small bases. For a weighted share, plug in the weighted proportion and the effective sample size.
+  - id: stats-4
+    lessons: [B8-L2]
+    seconds: 90
+    question: A difference is statistically significant on two million rows. Is it important?
+    points:
+      - Large samples make trivial differences significant
+      - Report an effect size, such as Cohen's h, with its interval
+      - Compare it with the smallest difference that matters to the decision
+    model_answer: |
+      Not necessarily. With two million rows, a difference far too small to matter still gives a tiny p-value. Report the size of the difference with its interval, or an effect size such as Cohen's h, and judge it against the smallest difference that would change the decision.
+  - id: stats-5
+    lessons: [B8-L3]
+    seconds: 60
+    question: Which statement about Holm's method is right?
+    options:
+      - {id: a, text: "It controls the false discovery rate, like Benjamini-Hochberg"}
+      - {id: b, text: "It controls the family-wise error rate, like Bonferroni, and rejects at least as many hypotheses"}
+      - {id: c, text: "It rejects fewer hypotheses than Bonferroni, in return for more power"}
+      - {id: d, text: "It needs the p-values sorted from largest to smallest and stops at the first rejection"}
+    answer: b
+    model_answer: |
+      Holm gives the same family-wise control as Bonferroni. It is step-down: it compares the smallest p-value with alpha / m, the next with alpha / (m - 1), and so on, stopping at the first that fails. It always rejects at least as many hypotheses as Bonferroni, so prefer it. Benjamini-Hochberg controls the false discovery rate instead, which suits screening many cells.

@@ -1,0 +1,269 @@
+id: kmeans
+title: k-means clustering
+lessons: [B15-L2, B15-L3]
+minutes: 25
+prompt: |
+  Write `kmeans(X, k, seed, max_iter=100)` with NumPy only. It returns `(centroids, labels)`: centroids of shape `(k, n_features)` and one integer label per row, from 0 to `k - 1`.
+
+  - Start from `k` distinct rows chosen with `np.random.default_rng(seed).choice(len(X), size=k, replace=False)`.
+  - Alternate the two steps until the labels stop changing or `max_iter` runs out.
+  - A cluster that loses every point keeps its previous centroid. Never return `nan`.
+  - Raise `ValueError` unless `1 <= k <= len(X)`.
+primer: |
+  k-means repeats two steps. Assign: give each point the label of its nearest centroid by squared Euclidean distance. Update: move each centroid to the mean of the points that carry its label. It stops when an assign step changes no label.
+
+  Broadcasting computes every distance at once: `X[:, None, :] - C[None, :, :]` has shape `(n_rows, k, n_features)`. Sum the squares over the last axis, then `argmin(axis=1)` gives each row's nearest centroid. `np.array_equal(a, b)` is True when two arrays hold the same values.
+starter: |
+  import numpy as np
+
+
+  def kmeans(
+      X: np.ndarray, k: int, seed: int, max_iter: int = 100
+  ) -> tuple[np.ndarray, np.ndarray]:
+      """Cluster rows of X into k groups. Return centroids and labels."""
+      raise NotImplementedError
+packages: [numpy]
+checker:
+  kind: python
+  ast_rules:
+    - id: numpy_only
+      kind: forbids_pattern
+      pattern: "^\\s*(from|import)\\s+(sklearn|scipy)"
+      message: Write k-means yourself with NumPy. scikit-learn and SciPy are off limits.
+  setup: |
+    import warnings
+
+    import numpy as np
+
+    _RNG = np.random.default_rng(42)
+    _CENTRES = np.array([[0.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
+    _BLOBS = np.concatenate([c + _RNG.normal(scale=0.5, size=(30, 2)) for c in _CENTRES])
+    _TRUE = np.repeat([0, 1, 2], 30)
+  tests:
+    - id: shapes
+      code: |
+        centroids, labels = kmeans(_BLOBS, 3, seed=0)
+        assert centroids.shape == (3, 2), centroids.shape
+        assert labels.shape == (90,) and np.issubdtype(labels.dtype, np.integer), labels.dtype
+        assert set(labels.tolist()) <= {0, 1, 2}
+      message: Return centroids of shape (k, n_features) and one integer label per row.
+    - id: consistent
+      code: |
+        centroids, labels = kmeans(_BLOBS, 3, seed=1)
+        nearest = ((_BLOBS[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2).argmin(axis=1)
+        assert np.array_equal(nearest, labels), "a point is not labelled with its nearest centroid"
+        for j in range(3):
+            assert np.allclose(centroids[j], _BLOBS[labels == j].mean(axis=0)), j
+      message: At the end, each label is the nearest centroid and each centroid is the mean of its points.
+    - id: blobs
+      code: |
+        runs = []
+        for seed in range(20):
+            centroids, labels = kmeans(_BLOBS, 3, seed=seed)
+            inertia = ((_BLOBS - centroids[labels]) ** 2).sum()
+            groups = [set(labels[_TRUE == g].tolist()) for g in range(3)]
+            found = all(len(g) == 1 for g in groups) and len(set().union(*groups)) == 3
+            runs.append((inertia, found))
+        assert min(runs)[1], "the run with the lowest total squared distance did not find the blobs"
+        assert sum(found for _, found in runs) >= 5, runs
+      message: Across 20 seeds, the run with the lowest total squared distance finds the three blobs, one cluster each.
+    - id: seeded
+      code: |
+        X = np.random.default_rng(5).random((200, 2))
+        runs = [kmeans(X, 8, seed=7) for _ in range(3)]
+        for centroids, labels in runs[1:]:
+            assert np.array_equal(labels, runs[0][1]) and np.allclose(centroids, runs[0][0])
+        others = {tuple(kmeans(X, 8, seed=s)[1][:50]) for s in range(5)}
+        assert len(others) > 1, "every seed gave the same clusters"
+      message: Choose the starting rows with `np.random.default_rng(seed)`, so a seed repeats the result.
+    - id: invalid_k
+      code: |
+        for k in [0, 91]:
+            try:
+                kmeans(_BLOBS, k, seed=0)
+            except ValueError:
+                continue
+            raise AssertionError(f"no ValueError for k={k}")
+      message: Raise ValueError unless 1 <= k <= the number of rows.
+    - id: empty_cluster
+      code: |
+        X = np.array([[0.0, 0.0]] * 5 + [[10.0, 10.0]] * 5)
+        for seed in range(5):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                centroids, labels = kmeans(X, 3, seed=seed)
+            assert np.all(np.isfinite(centroids)), (seed, centroids)
+      message: A cluster with no points keeps its centroid. The mean of an empty selection is nan, with a warning.
+solution: |
+  import numpy as np
+
+
+  def kmeans(
+      X: np.ndarray, k: int, seed: int, max_iter: int = 100
+  ) -> tuple[np.ndarray, np.ndarray]:
+      """Cluster rows of X into k groups with Lloyd's algorithm.
+
+      Args:
+          X: Data, shape (n_rows, n_features).
+          k: Number of clusters, from 1 to n_rows.
+          seed: Seed for choosing the starting rows.
+          max_iter: Most assign-and-update rounds to run.
+
+      Returns:
+          Centroids of shape (k, n_features) and one label per row.
+
+      Raises:
+          ValueError: If k is outside 1 to n_rows.
+      """
+      if not 1 <= k <= len(X):
+          raise ValueError(f"k must be between 1 and {len(X)}, got {k}")
+      rng = np.random.default_rng(seed)
+      centroids = X[rng.choice(len(X), size=k, replace=False)].astype(float)
+      labels = np.full(len(X), -1)
+      for _ in range(max_iter):
+          distances = ((X[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2)
+          new_labels = distances.argmin(axis=1)
+          if np.array_equal(new_labels, labels):
+              break
+          labels = new_labels
+          for j in range(k):
+              members = X[labels == j]
+              if len(members) > 0:
+                  centroids[j] = members.mean(axis=0)
+      return centroids, labels
+seeded_bugs:
+  - |
+    import numpy as np
+
+
+    def kmeans(X, k, seed, max_iter=100):
+        if not 1 <= k <= len(X):
+            raise ValueError("bad k")
+        rng = np.random.default_rng(seed)
+        centroids = X[rng.choice(len(X), size=k, replace=False)].astype(float)
+        labels = np.full(len(X), -1)
+        for _ in range(max_iter):
+            distances = ((X[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2)
+            new_labels = distances.argmin(axis=1)
+            if np.array_equal(new_labels, labels):
+                break
+            labels = new_labels
+            for j in range(k):
+                centroids[j] = X[labels == j].mean(axis=0)
+        return centroids, labels
+  - |
+    import numpy as np
+
+
+    def kmeans(X, k, seed, max_iter=100):
+        if not 1 <= k <= len(X):
+            raise ValueError("bad k")
+        rng = np.random.default_rng()
+        centroids = X[rng.choice(len(X), size=k, replace=False)].astype(float)
+        labels = np.full(len(X), -1)
+        for _ in range(max_iter):
+            distances = ((X[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2)
+            new_labels = distances.argmin(axis=1)
+            if np.array_equal(new_labels, labels):
+                break
+            labels = new_labels
+            for j in range(k):
+                members = X[labels == j]
+                if len(members) > 0:
+                    centroids[j] = members.mean(axis=0)
+        return centroids, labels
+  - |
+    import numpy as np
+
+
+    def kmeans(X, k, seed, max_iter=100):
+        if not 1 <= k <= len(X):
+            raise ValueError("bad k")
+        rng = np.random.default_rng(seed)
+        centroids = X[rng.choice(len(X), size=k, replace=False)].astype(float)
+        distances = ((X[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2)
+        labels = distances.argmin(axis=1)
+        for j in range(k):
+            members = X[labels == j]
+            if len(members) > 0:
+                centroids[j] = members.mean(axis=0)
+        return centroids, labels
+  - |
+    import numpy as np
+
+
+    def kmeans(X, k, seed, max_iter=100):
+        rng = np.random.default_rng(seed)
+        centroids = X[rng.choice(len(X), size=min(k, len(X)), replace=False)].astype(float)
+        labels = np.full(len(X), -1)
+        for _ in range(max_iter):
+            distances = ((X[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2)
+            new_labels = distances.argmin(axis=1)
+            if np.array_equal(new_labels, labels):
+                break
+            labels = new_labels
+            for j in range(len(centroids)):
+                members = X[labels == j]
+                if len(members) > 0:
+                    centroids[j] = members.mean(axis=0)
+        return centroids, labels
+wrong_answers:
+  - triggers: empty_cluster
+    answer: |
+      import numpy as np
+
+
+      def kmeans(X, k, seed, max_iter=100):
+          if not 1 <= k <= len(X):
+              raise ValueError("bad k")
+          rng = np.random.default_rng(seed)
+          centroids = X[rng.choice(len(X), size=k, replace=False)].astype(float)
+          labels = np.full(len(X), -1)
+          for _ in range(max_iter):
+              distances = ((X[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2)
+              new_labels = distances.argmin(axis=1)
+              if np.array_equal(new_labels, labels):
+                  break
+              labels = new_labels
+              for j in range(k):
+                  centroids[j] = X[labels == j].mean(axis=0)
+          return centroids, labels
+  - triggers: consistent
+    answer: |
+      import numpy as np
+
+
+      def kmeans(X, k, seed, max_iter=100):
+          if not 1 <= k <= len(X):
+              raise ValueError("bad k")
+          rng = np.random.default_rng(seed)
+          centroids = X[rng.choice(len(X), size=k, replace=False)].astype(float)
+          distances = ((X[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2)
+          labels = distances.argmin(axis=1)
+          for j in range(k):
+              members = X[labels == j]
+              if len(members) > 0:
+                  centroids[j] = members.mean(axis=0)
+          return centroids, labels
+  - triggers: numpy_only
+    answer: |
+      from sklearn.cluster import KMeans
+hints:
+  - "Write the assign step on its own first: a `(n_rows, k)` array of squared distances, then `argmin(axis=1)`."
+  - "Loop: assign, compare the new labels with the old ones and stop if nothing changed, then update each centroid from its members."
+  - "Guard the update: compute `members = X[labels == j]` and move the centroid only when `len(members) > 0`. Start `labels` at -1 so the first round never stops early."
+explanation: |
+  Each round lowers or keeps the total squared distance, so the labels settle after a finite number of rounds. Stopping when the labels repeat also guarantees the returned labels match the returned centroids. The empty-cluster guard matters on real data with duplicates or outliers: without it one bad start fills the result with `nan`.
+follow_ups:
+  - question: How do you choose k?
+    answer: |
+      From the use first: a fixed number of segments a team can act on. Then check candidates with an internal measure such as silhouette, stability across seeds with the adjusted Rand index, and by reading samples from each cluster (B15-L3). Plotting inertia against k shows diminishing returns, but the "elbow" is often unclear.
+  - question: What are k-means' assumptions, and when does it fail?
+    answer: |
+      It assumes roughly round clusters of similar size, because it splits space by nearest centroid. It puts every point in a cluster, so noise and outliers drag centroids. For uneven densities, odd shapes or real noise, use a density method such as HDBSCAN, which labels sparse points -1 (B15-L2).
+  - question: Your result changes from run to run. Why, and what do you do?
+    answer: |
+      k-means finds a local optimum that depends on the starting centroids. Seed the generator, run several starts and keep the one with the lowest total squared distance, and use a spread-out start such as k-means++. Measure the stability across seeds with the adjusted Rand index.
+  - question: Do you scale features first?
+    answer: |
+      Yes, when features use different units. Distances are dominated by the feature with the largest range, so standardise with statistics from the data you fit on, and keep those statistics to transform new data.

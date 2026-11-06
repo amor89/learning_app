@@ -8,7 +8,19 @@ from typing import Any
 
 import yaml
 
-from learnkit.models import Lesson, ModuleMeta, Pathway, Pathways, Roadmap, Track
+from learnkit.models import (
+    InterviewIndex,
+    InterviewTask,
+    InterviewTopic,
+    Lesson,
+    ModuleMeta,
+    Pathway,
+    Pathways,
+    Roadmap,
+    TheoryFile,
+    TheoryQuestion,
+    Track,
+)
 
 CONTENT_DIR = Path(__file__).resolve().parent.parent / "content"
 
@@ -114,3 +126,61 @@ def load_pathways(path: Path, module_ids: set[str]) -> list[Pathway]:
     if orphans:
         raise ValueError(f"modules in no pathway: {orphans}")
     return pathways
+
+
+@dataclass
+class Interview:
+    """The interview practice bank: theory questions by topic, and coding tasks."""
+
+    topics: list[InterviewTopic]
+    questions: dict[str, list[TheoryQuestion]]
+    tasks: list[InterviewTask]
+
+    def all_questions(self) -> list[TheoryQuestion]:
+        """Every theory question in topic order."""
+        return [q for topic in self.topics for q in self.questions[topic.id]]
+
+
+def load_interview(course: Course, content_dir: Path = CONTENT_DIR) -> Interview:
+    """Load and validate content/interview/.
+
+    Args:
+        course: The loaded course, to check the lessons each item names.
+        content_dir: Root of the content tree.
+
+    Returns:
+        The validated interview bank.
+
+    Raises:
+        ValueError: If a topic has no question file, a file has no topic, a task
+            file is missing or unlisted, or an item names a lesson that does not exist.
+    """
+    root = content_dir / "interview"
+    index = InterviewIndex.model_validate(read_yaml(root / "index.yaml"))
+    topic_ids = [t.id for t in index.topics]
+    files = {path.stem: path for path in sorted((root / "theory").glob("*.yaml"))}
+    if sorted(files) != sorted(topic_ids):
+        raise ValueError(f"theory files {sorted(files)} do not match topics {sorted(topic_ids)}")
+    questions: dict[str, list[TheoryQuestion]] = {}
+    for topic in index.topics:
+        theory = TheoryFile.model_validate(read_yaml(files[topic.id]))
+        if theory.topic != topic.id:
+            raise ValueError(f"{files[topic.id]}: topic {theory.topic} does not match file name")
+        questions[topic.id] = theory.questions
+    task_files = {path.stem: path for path in sorted((root / "tasks").glob("*.yaml"))}
+    if sorted(task_files) != sorted(index.tasks) or len(set(index.tasks)) != len(index.tasks):
+        raise ValueError(f"task files {sorted(task_files)} do not match index {index.tasks}")
+    tasks = [InterviewTask.model_validate(read_yaml(task_files[t])) for t in index.tasks]
+    for task, name in zip(tasks, index.tasks, strict=True):
+        if task.id != name:
+            raise ValueError(f"{task_files[name]}: id {task.id} does not match file name")
+    lesson_ids = {lesson.id for lesson in course.lessons()}
+    items: list[TheoryQuestion | InterviewTask] = [
+        *(q for qs in questions.values() for q in qs),
+        *tasks,
+    ]
+    for item in items:
+        unknown = sorted(set(item.lessons) - lesson_ids)
+        if unknown:
+            raise ValueError(f"{item.id}: names lessons that do not exist: {unknown}")
+    return Interview(index.topics, questions, tasks)

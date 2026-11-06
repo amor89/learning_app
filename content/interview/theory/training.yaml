@@ -1,0 +1,70 @@
+topic: training
+questions:
+  - id: training-1
+    lessons: [B23-L1]
+    seconds: 60
+    question: Predictions have shape `(n, 1)` and targets have shape `(n,)`. You compute `((pred - y) ** 2).mean()`. What happens?
+    options:
+      - {id: a, text: "PyTorch raises a shape error"}
+      - {id: b, text: "It broadcasts to (n, n) with no error and gives a wrong loss"}
+      - {id: c, text: "PyTorch squeezes the predictions for you"}
+      - {id: d, text: "It works, because the mean hides the extra axis"}
+    answer: b
+    model_answer: |
+      `(n, 1)` against `(n,)` broadcasts to `(n, n)`: every prediction is compared with every target. The loss is wrong and nothing warns you. Flatten with `squeeze(1)` or `reshape(-1)`, and assert shapes before you compare.
+  - id: training-2
+    lessons: [B16-L2]
+    seconds: 90
+    question: Walk through one training iteration in PyTorch, in order.
+    points:
+      - Move the batch to the device
+      - "optimizer.zero_grad()"
+      - Forward pass and loss
+      - "loss.backward()"
+      - "optimizer.step()"
+    model_answer: |
+      For each batch: move inputs and targets to the device, clear old gradients with `optimizer.zero_grad()`, run the forward pass and compute the loss, call `loss.backward()` to fill the gradients, then `optimizer.step()` to update the weights. Log `loss.item()`, not the tensor.
+  - id: training-3
+    lessons: [B23-L3, B23-L5, B23-L6]
+    seconds: 100
+    question: The training loss turns into nan after a few steps. What do you check?
+    points:
+      - The learning rate, which may be too high
+      - Feature scales, standardised with training statistics
+      - A stable loss, such as BCEWithLogitsLoss on raw logits
+      - Missing values in the inputs, imputed before training
+    model_answer: |
+      Start with the learning rate: too high and the loss grows, then turns into nan. Check that features are scaled with statistics from training rows, so one rate fits all weights. Use a numerically stable loss on raw logits, never log of a sigmoid you computed yourself. And check the inputs for missing values, which spread nan through every gradient.
+  - id: training-4
+    lessons: [B23-L5]
+    seconds: 60
+    question: A binary classifier ends in `nn.Sigmoid()` and trains with `nn.BCEWithLogitsLoss`. What goes wrong?
+    options:
+      - {id: a, text: "Nothing, the two are designed to work together"}
+      - {id: b, text: "The sigmoid is applied twice, so outputs squeeze and gradients shrink"}
+      - {id: c, text: "The loss raises an error on probabilities"}
+      - {id: d, text: "Training gets faster but less accurate"}
+    answer: b
+    model_answer: |
+      `BCEWithLogitsLoss` applies the sigmoid itself, in a stable form. A sigmoid in the model squeezes the outputs into 0.5 to 0.73 before the loss sees them, so the loss stalls and gradients shrink. In the lesson, removing the sigmoid layer took validation loss from 0.69 to 0.41. Output raw logits, and apply `torch.sigmoid` only at prediction time.
+  - id: training-5
+    lessons: [B16-L3]
+    seconds: 90
+    question: How do you make a PyTorch training run reproducible?
+    points:
+      - Seed Python, NumPy and PyTorch at the entry point
+      - Give each DataLoader its own seeded generator
+      - Checkpoint state dicts, the epoch and the RNG state
+      - Turn on deterministic algorithms where you need exact repeats
+    model_answer: |
+      Seed `random`, NumPy and `torch.manual_seed` once at the entry point, and pass a seeded `torch.Generator` to each DataLoader so shuffling repeats. Checkpoint the model and optimiser state dicts with the epoch, the RNG state and the best metric. `torch.use_deterministic_algorithms(True)` raises on any operation with no deterministic version.
+  - id: training-6
+    lessons: [B16-L2]
+    seconds: 90
+    question: What does `model.eval()` change, and what else do you do when you validate?
+    points:
+      - Dropout stops and batch norm uses its stored statistics
+      - Run validation under torch.inference_mode(), so no graph is built
+      - Switch back with model.train() before the next training step
+    model_answer: |
+      In train mode, dropout stays active and batch norm keeps updating its statistics, so the same input gives different predictions. `model.eval()` switches both to prediction behaviour. Wrap validation in `torch.inference_mode()` to skip building the graph, and call `model.train()` before training resumes.

@@ -1,0 +1,58 @@
+topic: cnn
+questions:
+  - id: cnn-1
+    lessons: [B24-L2]
+    seconds: 60
+    question: A 32 by 32 input passes through `nn.Conv2d(3, 16, kernel_size=5, padding=2, stride=2)`. What are the output height and width?
+    options:
+      - {id: a, text: "14 by 14"}
+      - {id: b, text: "15 by 15"}
+      - {id: c, text: "16 by 16"}
+      - {id: d, text: "32 by 32"}
+    answer: c
+    model_answer: |
+      `(H + 2 * padding - kernel_size) // stride + 1 = (32 + 4 - 5) // 2 + 1 = 15 + 1 = 16`. Work layer by layer with this rule to size the Linear layer after Flatten, or end with adaptive average pooling.
+  - id: cnn-2
+    lessons: [B24-L1]
+    seconds: 90
+    question: Why do convolutions suit images better than a dense layer on the raw pixels?
+    points:
+      - Each output looks at a small local patch
+      - The same weights slide across the image, so a pattern is found wherever it appears
+      - The parameter count does not depend on the image size
+    model_answer: |
+      A convolution slides one small set of shared weights across the image. It is local, it detects the same pattern anywhere, and its parameter count, `out * in * k * k + out`, is fixed whatever the image size. A dense layer on a 224 by 224 colour image needs over 150,000 weights per output unit and learns each position separately.
+  - id: cnn-3
+    lessons: [B24-L1]
+    seconds: 60
+    question: How many parameters does `nn.Conv2d(3, 16, kernel_size=3)` have?
+    options:
+      - {id: a, text: "144"}
+      - {id: b, text: "160"}
+      - {id: c, text: "432"}
+      - {id: d, text: "448"}
+    answer: d
+    model_answer: |
+      Weights: `out * in * k * k = 16 * 3 * 3 * 3 = 432`. Biases: one per output channel, 16. Total 448. The weight tensor has shape `(16, 3, 3, 3)`.
+  - id: cnn-4
+    lessons: [B24-L5]
+    seconds: 100
+    question: You have 2,000 labelled photos. Describe how you fine-tune a pretrained image model on them.
+    points:
+      - Load pretrained weights and freeze them
+      - Replace the head with a new layer for your classes
+      - Build the optimiser afterwards, from the trainable parameters
+      - Preprocess exactly as the backbone was trained
+      - Keep the frozen backbone in eval mode so batch norm statistics stay fixed
+    model_answer: |
+      Load the pretrained weights, freeze the backbone, and swap the head, for ResNet-18 `model.fc`, for `nn.Linear(model.fc.in_features, n_classes)`. Build the optimiser after that, from the trainable parameters. Use the backbone's own preprocessing, `weights.transforms()`, and keep the frozen backbone in eval mode, because batch norm in train mode keeps updating its statistics.
+  - id: cnn-5
+    lessons: [B24-L6]
+    seconds: 90
+    question: An image classifier scores 99% on its test set and fails in production. What do you check about the evaluation?
+    points:
+      - Near-duplicates across the split, such as bursts and repeat shots
+      - Split by the unit that makes near-duplicates, such as shelf, store or session
+      - Recall for every class from the confusion matrix, and a look at the worst errors
+    model_answer: |
+      First, whether near-duplicates crossed the split: burst photos, repeat shots of one shelf, saved augmentations. Split by shelf, store or session, never by photo. Then read recall per class from the confusion matrix, rows as true classes, and look at the worst errors. A high overall accuracy can hide classes the model never gets right.

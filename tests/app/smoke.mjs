@@ -240,6 +240,64 @@ const xp = await page.locator(".stat-value").first().textContent();
 check(Number(xp) > 0, `dashboard shows earned XP (${xp})`);
 await page.screenshot({ path: `${shots}/08-dashboard-after.png`, fullPage: true });
 
+// Interview practice: the hub, a timed drill to the end, and a timed task whose clock survives a reload
+const bank = JSON.parse(readFileSync(new URL("../../site/content/interview.json", import.meta.url), "utf8"));
+await page.getByRole("link", { name: "Interview" }).click();
+await page.getByRole("heading", { name: "Interview practice" }).waitFor();
+check(await page.locator(".interview .module-list > li").count() === bank.tasks.length, `interview lists ${bank.tasks.length} from-scratch tasks`);
+check(await page.locator("#drill-topic option").count() === bank.topics.length + 1, `drill offers ${bank.topics.length} topics and all topics`);
+await noHorizontalScroll("interview hub");
+await page.selectOption("#drill-length", "5");
+await page.getByRole("button", { name: "Start drill" }).click();
+await page.getByRole("heading", { name: "Theory drill" }).waitFor();
+check(/^\d+:\d\d$/.test(await page.locator(".clock").textContent()), "drill shows a countdown clock");
+for (let i = 0; i < 5; i += 1) {
+  const submit = page.getByRole("button", { name: "Submit" });
+  if (await submit.count()) {
+    await submit.click();
+    check((await page.locator(".drill-review").textContent()).includes("Pick an option"), "submitting with no option asks for one");
+    await page.locator(".choices input").first().check();
+    await submit.click();
+  } else {
+    await page.getByRole("button", { name: "Show model answer" }).click();
+    await page.locator(".points input").first().check();
+  }
+  check(await page.locator(".drill-review .taught a").count() > 0, `drill question ${i + 1} links to the lessons that teach it`);
+  await noHorizontalScroll(`drill question ${i + 1}`);
+  if (i === 0) await page.screenshot({ path: `${shots}/09-drill.png`, fullPage: true });
+  await page.getByRole("button", { name: /Next question|See results/ }).click();
+}
+await page.getByRole("heading", { name: "Drill complete" }).waitFor();
+check(await page.locator(".drill-results > li").count() === 5, "drill summary lists five answers");
+const practice = await page.evaluate(() => JSON.parse(localStorage.getItem("learning-app.progress")).interview);
+check(Object.keys(practice.theory).length === 5 && practice.drills.length === 1, "drill answers and the drill are saved");
+await page.goto(`${base}${query}#/interview/task/${bank.tasks[0].id}`);
+await page.getByRole("heading", { name: bank.tasks[0].title }).waitFor();
+check(await page.locator("textarea.editor").count() === 0, "task editor stays hidden until the clock starts");
+await page.getByRole("button", { name: "Start the clock" }).click();
+await page.locator("textarea.editor").fill("# my draft\n");
+await page.waitForTimeout(1200);
+await page.reload();
+await page.getByRole("heading", { name: bank.tasks[0].title }).waitFor();
+check((await page.locator("textarea.editor").inputValue()) === "# my draft\n", "task code survives a reload");
+check((await page.locator(".clock").textContent()) !== "0:00", "task clock keeps running across a reload");
+check(await page.getByRole("button", { name: "Show solution" }).isDisabled(), "solution stays locked before an attempt");
+await noHorizontalScroll("interview task");
+await page.screenshot({ path: `${shots}/10-task.png`, fullPage: true });
+if (pyodide) {
+  const task = bank.tasks.find((t) => t.id === "layer-norm");
+  await page.goto(`${base}${query}#/interview/task/${task.id}`);
+  await page.getByRole("button", { name: "Start the clock" }).click();
+  const area = page.locator("textarea.editor");
+  await area.fill(["import numpy as np", "", "", "def layer_norm(x, gamma, beta, eps=1e-5):", "    return x", ""].join("\n"));
+  await page.getByRole("button", { name: "Run checks" }).click();
+  await page.locator("[role=status].feedback.bad, [role=status].feedback.ok").waitFor({ timeout: 120_000 });
+  check(await page.locator("[role=status].feedback.bad").count() === 1, "Pyodide fails a wrong task answer");
+  await page.getByRole("button", { name: "Show solution" }).click();
+  check((await page.locator(".solution-box").textContent()).includes("def layer_norm"), "the solution shows after an attempt");
+  check(await page.locator(".follow-up").count() === task.follow_ups.length, "follow-up questions show once the task ends");
+}
+
 // Settings
 await page.goto(`${base}${query}#/settings`);
 check(await page.getByRole("button", { name: "Export progress" }).isVisible(), "settings offers export");

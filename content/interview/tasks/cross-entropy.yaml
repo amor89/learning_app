@@ -1,0 +1,198 @@
+id: cross-entropy
+title: Cross-entropy from logits, with ignored targets
+lessons: [B16-L2, B25-L3, B26-L5]
+minutes: 15
+prompt: |
+  Write `cross_entropy(logits, targets, ignore_index=-100)` with NumPy only, the way PyTorch's `nn.CrossEntropyLoss` computes it by default.
+
+  - `logits` has shape `(n, n_classes)` and holds raw scores. `targets` holds one class ID per row.
+  - Return the mean of `-log(softmax(logits)[target])` over the rows whose target is not `ignore_index`, as a Python float.
+  - Stay finite for logits in the thousands.
+  - Raise `ValueError` when every target is ignored, or when a target is outside `0` to `n_classes - 1` and is not `ignore_index`.
+primer: |
+  Log-softmax without overflow: subtract each row's maximum, then `log_softmax = z - log(sum(exp(z)))` along the row, with `keepdims=True` so the shapes line up. `np.log` is the natural logarithm. To pick one entry per row, index with two arrays: `a[np.arange(len(t)), t]` takes `a[0, t[0]]`, `a[1, t[1]]` and so on.
+starter: |
+  import numpy as np
+
+
+  def cross_entropy(logits: np.ndarray, targets: np.ndarray, ignore_index: int = -100) -> float:
+      """Mean cross-entropy from raw logits, skipping ignored targets."""
+      raise NotImplementedError
+packages: [numpy]
+checker:
+  kind: python
+  ast_rules:
+    - id: numpy_only
+      kind: forbids_pattern
+      pattern: "^\\s*(from|import)\\s+(torch|scipy|sklearn)"
+      message: Write the loss yourself with NumPy. PyTorch, SciPy and scikit-learn are off limits.
+  setup: |
+    import math
+    import warnings
+
+    import numpy as np
+  tests:
+    - id: value
+      code: |
+        loss = cross_entropy(np.array([[2.0, 1.0, 0.0]]), np.array([0]))
+        expected = math.log(1 + math.exp(-1) + math.exp(-2))
+        assert isinstance(loss, float), type(loss)
+        assert math.isclose(loss, expected, rel_tol=1e-9), (loss, expected)
+      message: "Return -log(softmax(logits)[target]) as a float: for logits [2, 1, 0] and target 0 that is about 0.4076."
+    - id: mean
+      code: |
+        logits = np.zeros((4, 5))
+        assert math.isclose(cross_entropy(logits, np.array([0, 1, 2, 3])), math.log(5))
+        logits = np.array([[3.0, 0.0], [0.0, 3.0]])
+        single = cross_entropy(logits[:1], np.array([1]))
+        both = cross_entropy(logits, np.array([1, 1]))
+        assert math.isclose(both, (single + cross_entropy(logits[1:], np.array([1]))) / 2)
+      message: Average over rows. Equal logits over 5 classes give log(5).
+    - id: stable
+      code: |
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            loss = cross_entropy(np.array([[1000.0, 0.0], [0.0, 1000.0]]), np.array([1, 1]))
+        assert math.isclose(loss, 500.0, rel_tol=1e-9), loss
+      message: Stay finite for large logits. Subtract each row's maximum before exp.
+    - id: ignore
+      code: |
+        logits = np.array([[2.0, 1.0, 0.0], [0.0, 5.0, 0.0], [1.0, 1.0, 1.0]])
+        loss = cross_entropy(logits, np.array([0, -100, 2]))
+        kept = cross_entropy(logits[[0, 2]], np.array([0, 2]))
+        assert math.isclose(loss, kept), (loss, kept)
+        assert math.isclose(cross_entropy(logits, np.array([5, 1, 5]), ignore_index=5), cross_entropy(logits[[1]], np.array([1])))
+      message: Skip rows whose target is `ignore_index`, and average over the rows you kept, not over every row.
+    - id: invalid
+      code: |
+        logits = np.zeros((2, 3))
+        for targets in [np.array([-100, -100]), np.array([0, 3]), np.array([-1, 0])]:
+            try:
+                cross_entropy(logits, targets)
+            except ValueError:
+                continue
+            raise AssertionError(f"no ValueError for targets {targets}")
+      message: Raise ValueError when every target is ignored, or a target is outside 0 to n_classes - 1.
+solution: |
+  import numpy as np
+
+
+  def cross_entropy(logits: np.ndarray, targets: np.ndarray, ignore_index: int = -100) -> float:
+      """Mean cross-entropy from raw logits, skipping ignored targets.
+
+      Args:
+          logits: Raw scores, shape (n, n_classes).
+          targets: One class ID per row.
+          ignore_index: Target value that marks a row to skip.
+
+      Returns:
+          The mean loss over kept rows.
+
+      Raises:
+          ValueError: If every target is ignored or a target is out of range.
+      """
+      keep = targets != ignore_index
+      if not keep.any():
+          raise ValueError("every target is ignored")
+      z, t = logits[keep], targets[keep]
+      if t.min() < 0 or t.max() >= logits.shape[1]:
+          raise ValueError(f"targets must lie in 0 to {logits.shape[1] - 1}")
+      z = z - z.max(axis=1, keepdims=True)
+      log_probs = z - np.log(np.exp(z).sum(axis=1, keepdims=True))
+      return float(-log_probs[np.arange(len(t)), t].mean())
+seeded_bugs:
+  - |
+    import numpy as np
+
+
+    def cross_entropy(logits, targets, ignore_index=-100):
+        keep = targets != ignore_index
+        if not keep.any():
+            raise ValueError("all ignored")
+        z, t = logits[keep], targets[keep]
+        if t.min() < 0 or t.max() >= logits.shape[1]:
+            raise ValueError("out of range")
+        probs = np.exp(z) / np.exp(z).sum(axis=1, keepdims=True)
+        return float(-np.log(probs[np.arange(len(t)), t]).mean())
+  - |
+    import numpy as np
+
+
+    def cross_entropy(logits, targets, ignore_index=-100):
+        keep = targets != ignore_index
+        if not keep.any():
+            raise ValueError("all ignored")
+        z, t = logits[keep], targets[keep]
+        if t.min() < 0 or t.max() >= logits.shape[1]:
+            raise ValueError("out of range")
+        z = z - z.max(axis=1, keepdims=True)
+        log_probs = z - np.log(np.exp(z).sum(axis=1, keepdims=True))
+        return float(-log_probs[np.arange(len(t)), t].sum() / len(targets))
+  - |
+    import numpy as np
+
+
+    def cross_entropy(logits, targets, ignore_index=-100):
+        z = logits - logits.max(axis=1, keepdims=True)
+        log_probs = z - np.log(np.exp(z).sum(axis=1, keepdims=True))
+        return float(-log_probs[np.arange(len(targets)), targets].mean())
+  - |
+    import numpy as np
+
+
+    def cross_entropy(logits, targets, ignore_index=-100):
+        keep = targets != ignore_index
+        if not keep.any():
+            raise ValueError("all ignored")
+        z, t = logits[keep], targets[keep]
+        if t.min() < 0 or t.max() >= logits.shape[1]:
+            raise ValueError("out of range")
+        z = z - z.max(axis=0, keepdims=True)
+        log_probs = z - np.log(np.exp(z).sum(axis=0, keepdims=True))
+        return float(-log_probs[np.arange(len(t)), t].mean())
+wrong_answers:
+  - triggers: stable
+    answer: |
+      import numpy as np
+
+
+      def cross_entropy(logits, targets, ignore_index=-100):
+          keep = targets != ignore_index
+          if not keep.any():
+              raise ValueError("all ignored")
+          z, t = logits[keep], targets[keep]
+          if t.min() < 0 or t.max() >= logits.shape[1]:
+              raise ValueError("out of range")
+          probs = np.exp(z) / np.exp(z).sum(axis=1, keepdims=True)
+          return float(-np.log(probs[np.arange(len(t)), t]).mean())
+  - triggers: ignore
+    answer: |
+      import numpy as np
+
+
+      def cross_entropy(logits, targets, ignore_index=-100):
+          keep = targets != ignore_index
+          if not keep.any():
+              raise ValueError("all ignored")
+          z, t = logits[keep], targets[keep]
+          if t.min() < 0 or t.max() >= logits.shape[1]:
+              raise ValueError("out of range")
+          z = z - z.max(axis=1, keepdims=True)
+          log_probs = z - np.log(np.exp(z).sum(axis=1, keepdims=True))
+          return float(-log_probs[np.arange(len(t)), t].sum() / len(targets))
+hints:
+  - "Drop the ignored rows first with a boolean mask, then work on what is left."
+  - "Log-softmax in two lines: subtract the row maximum, then subtract the log of the row's sum of `exp`. Never take `log` of a softmax you computed with raw `exp`."
+  - "Pick each row's target with `log_probs[np.arange(len(t)), t]`, negate, and take the mean over the kept rows only."
+explanation: |
+  Working in log space avoids two failures: `exp(1000)` overflows, and `log` of a probability that underflowed to 0 is minus infinity. The mean runs over kept rows, which is PyTorch's default `reduction="mean"` with `ignore_index`: padding and the later pieces of split words then add nothing (B26-L5).
+follow_ups:
+  - question: Why does a classifier output logits instead of probabilities?
+    answer: |
+      The loss applies log-softmax itself, in a stable form. A softmax in the model would be applied twice, squeezing the outputs and shrinking the gradients (B16-L2, B23-L5). Apply softmax only when you need probabilities at prediction time.
+  - question: What is the gradient of this loss with respect to the logits?
+    answer: |
+      softmax(logits) minus the one-hot target, divided by the number of kept rows. Ignored rows get a gradient of zero.
+  - question: The loss starts near log(n_classes) and stays there. What does that tell you?
+    answer: |
+      The model predicts close to uniform probabilities and is not learning. Check the learning rate, that zero_grad runs every step, that the targets match the inputs, and that the model is in train mode.

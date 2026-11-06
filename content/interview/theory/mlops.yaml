@@ -1,0 +1,70 @@
+topic: mlops
+questions:
+  - id: mlops-1
+    lessons: [B14-L2, B27-L1]
+    seconds: 100
+    question: How do model registry versions and aliases work, and how do you promote and roll back?
+    points:
+      - A version is fixed, an alias is a movable label on a version
+      - Serve through the alias, and resolve it once to a version
+      - Promote and roll back by moving the alias
+      - Keep old versions as rollback targets
+    model_answer: |
+      Each registration creates a fixed version. An alias such as `champion` points at one version, and the service loads `models:/name@champion`, resolved once so the model and the reported version agree. Promotion moves the alias to the new version, and rollback moves it back, so keep old versions.
+  - id: mlops-2
+    lessons: [B27-L5]
+    seconds: 60
+    question: By the common rule of thumb, which population stability index value signals a large shift?
+    options:
+      - {id: a, text: "Above 0.01"}
+      - {id: b, text: "Above 0.1"}
+      - {id: c, text: "Above 0.25"}
+      - {id: d, text: "Above 1"}
+    answer: c
+    model_answer: |
+      Below 0.1 counts as stable, 0.1 to 0.25 as moderate, and above 0.25 as large, a rule of thumb from credit scoring. PSI sums `(a - e) * ln(a / e)` over the reference's quantile bins, with shares floored at a small value. Tune the bands to your data and confirm drift with labels when they arrive.
+  - id: mlops-3
+    lessons: [B27-L5]
+    seconds: 90
+    question: Labels arrive weeks after predictions. What do you monitor for a served model in the meantime?
+    points:
+      - Input distributions, compared with a reference by PSI
+      - Predicted class shares and confidence
+      - Error rate and p95 latency
+      - One structured log record per request, with no raw text
+    model_answer: |
+      Watch what you can see without labels: input distributions against the training reference, the share of each predicted class, confidence, the error rate and p95 latency. Log one structured record per request with the model version, counts, confidence and latency, never the user's text.
+  - id: mlops-4
+    lessons: [B27-L3]
+    seconds: 60
+    question: A model service runs Uvicorn in a container with its default host. Clients outside the container cannot connect. Why?
+    options:
+      - {id: a, text: "Uvicorn 0.54 listens on 127.0.0.1 by default, which only the container itself reaches"}
+      - {id: b, text: "The container runs as a non-root user"}
+      - {id: c, text: "FastAPI blocks requests until the model loads"}
+      - {id: d, text: "The image has no pinned requirements"}
+    answer: a
+    model_answer: |
+      127.0.0.1 is the container's own loopback address. Start Uvicorn with `--host 0.0.0.0` so it accepts connections on every interface, and publish the port.
+  - id: mlops-5
+    lessons: [B27-L6]
+    seconds: 100
+    question: A retrained challenger looks better than the champion. How do you decide whether to promote it?
+    points:
+      - Compare both on the same recent labelled data
+      - Promote only for a gain above a margin, won on most batches
+      - Run it in shadow mode first, on the same requests
+      - Promote by moving the alias and keep the old version for rollback
+    model_answer: |
+      Score both models on the same recent labelled batches, and require a gain above a set margin that holds on most batches. Run the challenger in shadow on live requests and review where the two disagree. Then move the alias, deploy a new revision, and keep the old version, image and revision ready for rollback.
+  - id: mlops-6
+    lessons: [B14-L1, B14-L3]
+    seconds: 90
+    question: What must an MLflow run record so you can reproduce it later?
+    points:
+      - Parameters, including the seed
+      - The git commit and a hash of the input data
+      - The metrics and the model with pinned requirements
+      - The environment, from a lock file
+    model_answer: |
+      Log every parameter including the seed, tag the git commit and the input data's SHA-256, log the metrics and the model with its pinned requirements. To reproduce, check out the commit, rebuild the environment from the lock, verify the data hash, convert the string parameters back to their types, rerun and compare within a tolerance.

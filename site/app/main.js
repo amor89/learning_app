@@ -1,5 +1,6 @@
 // App entry: loads the content index, routes hash URLs and owns the progress state.
 import * as store from "./store.js";
+import { drillView, interviewView, taskView } from "./interview-view.js";
 import { clear, h, toast } from "./ui.js";
 import {
   dashboard,
@@ -17,6 +18,7 @@ import {
 const root = document.getElementById("app");
 const lessons = new Map();
 const sheets = new Map();
+let interviewBank = null;
 
 const app = {
   index: null,
@@ -36,6 +38,19 @@ const app = {
     app.state.settings.theme = theme;
     app.save();
     applyTheme();
+  },
+  drill: null,
+  async interview() {
+    interviewBank ??= fetch("content/interview.json").then((r) => {
+      if (!r.ok) throw new Error(`Interview practice failed to load (${r.status}).`);
+      return r.json();
+    });
+    try {
+      return await interviewBank;
+    } catch (error) {
+      interviewBank = null;
+      throw error;
+    }
   },
   async sheet(id) {
     if (!sheets.has(id)) {
@@ -82,6 +97,9 @@ const ROUTES = [
   [/^#\/track\/(\w+)$/, (m) => trackView(app, m[1]), "home"],
   [/^#\/module\/(\w+)$/, (m) => moduleView(app, m[1]), "home"],
   [/^#\/lesson\/([\w-]+)$/, (m) => lessonView(app, m[1]), "home"],
+  [/^#\/interview$/, () => interviewView(app), "interview"],
+  [/^#\/interview\/drill$/, () => drillView(app), "interview"],
+  [/^#\/interview\/task\/([\w-]+)$/, (m) => taskView(app, m[1]), "interview"],
   [/^#\/review$/, () => reviewView(app), "review"],
   [/^#\/settings$/, () => settingsView(app), "settings"],
 ];

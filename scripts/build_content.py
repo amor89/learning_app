@@ -4,6 +4,7 @@ Writes:
     site/content/index.json          syllabus, roadmap bands and download links
     site/content/lessons/<id>.json   one rendered lesson per file
     site/content/sheets/<id>.json    one module cheat sheet per file, for the in-app view
+    site/content/interview.json      timed theory questions and from-scratch tasks
     site/py/checkers/*.py            the checker package for Pyodide
     site/app/highlight.css           Pygments styles for light and dark themes
 
@@ -25,19 +26,27 @@ sys.path.insert(0, str(ROOT))
 
 from pygments.formatters import HtmlFormatter  # noqa: E402
 
-from learnkit.brief import Brief, code_brief, fix_brief  # noqa: E402
+from learnkit.brief import Brief, checker_parts, code_brief, fix_brief  # noqa: E402
 from learnkit.cheatsheet import module_sheet_data, module_stem, stage_stem  # noqa: E402
-from learnkit.loader import Course, ModuleContent, load_course  # noqa: E402
+from learnkit.loader import (  # noqa: E402
+    Course,
+    Interview,
+    ModuleContent,
+    load_course,
+    load_interview,
+)
 from learnkit.models import (  # noqa: E402
     CodeExercise,
     CodeSample,
     DesignExercise,
     Exercise,
     FillGapExercise,
+    InterviewTask,
     Lesson,
     McqExercise,
     PredictOutputExercise,
     SpotBugExercise,
+    TheoryQuestion,
 )
 from learnkit.render import CSS_CLASS, code_lines, md_inline, md_to_html, unknown_tags  # noqa: E402
 
@@ -47,6 +56,11 @@ DOWNLOADS = SITE / "downloads"
 TEST_FIXTURE = ROOT / "tests" / "app" / "exercises.generated.json"
 HIDDEN_KEY_MODULES = {"D7", "X3"}
 XP_PER_LEVEL = 10
+TASK_STEPS = [
+    "Read the task and the checks below. Open the algorithm reminder only if you need it.",
+    "Start the clock, then write your code in the editor.",
+    "Run checks as often as you like. The clock stops when every check passes.",
+]
 
 
 def write_json(path: Path, data: Any) -> None:
@@ -278,6 +292,75 @@ def build_index(course: Course, version: str) -> dict[str, Any]:
     }
 
 
+def lesson_refs(lesson_ids: list[str], titles: dict[str, str]) -> list[dict[str, str]]:
+    """Lesson IDs with titles, for links back to the lessons that teach an item."""
+    return [{"id": lesson_id, "title": titles[lesson_id]} for lesson_id in lesson_ids]
+
+
+def render_question(question: TheoryQuestion, topic: str, titles: dict[str, str]) -> dict[str, Any]:
+    """Serialise one theory question for the interview drill."""
+    return {
+        "id": question.id,
+        "topic": topic,
+        "kind": question.kind,
+        "seconds": question.seconds,
+        "lessons": lesson_refs(question.lessons, titles),
+        "question_html": md_to_html(question.question),
+        "options": [{"id": o.id, "html": md_inline(o.text)} for o in question.options],
+        "answer": question.answer,
+        "points_html": [md_inline(point) for point in question.points],
+        "model_answer_html": md_to_html(question.model_answer),
+    }
+
+
+def render_task(task: InterviewTask, titles: dict[str, str]) -> dict[str, Any]:
+    """Serialise one from-scratch task, with the brief the lessons' code exercises use."""
+    checks, include, avoid = checker_parts(task.checker)
+    brief = Brief(
+        steps=TASK_STEPS,
+        must=[c.message for c in checks],
+        checks=checks,
+        include=include,
+        avoid=avoid,
+    )
+    return {
+        "id": task.id,
+        "title": task.title,
+        "minutes": task.minutes,
+        "lessons": lesson_refs(task.lessons, titles),
+        "prompt_html": md_to_html(task.prompt),
+        "primer_html": md_to_html(task.primer) if task.primer else "",
+        "starter": task.starter,
+        "packages": task.packages,
+        "checker": task.checker.model_dump(mode="json"),
+        "brief": render_brief(brief, "python"),
+        "hints_html": [md_inline(h) for h in task.hints],
+        "solution_lines": code_lines(task.solution, "python"),
+        "explanation_html": md_to_html(task.explanation),
+        "follow_ups": [
+            {"question_html": md_inline(f.question), "answer_html": md_to_html(f.answer)}
+            for f in task.follow_ups
+        ],
+    }
+
+
+def build_interview(course: Course, interview: Interview) -> dict[str, Any]:
+    """The interview bank as the app reads it."""
+    titles = {lesson.id: lesson.title for lesson in course.lessons()}
+    return {
+        "topics": [
+            {"id": t.id, "title": t.title, "count": len(interview.questions[t.id])}
+            for t in interview.topics
+        ],
+        "questions": [
+            render_question(q, topic.id, titles)
+            for topic in interview.topics
+            for q in interview.questions[topic.id]
+        ],
+        "tasks": [render_task(task, titles) for task in interview.tasks],
+    }
+
+
 def copy_checkers() -> None:
     """Copy the checker package where the Pyodide worker can fetch it."""
     target = SITE / "py" / "checkers"
@@ -344,12 +427,18 @@ def main() -> None:
             sheet = module_sheet_data(module, sheet_link(module_stem(module.meta.id)))
             check_html(sheet, f"sheet {module.meta.id}")
             write_json(sheets_dir / f"{module.meta.id}.json", sheet)
+    interview = build_interview(course, load_interview(course))
+    check_html(interview, "interview")
+    write_json(OUT / "interview.json", interview)
     version = content_version()
     write_json(OUT / "index.json", build_index(course, version))
     write_json(TEST_FIXTURE, [ex.model_dump(mode="json") for ex in all_exercises(course)])
     copy_checkers()
     write_highlight_css()
-    print(f"Built {len(course.lessons())} lessons, version {version}")
+    print(
+        f"Built {len(course.lessons())} lessons, {len(interview['questions'])} interview "
+        f"questions and {len(interview['tasks'])} tasks, version {version}"
+    )
 
 
 if __name__ == "__main__":
