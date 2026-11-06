@@ -4,7 +4,7 @@ Standards for every file in this repository. They come from `reference/pipelines
 
 ## Project
 
-A static, offline-capable learning web app (GitHub Pages, PWA, Pyodide) with four tracks: A Databricks pipeline engineering, B Python for data science, C Microsoft Fabric, D Finding errors in code. Lesson content lives in `content/` and drives both the app and the handbook. Never write lesson text twice. Add every new module to a stage in `content/pathways.yaml`: the loader rejects a module that sits in no pathway.
+A static, offline-capable learning web app (GitHub Pages, PWA, Pyodide) with five tracks: A Databricks pipeline engineering, B Python for data science, C Microsoft Fabric, D Finding errors in code, E Data protection and governance. Lesson content lives in `content/` and drives both the app and the handbook. Never write lesson text twice. Add every new module to a stage in `content/pathways.yaml`: the loader rejects a module that sits in no pathway.
 
 Role plans live in `content/roles/<id>.yaml`: phases, competencies with target levels, and the lessons that teach each one, with `coverage` (`full`, `partial` or `gap`) and a `gaps` note on what the lessons leave out. Mark facts about an employer's systems as assumptions. The role's pathway must list, per phase, exactly the modules `role_stage_modules` derives.
 

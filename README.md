@@ -1,8 +1,8 @@
 # Learning app
 
-A personal, offline-capable course with four tracks: Databricks pipeline engineering, Python for data science, Microsoft Fabric, and finding errors in code. It runs as a static site on GitHub Pages and installs on an iPhone home screen.
+A personal, offline-capable course with five tracks: Databricks pipeline engineering, Python for data science, Microsoft Fabric, finding errors in code, and data protection and governance. It runs as a static site on GitHub Pages and installs on an iPhone home screen.
 
-Status: Phase 6 complete. All four tracks and three capstones are written: Track A (Databricks pipeline engineering) 33 lessons, Track B (Python for data science) 104, including PyTorch foundations for roadmap months 1 to 3, convolutional networks for months 4 to 6, attention and transformers from scratch for months 7 to 9, fine-tuning for months 10 to 12, prompting, RAG and LLM evaluation for months 13 to 15, and serving and monitoring for months 16 to 18, Track C (Microsoft Fabric) 33, checked against Microsoft Learn, Track D (Finding errors in code) 26, and the Capstones track with 3 projects.
+Status: Phase 6 complete. All four tracks and three capstones are written: Track A (Databricks pipeline engineering) 33 lessons, Track B (Python for data science) 104, including PyTorch foundations for roadmap months 1 to 3, convolutional networks for months 4 to 6, attention and transformers from scratch for months 7 to 9, fine-tuning for months 10 to 12, prompting, RAG and LLM evaluation for months 13 to 15, and serving and monitoring for months 16 to 18, Track C (Microsoft Fabric) 33, checked against Microsoft Learn, Track D (Finding errors in code) 26, Track E (Data protection and governance) 6, covering UK GDPR in HR and DAMA-DMBOK for the EY role plan, and the Capstones track with 3 projects.
 
 ## Pathways
 

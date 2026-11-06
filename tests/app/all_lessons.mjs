@@ -29,7 +29,8 @@ for (const lesson of lessons) {
     if (width > 390) failures.push(`${lesson.id} exercise ${i}: page width ${width}px`);
     const strayNull = await page.evaluate(() => {
       const walker = document.createTreeWalker(document.querySelector(".exercise"), NodeFilter.SHOW_TEXT);
-      for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.textContent.trim() === "null") return true;
+      // A null literal inside a code sample, such as YAML's null, is content, not a rendering bug.
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.textContent.trim() === "null" && !n.parentElement.closest(".code, pre")) return true;
       return false;
     });
     if (strayNull) failures.push(`${lesson.id} exercise ${i}: stray "null" text`);

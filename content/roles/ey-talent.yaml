@@ -129,9 +129,8 @@ modules:
     hours: 6
     outcomes: [Identify lawful basis per use, Apply Article 9 conditions]
     assessment: Classify 20 synthetic talent attributes by sensitivity and lawful basis.
-    lessons: []
-    coverage: gap
-    gaps: No lesson covers UK GDPR, lawful basis or special category data yet.
+    lessons: [E1-L1, E1-L2, E1-L3]
+    coverage: full
   - id: SEC-02
     stream: Security
     title: Fabric access models
@@ -175,9 +174,8 @@ modules:
     hours: 5
     outcomes: [Map knowledge areas to talent data, Rate maturity per area]
     assessment: Maturity baseline across the six talent domains.
-    lessons: []
-    coverage: gap
-    gaps: No lesson covers DAMA-DMBOK yet. Your brief names DAMA work at Ofcom as your starting point.
+    lessons: [E2-L1, E2-L2, E2-L3]
+    coverage: full
   - id: GOV-02
     stream: Governance and standards
     title: Ownership, stewardship, glossary and naming
@@ -187,9 +185,9 @@ modules:
     hours: 8
     outcomes: [Draft RACI, Write glossary entries, Set naming conventions]
     assessment: RACI, 15 glossary entries and a naming standard.
-    lessons: [C9-L1, A1-L1, B18-L3]
+    lessons: [E2-L3, C9-L1, A1-L1, B18-L3]
     coverage: partial
-    gaps: The lessons cover domains, endorsement, naming in code and decision logs. They do not cover RACI, stewardship roles or a business glossary.
+    gaps: The lessons cover decision rights, escalation, domains, endorsement, naming in code and decision logs. They do not cover a RACI or a business glossary.
   - id: GOV-03
     stream: Governance and standards
     title: Data quality rules and lineage
@@ -232,9 +230,9 @@ modules:
     hours: 8
     outcomes: [Run a fairness test on protected attributes, Write a DPIA section]
     assessment: Bias report on a synthetic hiring dataset with disparity metrics.
-    lessons: [B13-L3, B12-L3, B18-L2]
+    lessons: [B13-L3, B12-L3, B18-L2, E1-L3]
     coverage: partial
-    gaps: The lessons cover subgroup rates, the fairness trade-offs and model cards. They do not cover writing a data protection impact assessment.
+    gaps: The lessons cover subgroup rates, the fairness trade-offs, model cards and DPIA screening. They do not cover writing the assessment itself.
   - id: AI-04
     stream: AI enablement
     title: AI-ready data products and use case selection

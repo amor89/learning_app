@@ -1,0 +1,331 @@
+id: E2-L2
+title: A maturity baseline you can defend
+
+concept: |
+  A **maturity baseline** records how well each knowledge area is run today, so you can set targets and show progress. DMBOK2 describes a data management maturity assessment. Sources differ on the exact level names, so agree one scale with your stakeholders and write it down. A common version runs from 0 to 5:
+
+  - **0** no capability
+  - **1** initial: ad hoc, depends on individuals
+  - **2** repeatable: some process, applied unevenly
+  - **3** defined: a documented standard, followed across teams
+  - **4** managed: measured, with targets and reviews
+  - **5** optimised: improved continuously from the measures
+
+  Each level builds on the last, so none can be skipped.
+
+  Score a **grid**, not a single number: knowledge areas down the side, talent domains across the top. A talent platform has six domains: workforce and organisation, recruitment, learning, performance, mobility and skills. Data quality can be at 3 for workforce data and at 1 for skills.
+
+  Three rules make a baseline you can defend.
+
+  1. **Evidence for every score.** A score without a document, a metric or a log is an opinion. "Level 3: quality rules documented in DQ-STD-02 and run nightly" survives a challenge.
+  2. **Report the weakest area, not the mean.** An average of 3 can hide a 0 in data security. One weak area can sink a domain.
+  3. **Integers only.** A level is a stage you have reached. A score of 2.5 says you have not agreed which stage you are at.
+
+  The baseline is a snapshot. Rescore at fixed intervals with the same scale, so changes mean progress, not a new yardstick.
+
+why_it_matters: |
+  A firm reported its talent data maturity as 3.1 out of 5 to its board and won budget for an AI pilot. The pilot stalled in week two: nobody owned access to performance data, which scored 0 for data security in the performance domain. The average had hidden it. A grid reporting the weakest area per domain would have put security ahead of the pilot.
+
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      # Maturity baseline, talent data
+      overall: 3.1
+      data_security: 2.5
+      evidence: workshop with the HR leadership team
+    annotations:
+      - find: "overall: 3.1"
+        note: "One mean for the whole platform hides the weakest area."
+      - find: "data_security: 2.5"
+        note: "A fractional level means the stage was never agreed."
+      - find: "evidence: workshop with the HR leadership team"
+        note: "Opinions, not artefacts. Nothing an auditor can check."
+  strong:
+    code: |
+      # Maturity baseline, talent data, scale DMMA-0-5 v1
+      performance:
+        data_security: {score: 0, evidence: "no access model; analysts read raw reviews"}
+        data_quality: {score: 2, evidence: "rules in DQ-PERF-01, run by hand monthly"}
+        weakest: {area: data_security, score: 0}
+      workforce:
+        data_security: {score: 3, evidence: "role model SEC-STD-01, quarterly access review log"}
+        weakest: {area: metadata, score: 1}
+    annotations:
+      - find: "# Maturity baseline, talent data, scale DMMA-0-5 v1"
+        note: "The scale is named and versioned, so rescoring uses the same yardstick."
+      - find: 'data_security: {score: 0, evidence: "no access model; analysts read raw reviews"}'
+        note: "Every score cites evidence."
+      - find: "weakest: {area: data_security, score: 0}"
+        note: "Each domain reports its weakest area, not its average."
+  takeaway: |
+    Score a grid of knowledge areas by talent domain, in whole levels, with evidence for each score, and report the weakest area per domain.
+
+exercises:
+  - id: E2-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Data quality rules for the learning domain are documented in a standard and followed by every team, but nobody measures them yet. Which level fits, on the 0 to 5 scale in this lesson?
+    options:
+      - {id: a, text: "1 initial"}
+      - {id: b, text: "3 defined"}
+      - {id: c, text: "4 managed"}
+      - {id: d, text: "5 optimised"}
+    answer: b
+    wrong_answers:
+      - answer: a
+        feedback: "Initial means ad hoc. A documented standard that every team follows is further along."
+      - answer: c
+        feedback: "Managed needs measures and targets. Nobody measures these rules yet."
+      - answer: d
+        feedback: "Optimised needs continuous improvement driven by measures."
+    hints:
+      - "Is there a documented standard?"
+      - "Is it measured?"
+      - "Documented and followed, but not measured."
+    explanation: |
+      A documented standard followed across teams is level 3, defined. Measuring it with targets would move it to 4.
+
+  - id: E2-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      The performance domain scores 4, 4, 3, 4 and 0 across five knowledge areas. What should the baseline report for the domain?
+    options:
+      - {id: a, text: "3, the mean"}
+      - {id: b, text: "4, the most common score"}
+      - {id: c, text: "0, with the area that scored it"}
+      - {id: d, text: "Nothing until every area reaches 3"}
+    answer: c
+    reasons:
+      - {id: r1, text: "One weak area can sink a domain, and a mean hides it."}
+      - {id: r2, text: "The lowest score is always data security."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: a
+        feedback: "The mean of 3 hides an area with no capability at all."
+      - answer: b
+        feedback: "The mode hides the weakest area just as the mean does."
+      - answer: d
+        feedback: "A baseline reports where you are today, including the gaps."
+      - answer: c|r2
+        feedback: "Right answer, wrong reason. The weakest area can be any of the eleven."
+    hints:
+      - "What would an average hide?"
+      - "Which score stops an AI pilot in its tracks?"
+      - "Report the minimum and name its area."
+    explanation: |
+      Report the weakest area per domain. The other scores still matter for the plan, but the minimum sets the risk.
+
+  - id: E2-L2-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Put the steps of building a maturity baseline in order.
+    items:
+      - {id: scale, text: "Agree and version the scale with stakeholders"}
+      - {id: grid, text: "Lay out the grid: knowledge areas by talent domain"}
+      - {id: score, text: "Score each cell in whole levels, citing evidence"}
+      - {id: weakest, text: "Report the weakest area per domain"}
+      - {id: rescore, text: "Rescore at a fixed interval on the same scale"}
+    answer: [scale, grid, score, weakest, rescore]
+    wrong_answers:
+      - answer: [grid, score, scale, weakest, rescore]
+        feedback: "Scores mean nothing until the scale is agreed. Agree it first."
+      - answer: [scale, grid, weakest, score, rescore]
+        feedback: "You cannot report the weakest area before you score."
+    hints:
+      - "What must exist before any score?"
+      - "Scores before summaries."
+      - "Rescoring comes last, on the same scale."
+    explanation: |
+      Scale, grid, scores with evidence, the weakest area per domain, then rescoring on the same scale.
+
+  - id: E2-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `weakest_by_domain(scores: dict[str, dict[str, int]]) -> dict[str, tuple[str, int]]`. `scores` maps each talent domain to a dict of knowledge area to score. Return, for each domain, the weakest area and its score. When two areas tie, pick the one that comes first alphabetically.
+
+      Raise `ValueError` if any score is not a whole number from 0 to 5, or if a domain has no scores. A `bool` does not count as a whole number.
+    primer: |
+      `isinstance(value, int)` checks a type. In Python, `True` is also an `int`, so check for `bool` first:
+
+      ```python
+      isinstance(3, int)       # True
+      isinstance(2.5, int)     # False
+      isinstance(True, bool)   # True, and isinstance(True, int) is True too
+      ```
+
+      `min` takes a `key` function. A tuple key compares item by item: `min([("b", 1), ("a", 1)], key=lambda p: (p[1], p[0]))` returns `("a", 1)`.
+    starter: |
+      def weakest_by_domain(scores):
+          return {domain: min(areas.items()) for domain, areas in scores.items()}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: weakest_by_domain
+          typed: true
+          docstring: true
+          message: "Give `weakest_by_domain` type hints and a docstring."
+      tests:
+        - id: weakest
+          code: |
+            got = weakest_by_domain({
+                "performance": {"data_quality": 4, "data_security": 0, "metadata": 3},
+                "workforce": {"data_quality": 3, "data_security": 3, "metadata": 1},
+            })
+            assert got == {"performance": ("data_security", 0), "workforce": ("metadata", 1)}, got
+          message: "Return the lowest-scoring area and its score for each domain."
+        - id: tie
+          code: |
+            got = weakest_by_domain({"skills": {"metadata": 1, "data_quality": 1, "data_security": 2}})
+            assert got == {"skills": ("data_quality", 1)}, got
+          message: "When areas tie, pick the one that comes first alphabetically."
+        - id: invalid
+          code: |
+            for bad in [{"x": {"a": 6}}, {"x": {"a": -1}}, {"x": {"a": 2.5}}, {"x": {"a": True}}, {"x": {}}]:
+                try:
+                    weakest_by_domain(bad)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {bad}")
+          message: "Raise ValueError for a score outside 0 to 5, a fraction, a bool, or a domain with no scores."
+    solution: |
+      MIN_LEVEL = 0
+      MAX_LEVEL = 5
+
+
+      def weakest_by_domain(scores: dict[str, dict[str, int]]) -> dict[str, tuple[str, int]]:
+          """The weakest knowledge area and its score for each talent domain.
+
+          Args:
+              scores: Domain to knowledge area to whole-level score.
+
+          Returns:
+              Domain to (area, score). Ties go to the area first in alphabetical order.
+
+          Raises:
+              ValueError: If a score is not a whole number from 0 to 5, or a domain is empty.
+          """
+          result: dict[str, tuple[str, int]] = {}
+          for domain, areas in scores.items():
+              if not areas:
+                  raise ValueError(f"{domain}: no scores")
+              for area, score in areas.items():
+                  if isinstance(score, bool) or not isinstance(score, int):
+                      raise ValueError(f"{domain}.{area}: score must be a whole number")
+                  if not MIN_LEVEL <= score <= MAX_LEVEL:
+                      raise ValueError(f"{domain}.{area}: score {score} is outside 0 to 5")
+              result[domain] = min(areas.items(), key=lambda pair: (pair[1], pair[0]))
+          return result
+    seeded_bugs:
+      - |
+        def weakest_by_domain(scores: dict[str, dict[str, int]]) -> dict[str, tuple[str, int]]:
+            """Takes the alphabetically first area, not the weakest."""
+            return {domain: min(areas.items()) for domain, areas in scores.items()}
+      - |
+        def weakest_by_domain(scores: dict[str, dict[str, int]]) -> dict[str, tuple[str, int]]:
+            """No validation."""
+            return {d: min(a.items(), key=lambda p: (p[1], p[0])) for d, a in scores.items()}
+      - |
+        def weakest_by_domain(scores: dict[str, dict[str, int]]) -> dict[str, tuple[str, int]]:
+            """Ties go to whichever area comes first in the dict."""
+            result = {}
+            for domain, areas in scores.items():
+                if not areas:
+                    raise ValueError("empty")
+                for score in areas.values():
+                    if isinstance(score, bool) or not isinstance(score, int) or not 0 <= score <= 5:
+                        raise ValueError("bad score")
+                result[domain] = min(areas.items(), key=lambda pair: pair[1])
+            return result
+    wrong_answers:
+      - answer: |
+          def weakest_by_domain(scores: dict[str, dict[str, int]]) -> dict[str, tuple[str, int]]:
+              """No validation."""
+              return {d: min(a.items(), key=lambda p: (p[1], p[0])) for d, a in scores.items()}
+        triggers: invalid
+      - answer: |
+          def weakest_by_domain(scores: dict[str, dict[str, int]]) -> dict[str, tuple[str, int]]:
+              """Ties go to whichever area comes first in the dict."""
+              result = {}
+              for domain, areas in scores.items():
+                  if not areas:
+                      raise ValueError("empty")
+                  for score in areas.values():
+                      if isinstance(score, bool) or not isinstance(score, int) or not 0 <= score <= 5:
+                          raise ValueError("bad score")
+                  result[domain] = min(areas.items(), key=lambda pair: pair[1])
+              return result
+        triggers: tie
+    hints:
+      - "Validate every score before you pick the minimum."
+      - "Check `bool` before `int`, because `True` is an `int` in Python."
+      - "`min(areas.items(), key=lambda pair: (pair[1], pair[0]))` breaks ties by name."
+    explanation: |
+      Validate first, so a typo such as 2.5 or 6 fails loudly. Then a tuple key picks the lowest score and breaks ties by name, so the result never depends on dict order.
+
+  - id: E2-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Plan how you present the first talent data maturity baseline to HR leadership.
+    slots:
+      - id: headline
+        label: "Headline"
+        options:
+          - {id: grid, text: "A grid of areas by domain, with the weakest area per domain highlighted"}
+          - {id: mean, text: "One overall maturity score out of 5"}
+        answer: grid
+      - id: evidence
+        label: "Evidence"
+        options:
+          - {id: cited, text: "A cited document, metric or log behind every score"}
+          - {id: survey, text: "A leadership survey of perceived maturity"}
+        answer: cited
+      - id: next
+        label: "What the baseline leads to"
+        options:
+          - {id: targets, text: "A target level per area and domain, with the weakest areas first"}
+          - {id: pilot, text: "Start the AI pilot in the domain with the highest mean"}
+        answer: targets
+    model_answer: |
+      - The grid shows where the risk sits. One number cannot.
+      - Evidence lets anyone check a score, and rescoring use the same proof.
+      - Targets start with the weakest areas, because they block everything built on top.
+    wrong_answers:
+      - answer: {headline: mean}
+        feedback: "An average of 3.1 hid a 0 in this lesson's example."
+      - answer: {evidence: survey}
+        feedback: "Perception is not evidence. Cite artefacts."
+      - answer: {next: pilot}
+        feedback: "A high mean can still hide a 0 in security or ownership."
+    hints:
+      - "Which view shows the weakest area?"
+      - "What can an auditor check?"
+      - "What blocks work built on top?"
+    explanation: |
+      Show the grid, cite the evidence, and set targets that fix the weakest areas first.
+
+recap:
+  - front: "A common 0 to 5 maturity scale"
+    back: "0 none, 1 initial, 2 repeatable, 3 defined, 4 managed, 5 optimised. Agree and version the names with stakeholders."
+  - front: "The baseline grid"
+    back: "Knowledge areas by talent domain: workforce, recruitment, learning, performance, mobility, skills."
+  - front: "Summarise a domain by"
+    back: "Its weakest area and score. A mean hides gaps."
+  - front: "A defensible score"
+    back: "A whole level with cited evidence: a document, a metric or a log."
+
+claims:
+  - claim: "DMBOK2 describes a data management maturity assessment; a common scale runs 0 no capability, 1 initial or ad hoc, 2 repeatable, 3 defined, 4 managed, 5 optimised; levels cannot be skipped."
+    status: unverified
+    source: "Practitioner and consultancy sources (datacrossroads.nl, DAMA chapter presentations on SlideShare), seen through search results, November 2026. Sources disagree on names and numbering, and DMBOK2 itself was not checked."
+  - claim: "The six talent domains (workforce and organisation, recruitment, learning, performance, mobility, skills) come from the role brief, not from DAMA."
+    status: verified
+    source: "content/roles/ey-talent.yaml, the job description in the brief."

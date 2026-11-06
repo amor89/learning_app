@@ -245,3 +245,21 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 | PSI cut-offs 0.1 and 0.25 | Unverified convention | Taught as a rule of thumb only |
 
 | Pyodide 314.0.7 Polars 1.33.1 cannot collect file scans (`scan_parquet`, `scan_csv`): "invalid build. Missing feature new-streaming". `write_parquet` also fails (no `sink_parquet`). In-memory lazy frames work. B4-L3-E4 checks its fix statically for this reason. | Verified | Real browser run from the CDN, September 2026 |
+
+## Track E: data protection and governance sources (checked 6 November 2026)
+
+ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build environment, so every legal and DAMA fact below is search-only or unverified. A personal environment called learning_app now allows those hosts. Re-check these in a session on it before relying on them.
+
+| Item | Status | Source |
+|---|---|---|
+| UK GDPR Article 9: nine special categories; biometric only when used to identify; inferred special category data counts; age is a protected characteristic, not special category data | Search only | ICO special category data guidance |
+| Six Article 6 lawful bases; consent rarely appropriate for employers because of the power imbalance | Search only | ICO lawful basis and employment guidance |
+| Legitimate interests three-part test (purpose, necessity, balancing), recorded in an LIA | Search only | ICO legitimate interests guidance |
+| Recognised legitimate interests in force 5 February 2026 (Data (Use and Access) Act 2025, SI 2026/82), not for commercial uses | Search only | Law firm commentary (Alston & Bird, Pearl Cohen, bratby.law) |
+| Article 9(2)(b) with DPA 2018 Schedule 1 Part 1 paragraph 1, appropriate policy document required; not for purely contractual rights | Search only | ICO conditions for processing, monitoring workers guidance |
+| Schedule 1 paragraphs 6 to 28 (23 conditions); paragraph 8 equality of opportunity or treatment for monitoring, not for decisions about an individual | Search only | ICO substantial public interest and AI fairness guidance |
+| The Data (Use and Access) Act 2025 added a substantial public interest condition | Unverified | Mentioned in an ICO training module; details not checked |
+| Article 35 DPIA triggers, ICO list, two screening criteria, prior consultation | Search only | ICO DPIA guidance |
+| DAMA-DMBOK2: eleven knowledge areas, governance at the hub; 2024 revision kept them | Search only | Secondary summaries; book not checked |
+| DMBOK2 definition of data governance (section 3.1, p. 67) | Search only | GCcollab wiki citing DMBOK2 |
+| Maturity scale 0 to 5 (none, initial, repeatable, defined, managed, optimised) | Unverified | Sources disagree on names and numbering. E2-L2 says to agree and version the scale |
