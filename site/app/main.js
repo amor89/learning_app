@@ -2,6 +2,7 @@
 import * as store from "./store.js";
 import { drillView, interviewView, taskView } from "./interview-view.js";
 import { monthsView, monthView } from "./month-view.js";
+import { backTarget, isRoot, visit } from "./nav.js";
 import { placementView } from "./placement-view.js";
 import { tabFor } from "./pathways.js";
 import { roleView } from "./role-view.js";
@@ -125,7 +126,7 @@ const ROUTES = [
   [/^#?\/?$/, () => dashboard(app), "home"],
   [/^#\/paths$/, () => pathwaysView(app), "paths"],
   [/^#\/path\/([\w-]+)(?:\/([\w-]+))?$/, (m) => pathwayView(app, m[1], m[2]), "paths"],
-  [/^#\/library$/, () => libraryView(app), null],
+  [/^#\/library(?:\/(\w+))?$/, (m) => libraryView(app, m[1]), null],
   [/^#\/sheet\/([\w-]+)(?:\/([\w-]+))?$/, (m) => sheetView(app, m[1], m[2]), null],
   [/^#\/track\/(\w+)$/, (m) => trackView(app, m[1]), null],
   [/^#\/module\/(\w+)$/, (m) => moduleView(app, m[1]), null],
@@ -142,9 +143,39 @@ const ROUTES = [
 ];
 
 let activeTab = "home";
+let visited = [];
+let titleWatch = null;
+
+const backButton = document.querySelector(".topbar .back");
+const barTitle = document.querySelector(".topbar-title");
+
+// The header shows Back on every page but the five tab pages, and the page title
+// once the page's own heading has scrolled under the header.
+function updateHeader(hash, heading) {
+  const root = isRoot(hash);
+  backButton.hidden = root;
+  const brand = root ? "Learning app" : "";
+  barTitle.textContent = brand;
+  titleWatch?.disconnect();
+  if (!heading || !("IntersectionObserver" in window)) return;
+  const top = document.querySelector(".topbar").offsetHeight;
+  titleWatch = new IntersectionObserver(([entry]) => {
+    barTitle.textContent = entry.isIntersecting ? brand : heading.textContent;
+  }, { rootMargin: `-${top}px 0px 0px 0px` });
+  titleWatch.observe(heading);
+}
+
+backButton.addEventListener("click", (event) => {
+  event.preventDefault();
+  const parent = [...document.querySelectorAll("#app .crumbs a")].at(-1)?.getAttribute("href");
+  const target = backTarget(visited, parent);
+  if (target === "history") history.back();
+  else location.hash = target;
+});
 
 async function route() {
   const hash = location.hash || "#/";
+  visited = visit(visited, hash);
   const match = ROUTES.map(([re, view, tab]) => [hash.match(re), view, tab]).find(([m]) => m);
   activeTab = tabFor(match?.[2], activeTab);
   document.querySelectorAll(".tabbar a").forEach((a) => a.setAttribute("aria-current", a.dataset.tab === activeTab ? "page" : "false"));
@@ -156,6 +187,7 @@ async function route() {
     window.scrollTo(0, 0);
     heading?.setAttribute("tabindex", "-1");
     heading?.focus({ preventScroll: true });
+    updateHeader(hash, heading);
   } catch (error) {
     clear(root).append(h("section", { class: "page" }, h("h1", {}, "Something went wrong"), h("p", {}, error.message), h("a", { href: "#/" }, "Back to home")));
   }
