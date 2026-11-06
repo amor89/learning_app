@@ -94,6 +94,8 @@ jobs:
         run: node tests/app/all_lessons.mjs http://localhost:8000/
       - name: Smoke test (Pyodide steps skipped without a local Pyodide copy)
         run: node tests/app/smoke.mjs http://localhost:8000/
+      - name: A deploy reaches the app on the next launch, and the app works offline
+        run: node tests/app/update.mjs
 
   deploy:
     # Publishes site/ to GitHub Pages after every gate passes on main.

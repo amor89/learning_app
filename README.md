@@ -52,6 +52,8 @@ The automated layout tests run in Chromium at 390px. Check a few lessons on the 
 
 The `deploy` job in `.github/workflows/ci.yml` publishes `site/` after every gate passes on `main`.
 
+A deploy reaches the app on its next launch. The service worker asks the network first for every app file, revalidating past GitHub Pages' 10-minute cache, and falls back to its cached copy when you are offline or the network takes more than 4 seconds. An app left open, or brought back from the background, compares the content version with the server and shows **Reload** when they differ. The version hashes the content, the renderers and the app files, so run `python scripts/build_content.py` after any change under `site/app/` and commit the new `site/content/index.json`. `tests/app/update.mjs` serves a copy of the site with GitHub Pages' cache headers, makes a deploy, and checks all three.
+
 1. In the repository, open **Settings > Pages** and set **Source** to **GitHub Actions**. Do this once.
 2. Merge your branch into `main`. The site appears at `https://<user>.github.io/<repository>/`.
 

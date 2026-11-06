@@ -1,7 +1,10 @@
-// Service worker: offline app shell, fresh content when online, cached Pyodide.
-const SHELL_CACHE = "shell-v5";
+// Service worker: fresh files whenever the network answers, the cached copy when it does not.
+// Every app file is network-first, revalidated past the browser's HTTP cache, so a deploy shows
+// on the next launch. A slow network falls back to the cache after NETWORK_WAIT_MS.
+const SHELL_CACHE = "shell-v6";
 const CONTENT_CACHE = "content-v1";
 const PYODIDE_CACHE = "pyodide-v1";
+const NETWORK_WAIT_MS = 4000;
 const SHELL = [
   "./",
   "index.html",
@@ -27,7 +30,9 @@ const SHELL = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: "reload" skips the HTTP cache, so a new worker never stores files from the last deploy.
+  const requests = SHELL.map((url) => new Request(url, { cache: "reload" }));
+  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(requests)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -39,17 +44,25 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-async function networkFirst(request, cacheName) {
-  const cache = await caches.open(cacheName);
-  try {
-    const response = await fetch(request);
-    if (response.ok) cache.put(request, response.clone());
+// Asks the server (no-cache revalidates with the ETag, so an unchanged file costs a 304),
+// stores the answer, and falls back to the cache when offline or slow.
+function networkFirst(event, cacheName) {
+  const { request } = event;
+  const network = fetch(request.url, { cache: "no-cache", credentials: "same-origin" }).then((response) => {
+    if (response.ok) {
+      const copy = response.clone();
+      event.waitUntil(caches.open(cacheName).then((cache) => cache.put(request, copy)));
+    }
     return response;
-  } catch {
-    const cached = await cache.match(request, { ignoreSearch: true });
-    if (cached) return cached;
-    throw new Error("offline and not cached");
-  }
+  });
+  event.waitUntil(network.then(() => undefined, () => undefined));
+  return caches.open(cacheName)
+    .then((cache) => cache.match(request, { ignoreSearch: true }))
+    .then((cached) => {
+      if (!cached) return network;
+      const slow = new Promise((resolve) => setTimeout(() => resolve(cached), NETWORK_WAIT_MS));
+      return Promise.race([network.catch(() => cached), slow]);
+    });
 }
 
 async function cacheFirst(request, cacheName) {
@@ -59,18 +72,6 @@ async function cacheFirst(request, cacheName) {
   const response = await fetch(request);
   if (response.ok) cache.put(request, response.clone());
   return response;
-}
-
-async function staleWhileRevalidate(request, cacheName) {
-  const cache = await caches.open(cacheName);
-  const cached = await cache.match(request, { ignoreSearch: true });
-  const update = fetch(request)
-    .then((response) => {
-      if (response.ok) cache.put(request, response.clone());
-      return response;
-    })
-    .catch(() => cached);
-  return cached ?? update;
 }
 
 self.addEventListener("fetch", (event) => {
@@ -83,9 +84,6 @@ self.addEventListener("fetch", (event) => {
   }
   if (url.origin !== self.location.origin) return;
   const path = url.pathname;
-  if (path.includes("/content/") || path.includes("/downloads/") || path.includes("/py/")) {
-    event.respondWith(networkFirst(request, CONTENT_CACHE));
-    return;
-  }
-  event.respondWith(staleWhileRevalidate(request, SHELL_CACHE));
+  const content = path.includes("/content/") || path.includes("/downloads/") || path.includes("/py/");
+  event.respondWith(networkFirst(event, content ? CONTENT_CACHE : SHELL_CACHE));
 });

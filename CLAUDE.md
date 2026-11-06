@@ -72,6 +72,7 @@ These are the "strong code" side of every worked example.
 - `ruff check` and `ruff format` on all Python. `mypy --strict` on `scripts/`, `checkers/`, `practice/`, `labs/testing/src/`, `labs/rag/src/`, `labs/rag/solution/`, `labs/torch/src/`, `labs/torch/solution/`, `labs/cnn/src/`, `labs/cnn/solution/`, `labs/transformer/src/`, `labs/transformer/solution/`, `labs/finetune/src/`, `labs/finetune/solution/`, `labs/serving/src/` and `labs/serving/solution/`.
 - Every reference solution passes its checker. Every seeded bug fails its checker. Every listed wrong answer triggers its feedback. `pytest tests/content` enforces all three.
 - Regenerate the handbook and cheat sheets (`python scripts/build_all.py`) after every content change and commit the output.
+- Run `python scripts/build_content.py` after any change under `site/app/`, `site/index.html` or `site/sw.js`. The content version hashes those files, and the app uses it to offer a reload after a deploy.
 - Recap cards and takeaways render as Markdown on cheat sheets: put names such as `__init__` or `test_*.py` in backticks. `tests/content/test_cheatsheets.py` enforces it.
 - Test the app at 390px width.
 

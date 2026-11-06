@@ -419,3 +419,13 @@ details.drills .plain-list { margin-top: 8px; }
 .review-lessons { margin: 6px 0 10px; }
 .review-lessons a { color: var(--accent); }
 #placement-result { margin-bottom: 8px; }
+
+/* Update banner */
+.update-banner {
+  position: fixed; left: 8px; right: 8px; z-index: 6;
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 8px);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius);
+  padding: 8px 8px 8px 14px; box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+}
+@media (min-width: 840px) { .update-banner { left: 50%; right: auto; width: 640px; transform: translateX(-50%); } }

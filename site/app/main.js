@@ -147,9 +147,41 @@ async function start() {
   }
   window.addEventListener("hashchange", route);
   await route();
-  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+  watchForUpdates();
+}
+
+// A deploy shows on the next launch, because the service worker asks the network first.
+// An app left open, or brought back from the background, checks the content version
+// and offers a reload instead of reloading under you.
+function watchForUpdates() {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") checkForUpdate();
+  });
+  if (!("serviceWorker" in navigator) || !(location.protocol === "https:" || location.hostname === "localhost")) return;
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (hadController) offerReload();
+  });
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
+}
+
+async function checkForUpdate() {
+  try {
+    const response = await fetch("content/index.json", { cache: "no-store" });
+    const latest = await response.json();
+    if (latest.version !== app.index.version) offerReload();
+    navigator.serviceWorker?.getRegistration().then((reg) => reg?.update()).catch(() => {});
+  } catch {
+    // Offline: nothing to compare against.
   }
+}
+
+function offerReload() {
+  if (document.querySelector(".update-banner")) return;
+  document.body.append(h("div", { class: "update-banner", role: "status" },
+    h("span", {}, "A new version of the app is ready."),
+    h("button", { type: "button", class: "btn", onclick: () => location.reload() }, "Reload"),
+  ));
 }
 
 start();
