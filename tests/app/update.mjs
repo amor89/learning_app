@@ -48,7 +48,7 @@ page.on("pageerror", (e) => errors.push(e.message));
 
 try {
   await page.goto(base);
-  await page.getByRole("heading", { name: "Dashboard" }).waitFor();
+  await page.getByRole("heading", { name: "Home" }).waitFor();
   await page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 15_000 });
   check(true, "the service worker controls the app");
 
@@ -65,14 +65,14 @@ try {
 
   // One launch picks up the deploy, despite max-age=600.
   await page.reload();
-  await page.getByRole("heading", { name: "Dashboard" }).waitFor();
+  await page.getByRole("heading", { name: "Home" }).waitFor();
   check((await marker()) === '"v2"', `one reload shows the new styles (marker ${JSON.stringify(await marker())})`);
   check(await page.locator(".update-banner").count() === 0, "no reload banner after the reload");
 
   // Offline, the app still opens from the cache.
   await context.setOffline(true);
   await page.reload();
-  const offline = await page.getByRole("heading", { name: "Dashboard" }).waitFor({ timeout: 10_000 }).then(() => true, () => false);
+  const offline = await page.getByRole("heading", { name: "Home" }).waitFor({ timeout: 10_000 }).then(() => true, () => false);
   check(offline, "the app opens offline from the cache");
   await context.setOffline(false);
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(" | ")}` : ""}`);

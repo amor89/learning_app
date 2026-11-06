@@ -132,7 +132,7 @@ export function downloadButtons(links, label) {
   return h(
     "div",
     { class: "downloads", role: "group", "aria-label": label },
-    h("button", { type: "button", class: "btn", onclick: () => saveFile(links.pdf, fileName(links.pdf)) }, "PDF"),
+    h("button", { type: "button", class: "btn secondary", onclick: () => saveFile(links.pdf, fileName(links.pdf)) }, "PDF"),
     h("button", { type: "button", class: "btn secondary", onclick: () => saveFile(links.docx, fileName(links.docx)) }, "Word"),
   );
 }

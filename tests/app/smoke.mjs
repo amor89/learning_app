@@ -29,18 +29,23 @@ async function noHorizontalScroll(label) {
   check(width <= 390, `${label}: page width ${width}px fits 390px`);
 }
 
-// Dashboard
+// Home
 await page.goto(`${base}${query}#/`);
-await page.getByRole("heading", { name: "Dashboard" }).waitFor();
+await page.getByRole("heading", { name: "Home" }).waitFor();
 const index = JSON.parse(readFileSync(new URL("../../site/content/index.json", import.meta.url), "utf8"));
 const trackCount = index.tracks.length;
 const moduleCount = index.tracks.reduce((n, t) => n + t.modules.length, 0);
 const first = index.pathways[0];
-check(await page.locator(".stage-list > li").count() === first.stages.length, `dashboard shows the ${first.stages.length} stages of ${first.title}`);
+check(await page.locator(".stage-list > li").count() === Math.min(2, first.stages.length), `Home shows the current stage and the next one of ${first.title}`);
+check((await page.locator(".stage-list .pill.ok").count()) === 1, "Home marks the current stage as Now");
+check(await page.locator(".today .btn").count() === 1 && await page.locator("main .btn:not(.secondary):not(.ghost):not(.danger)").count() === 1, "Home has one filled button, Continue");
+check(await page.locator(".quick-links a").count() >= 3, "Home shows the quick links");
+check(await page.locator(".tabbar a[aria-current=page]").textContent() === "Home", "the Home tab is active on Home");
+check(await page.locator(".tabbar .tab-icon").count() === 5, "every tab has an icon");
 const firstLesson = first.stages.flatMap((s) => s.modules).map((id) => index.tracks.flatMap((t) => t.modules).find((m) => m.id === id)).find((m) => m.lessons.length).lessons[0];
 check((await page.locator(".card.continue").getAttribute("href")) === `#/lesson/${firstLesson.id}`, `Continue opens the pathway's first lesson, ${firstLesson.id}`);
-await noHorizontalScroll("dashboard");
-await page.screenshot({ path: `${shots}/01-dashboard.png`, fullPage: true });
+await noHorizontalScroll("Home");
+await page.screenshot({ path: `${shots}/01-home.png`, fullPage: true });
 
 // Library: tracks, module chips and downloads
 await page.goto(`${base}${query}#/library`);
@@ -66,10 +71,15 @@ const last = index.pathways.at(-1);
 await page.getByRole("button", { name: "Make this my pathway" }).click();
 await page.getByText("Your pathway", { exact: true }).waitFor();
 await page.goto(`${base}${query}#/`);
-check((await page.locator(".pathway-card strong").textContent()) === last.title, `dashboard follows the chosen pathway, ${last.id}`);
+check((await page.locator(".pathway-card strong").textContent()) === last.title, `Home follows the chosen pathway, ${last.id}`);
 await page.goto(`${base}${query}#/path/${first.id}/${first.stages[1].id}`);
 await page.waitForFunction((title) => document.querySelector("h1")?.textContent === title, first.title);
 check(await page.locator(`#stage-${first.stages[1].id}`).evaluate((d) => d.open), "a stage link opens that stage");
+await page.locator(`#stage-${first.stages[1].id} .path-lesson`).first().click();
+await page.waitForFunction(() => location.hash.startsWith("#/lesson/"));
+check(await page.locator(".tabbar a[aria-current=page]").textContent() === "Paths", "a lesson opened from Paths keeps the Paths tab active");
+await page.goto(`${base}${query}#/path/${first.id}/${first.stages[1].id}`);
+await page.waitForFunction((title) => document.querySelector("h1")?.textContent === title, first.title);
 await page.getByRole("button", { name: "Make this my pathway" }).click();
 await page.getByText("Your pathway", { exact: true }).waitFor();
 
@@ -234,18 +244,18 @@ check((await page.locator(".muted.small").first().textContent()).includes("Card 
 await page.screenshot({ path: `${shots}/07-review.png` });
 await noHorizontalScroll("review");
 
-// Dashboard reflects progress
+// Home reflects progress
 await page.goto(`${base}${query}#/`);
-const xp = await page.locator(".stat-value").first().textContent();
-check(Number(xp) > 0, `dashboard shows earned XP (${xp})`);
-await page.screenshot({ path: `${shots}/08-dashboard-after.png`, fullPage: true });
+const xp = Number((await page.locator(".stats-line").textContent()).match(/^(\d+) XP/)?.[1]);
+check(xp > 0, `Home shows earned XP (${xp})`);
+await page.screenshot({ path: `${shots}/08-home-after.png`, fullPage: true });
 
-// Placement quiz: the dashboard offers it, a pass skips B0 and moves Continue on, a fail lists lessons
+// Placement quiz: Home offers it, a pass skips B0 and moves Continue on, a fail lists lessons
 const placement = JSON.parse(readFileSync(new URL("../../site/content/placement.json", import.meta.url), "utf8"));
 const quizB = placement.quizzes.find((q) => q.track === "B");
 await page.goto(`${base}${query}#/`);
-await page.getByRole("heading", { name: "Dashboard" }).waitFor();
-check(await page.locator(".placement-card").count() === 1, "dashboard offers the placement quiz while Continue points into B0");
+await page.getByRole("heading", { name: "Home" }).waitFor();
+check(await page.locator(".placement-card").count() === 1, "Home offers the placement quiz while Continue points into B0");
 await page.goto(`${base}${query}#/module/B0`);
 await page.getByRole("heading", { name: /^B0 / }).waitFor();
 check(await page.locator(".placement-card").count() === 1, "the start-here module page offers the placement quiz");
@@ -264,10 +274,10 @@ await page.screenshot({ path: `${shots}/08b-placement.png`, fullPage: false });
 await page.getByRole("button", { name: `Skip B0 and go to ${quizB.next.id}` }).click();
 await page.waitForFunction((id) => location.hash === `#/module/${id}`, quizB.next.id);
 await page.goto(`${base}${query}#/`);
-await page.getByRole("heading", { name: "Dashboard" }).waitFor();
+await page.getByRole("heading", { name: "Home" }).waitFor();
 const continueHref = await page.locator(".card.continue").getAttribute("href");
 check(!continueHref.includes("B0-"), `after the skip, Continue passes over B0 (${continueHref})`);
-check(await page.locator(".placement-card").count() === 0, "the dashboard stops offering the quiz once taken");
+check(await page.locator(".placement-card").count() === 0, "Home stops offering the quiz once taken");
 await page.goto(`${base}${query}#/path/${first.id}/${first.stages[0].id}`);
 await page.waitForFunction((title) => document.querySelector("h1")?.textContent === title, first.title);
 check((await page.locator(".path-module", { hasText: "B0 " }).locator(".pill").textContent()) === "Skipped", "the pathway marks B0 as skipped");

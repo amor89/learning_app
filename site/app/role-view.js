@@ -124,7 +124,7 @@ export async function roleView(app, roleId) {
   return h(
     "article",
     { class: "page role" },
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard"), " › ", h("a", { href: `#/path/${plan.pathway}` }, "Pathway")),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home"), " › ", h("a", { href: `#/path/${plan.pathway}` }, "Pathway")),
     h("h1", {}, plan.title),
     h("p", { class: "muted small", html: plan.status_html }),
     h("div", { class: "card pathway-card" },
@@ -169,7 +169,7 @@ export async function roleView(app, roleId) {
   );
 }
 
-// A link card for the dashboard and the pathway page.
+// A link card for the pathway page.
 export function roleCard(app, roleRef) {
   return h("a", { class: "card continue", href: `#/role/${roleRef.id}` },
     h("span", { class: "muted small" }, "Role plan"),

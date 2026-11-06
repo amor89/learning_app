@@ -15,7 +15,7 @@ export function monthsView(app) {
   return h(
     "section",
     { class: "page" },
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard")),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home")),
     h("h1", {}, "Monthly notes"),
     h("p", {}, "Your roadmap asks for a quick reference and a deep dive each month. Each month here has a one-page quick reference built from its lessons, and space for your own notes. Export them as Markdown for your GitHub repository."),
     h("ol", { class: "module-list" }, months.stages.map((m) => h("li", {}, h("a", { class: "card", href: `#/month/${m.id}` },
@@ -84,7 +84,7 @@ export async function monthView(app, stageId) {
   return h(
     "article",
     { class: "page month" },
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard"), " › ", h("a", { href: "#/months" }, "Monthly notes"), " › ", h("a", { href: `#/path/${app.index.months.pathway}/${month.id}` }, "Pathway stage")),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home"), " › ", h("a", { href: "#/months" }, "Monthly notes"), " › ", h("a", { href: `#/path/${app.index.months.pathway}/${month.id}` }, "Pathway stage")),
     h("h1", {}, month.title),
     h("p", {}, month.summary),
     h("h2", {}, "Your notes"),

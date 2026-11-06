@@ -68,3 +68,15 @@ export function followingLesson(pathway, modules, lessonId) {
   const at = order.findIndex((step) => step.lesson.id === lessonId);
   return at === -1 ? null : order[at + 1] ?? null;
 }
+
+// The stage you are in and the one after it, for Home. The pathway page lists the rest.
+export function nearStages(pathway, current) {
+  const at = Math.max(0, pathway.stages.findIndex((s) => s.id === current));
+  return pathway.stages.slice(at, at + 2);
+}
+
+// The tab to highlight for a route. A route tagged null (a lesson, a module, a sheet)
+// keeps the tab you reached it from, so the tab bar does not jump under you.
+export function tabFor(routeTab, previous = "home") {
+  return routeTab ?? previous ?? "home";
+}

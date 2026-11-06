@@ -38,16 +38,20 @@ function lessonStatus(state, lesson) {
 }
 
 function notFound(what) {
-  return h("section", { class: "page" }, h("h1", {}, "Not found"), h("p", {}, `${what} does not exist yet.`), h("a", { href: "#/" }, "Back to dashboard"));
+  return h("section", { class: "page" }, h("h1", {}, "Not found"), h("p", {}, `${what} does not exist yet.`), h("a", { href: "#/" }, "Back to home"));
 }
 
-// Dashboard ------------------------------------------------------------------
+// Home ---------------------------------------------------------------------
 
-function nextUpCard(step, label = "Next up") {
+// The card links to the lesson. Home adds a button-styled label as its one main action.
+function nextUpCard(step, label = "Next up", action = null) {
   if (!step) return h("p", { class: "card" }, "Every published lesson in this pathway is complete.");
   return h("a", { class: "card continue", href: `#/lesson/${step.lesson.id}` },
-    h("span", { class: "muted small" }, `${label} · ${step.stage.title} · ${step.module.id} ${step.module.title}`),
-    h("strong", {}, step.lesson.title),
+    h("span", { class: "muted small" }, label),
+    h("strong", { class: "continue-title" }, step.lesson.title),
+    h("span", { class: "small" }, `${step.module.id} ${step.module.title}`),
+    h("span", { class: "muted small" }, step.stage.title),
+    action ? h("span", { class: "btn continue-btn", "aria-hidden": "true" }, action) : null,
   );
 }
 
@@ -67,6 +71,29 @@ function placementPrompt(app, step) {
   return placementCard(app, track, track.placement);
 }
 
+function reviewAction(due) {
+  if (!due) return h("p", { class: "muted small review-action" }, "No cards due for review today.");
+  return h("a", { class: "btn secondary review-action", href: "#/review" }, `Review ${due} card${due > 1 ? "s" : ""}`);
+}
+
+function statsLine(state, streak) {
+  const badges = Object.keys(state.badges).length;
+  return h("p", { class: "muted small stats-line" },
+    `${state.xp} XP · ${streak}-day streak (best ${state.streak.best}) · ${badges} badge${badges === 1 ? "" : "s"}`);
+}
+
+function quickLinks(app, pathway) {
+  const role = (app.index.roles ?? []).find((r) => r.pathway === pathway.id);
+  const links = [
+    ["#/library", "Cheat sheets and handbooks"],
+    app.index.months ? ["#/months", "Monthly notes"] : null,
+    ["#/interview/drill", "Interview drill"],
+    role ? [`#/role/${role.id}`, "Role plan"] : null,
+  ].filter(Boolean);
+  return h("nav", { class: "quick-links", "aria-label": "Quick links" },
+    links.map(([href, text]) => h("a", { href }, text)));
+}
+
 export function dashboard(app) {
   const { index, state } = app;
   const modules = paths.moduleIndex(index);
@@ -75,22 +102,18 @@ export function dashboard(app) {
   const current = paths.currentStageId(state, pathway, modules);
   const due = store.dueCards(state).length;
   const streak = store.currentStreak(state);
-  const badges = Object.keys(state.badges).length;
   const next = paths.nextStep(state, pathway, modules);
+  const near = paths.nearStages(pathway, current);
 
   return h(
     "section",
     { class: "page" },
-    h("h1", {}, "Dashboard"),
-    h(
-      "div",
-      { class: "stats" },
-      h("div", { class: "stat" }, h("span", { class: "stat-value" }, state.xp), h("span", { class: "stat-label" }, "XP")),
-      h("div", { class: "stat" }, h("span", { class: "stat-value" }, streak), h("span", { class: "stat-label" }, `Day streak (best ${state.streak.best})`)),
-      h("div", { class: "stat" }, h("span", { class: "stat-value" }, badges), h("span", { class: "stat-label" }, "Badges")),
-      h("a", { class: "stat link", href: "#/review" }, h("span", { class: "stat-value" }, due), h("span", { class: "stat-label" }, "Cards due")),
+    h("h1", {}, "Home"),
+    h("div", { class: "today" },
+      nextUpCard(next, "Continue where you left off", "Continue"),
+      reviewAction(due),
+      statsLine(state, streak),
     ),
-    nextUpCard(next, "Continue"),
     placementPrompt(app, next),
     h("div", { class: "card pathway-card" },
       h("span", { class: "track-id" }, "Your pathway"),
@@ -102,11 +125,13 @@ export function dashboard(app) {
         h("a", { class: "btn ghost", href: "#/paths" }, "Change pathway"),
       ),
     ),
-    (app.index.roles ?? []).filter((r) => r.pathway === pathway.id).map((r) => roleCard(app, r)),
-    h("h2", {}, "Stages"),
-    h("ol", { class: "stage-list" }, pathway.stages.map((stage) => stageLink(app, pathway, stage, modules, current))),
-    h("p", {}, h("a", { href: "#/library" }, "All tracks, mastery and handbook downloads")),
-    pathway.id === app.index.months?.pathway ? h("p", {}, h("a", { href: "#/months" }, "Monthly notes: quick references and deep dives")) : null,
+    h("h2", {}, near.length > 1 ? "This stage and the next" : "This stage"),
+    h("ol", { class: "stage-list" }, near.map((stage) => stageLink(app, pathway, stage, modules, current))),
+    pathway.stages.length > near.length
+      ? h("p", { class: "small" }, h("a", { href: `#/path/${pathway.id}` }, `All ${pathway.stages.length} stages`))
+      : null,
+    h("h2", {}, "Quick links"),
+    quickLinks(app, pathway),
   );
 }
 
@@ -118,9 +143,9 @@ export function pathwaysView(app) {
   return h(
     "section",
     { class: "page" },
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard")),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home")),
     h("h1", {}, "Pathways"),
-    h("p", {}, "Each pathway is an ordered route through the modules towards one goal. Pick one, and the dashboard follows it."),
+    h("p", {}, "Each pathway is an ordered route through the modules towards one goal. Pick one, and Home follows it."),
     h("ol", { class: "module-list" }, app.index.pathways.map((pathway) => {
       const p = paths.pathwayProgress(app.state, pathway, modules);
       const count = pathway.stages.reduce((n, s) => n + s.modules.length, 0);
@@ -171,7 +196,7 @@ export function pathwayView(app, pathwayId, stageId) {
   return h(
     "section",
     { class: "page" },
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard"), " › ", h("a", { href: "#/paths" }, "Pathways")),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home"), " › ", h("a", { href: "#/paths" }, "Pathways")),
     h("h1", {}, pathway.title),
     h("p", {}, pathway.summary),
     progressBar(progress.share, `${pathway.title} progress`),
@@ -274,7 +299,7 @@ export function libraryView(app) {
   return h(
     "section",
     { class: "page" },
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard")),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home")),
     h("h1", {}, "All tracks and downloads"),
     h("h2", {}, "Tracks"),
     h(
@@ -335,7 +360,7 @@ export function trackView(app, trackId) {
   return h(
     "section",
     { class: "page" },
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard")),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home")),
     h("h1", {}, `Track ${track.id}: ${track.title}`),
     h("p", {}, track.summary),
     progressBar(p.share, "Track progress"),
@@ -366,7 +391,7 @@ export function moduleView(app, moduleId) {
   return h(
     "section",
     { class: "page" },
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard"), " › ", h("a", { href: `#/track/${track.id}` }, `Track ${track.id}`)),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home"), " › ", h("a", { href: `#/track/${track.id}` }, `Track ${track.id}`)),
     h("h1", {}, `${module.id} ${module.title}`),
     h("p", {}, module.summary),
     tagChips(module.tags, app.index.bands),
@@ -468,13 +493,13 @@ export async function lessonView(app, lessonId) {
 
   const practical = lesson.practical
     ? h("section", { id: "practical" }, h("h2", {}, `Practical: ${lesson.practical.title}`), h("div", { html: lesson.practical.intro_html }),
-        h("button", { type: "button", class: "btn", onclick: () => saveFile(lesson.practical.download, fileName(lesson.practical.download)) }, lesson.practical.platform === "databricks" ? "Save notebook (.ipynb)" : "Save lab (PDF)"))
+        h("button", { type: "button", class: "btn secondary", onclick: () => saveFile(lesson.practical.download, fileName(lesson.practical.download)) }, lesson.practical.platform === "databricks" ? "Save notebook (.ipynb)" : "Save lab (PDF)"))
     : null;
 
   return h(
     "article",
     { class: "page lesson" },
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard"), " › ", h("a", { href: `#/track/${meta.track.id}` }, `Track ${meta.track.id}`), " › ", h("a", { href: `#/module/${meta.module.id}` }, meta.module.id)),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home"), " › ", h("a", { href: `#/track/${meta.track.id}` }, `Track ${meta.track.id}`), " › ", h("a", { href: `#/module/${meta.module.id}` }, meta.module.id)),
     h("h1", {}, lesson.title),
     tagChips(lesson.tags, app.index.bands),
     meta.module.cheatsheet ? h("p", { class: "small" }, sheetLink(`#/sheet/${meta.module.id}`, `Open the ${meta.module.id} cheat sheet`, "sheet-link")) : null,
@@ -518,7 +543,7 @@ export async function reviewView(app) {
   const box = h("div", {});
   const paint = () => {
     if (i >= cards.length) {
-      fill(box, h("p", { class: "ok-text" }, `Done. You reviewed ${cards.length} card${cards.length > 1 ? "s" : ""}.`), h("a", { class: "btn", href: "#/" }, "Back to dashboard"));
+      fill(box, h("p", { class: "ok-text" }, `Done. You reviewed ${cards.length} card${cards.length > 1 ? "s" : ""}.`), h("a", { class: "btn", href: "#/" }, "Back to home"));
       return;
     }
     const { id, lesson, card } = cards[i];
