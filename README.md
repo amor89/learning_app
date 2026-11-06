@@ -53,6 +53,18 @@ The dashboard offers the quiz when **Continue** points into a start-here module 
 
 The questions live in `content/placement/<track>.yaml`. Each names the start-here lessons that teach it. The loader rejects a quiz whose module is not the first of its track, or a question that names a lesson outside that module. `tests/content/test_placement.py` checks that every start-here module has a quiz and that each of its lessons has at least two questions. `scripts/build_content.py` writes `site/content/placement.json`.
 
+## Search
+
+The magnifier in the header opens **Search**. Type a word or two and results appear as you type, in three groups:
+
+- **Key terms**: the phrases a concept section sets in bold, such as "decision rights" or "effective sample size", each linked to its lesson.
+- **Lessons**: title, module and a short extract around the match.
+- **Recap cards**: the front and back of each card, linked to its lesson.
+
+Every word you type must start a word in the result. Title matches rank first, and words found side by side rank above the same words scattered. Matched words are marked. The query sits in the address, so Back from a result returns to the same results.
+
+`scripts/build_content.py` writes the index to `site/content/search.json` through `learnkit/search.py`. The app loads it the first time you search, and the service worker keeps it for offline use. `tests/content/test_search.py` checks that every lesson and recap card is in the index, and `tests/app/search.test.mjs` tests matching, ranking, highlights and extracts.
+
 ## Interview practice
 
 The **Interview** tab holds timed practice for senior data science interviews, the "running throughout" strand of `reference/roadmap.md`.
@@ -129,7 +141,7 @@ pip install -e . --group dev
 python scripts/build_all.py
 ruff check . && ruff format --check . && mypy
 pytest                                   # Python checkers: solutions pass, seeded bugs fail
-node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs tests/app/notes.test.mjs tests/app/role.test.mjs
+node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs tests/app/notes.test.mjs tests/app/role.test.mjs tests/app/nav.test.mjs tests/app/search.test.mjs
 ```
 
 WeasyPrint needs Pango. On macOS: `brew install pango`. On Ubuntu: `apt install libpango-1.0-0 libpangoft2-1.0-0`.

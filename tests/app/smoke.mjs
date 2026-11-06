@@ -48,6 +48,29 @@ check((await page.locator(".card.continue").getAttribute("href")) === `#/lesson/
 await noHorizontalScroll("Home");
 await page.screenshot({ path: `${shots}/01-home.png`, fullPage: true });
 
+// Search: the header button, grouped results, a result, and Back to the same results
+await page.locator(".topbar .search-btn").click();
+await page.getByRole("heading", { name: "Search" }).waitFor();
+check(await page.locator(".topbar .search-btn").isHidden(), "the search page hides its own header button");
+check((await page.locator(".search-results").textContent()).includes("Type a word or two"), "search explains itself before you type");
+await page.locator("#search-q").fill("effective sample size");
+await page.waitForFunction(() => location.hash === "#/search?q=effective%20sample%20size" && document.querySelector(".search-hit"));
+check((await page.locator(".search-hit").first().locator("strong").textContent()).toLowerCase().includes("effective sample size"), "the best match comes first");
+check(await page.locator(".search-results mark").count() > 0, "search marks the matched words");
+await noHorizontalScroll("search results");
+await page.screenshot({ path: `${shots}/01c-search.png`, fullPage: false });
+const searchHit = await page.locator(".search-results h2", { hasText: "Lessons" }).locator("xpath=following-sibling::ul[1]//a").first().getAttribute("href");
+await page.locator(`.search-hit[href="${searchHit}"]`).first().click();
+await page.waitForFunction((href) => location.hash === href, searchHit);
+await page.locator(".topbar .back").click();
+await page.waitForFunction(() => document.querySelector("#search-q")?.value === "effective sample size" && document.querySelector(".search-hit"));
+check(true, "Back from a result returns to the same search");
+await page.locator("#search-q").fill("zzqqxx");
+await page.waitForFunction(() => document.querySelector(".search-results").textContent.includes("Nothing matches"));
+check(true, "a search with no match says so");
+await page.goto(`${base}${query}#/`);
+await page.getByRole("heading", { name: "Home" }).waitFor();
+
 // Library: three sections, tracks, progress and downloads
 await page.locator(".quick-links a", { hasText: "Cheat sheets and handbooks" }).click();
 await page.getByRole("heading", { name: "Library" }).waitFor();
@@ -62,7 +85,7 @@ check(await page.locator(".card.track").count() === trackCount, `library lists $
 check(await page.locator(".module-chip").count() === 0, "the Tracks section leaves the module chips to Progress");
 await noHorizontalScroll("library");
 await page.locator(".segmented a", { hasText: "Progress" }).click();
-await page.waitForFunction(() => location.hash === "#/library/progress");
+await page.waitForFunction(() => location.hash === "#/library/progress" && document.querySelector(".module-chip"));
 check(await page.locator(".module-chip").count() === moduleCount, `library progress shows ${moduleCount} module chips`);
 await noHorizontalScroll("library progress");
 await page.screenshot({ path: `${shots}/01a-library.png`, fullPage: true });

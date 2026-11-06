@@ -109,6 +109,10 @@ code { font-family: var(--mono); font-size: 0.88em; }
   color: var(--accent); font-weight: 600; text-decoration: none;
 }
 .back-icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.topbar .search-btn {
+  grid-column: 3; justify-self: end; display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; color: var(--accent);
+}
 .topbar-title {
   grid-column: 2; text-align: center; font-weight: 700;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -520,3 +524,19 @@ details.drills .plain-list { margin-top: 8px; }
 .check-line { display: flex; gap: 8px; align-items: flex-start; min-height: 32px; cursor: pointer; }
 .check-line input { width: 20px; height: 20px; margin-top: 1px; flex: none; }
 .assumptions li { justify-content: flex-start; }
+
+/* Search */
+.search-input {
+  width: 100%; min-height: 48px; padding: 10px 14px; margin: 4px 0 8px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text);
+  font: 1rem var(--sans); -webkit-appearance: none; appearance: none;
+}
+.search-input:focus { border-color: var(--accent); }
+.search-count { margin: 4px 0; }
+.search-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.search-hit {
+  display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; text-decoration: none; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow-wrap: anywhere;
+}
+.search-hit:hover { border-color: var(--accent); }
+.search mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
