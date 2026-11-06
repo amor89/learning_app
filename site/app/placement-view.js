@@ -6,14 +6,14 @@ import * as store from "./store.js";
 import { fill, h } from "./ui.js";
 
 function notFound(trackId) {
-  return h("section", { class: "page" }, h("h1", {}, "Not found"), h("p", {}, `Track ${trackId} has no placement quiz.`), h("a", { href: "#/" }, "Back to dashboard"));
+  return h("section", { class: "page" }, h("h1", {}, "Not found"), h("p", {}, `Track ${trackId} has no placement quiz.`), h("a", { href: "#/" }, "Back to home"));
 }
 
 function lessonList(lessons) {
   return h("ul", { class: "plain-list review-lessons" }, lessons.map((l) => h("li", {}, h("a", { href: `#/lesson/${l.id}` }, `${l.id} ${l.title}`))));
 }
 
-// A short card for the module, track and dashboard pages: take the quiz, or see the last result.
+// A short card for the module, track and Home pages: take the quiz, or see the last result.
 export function placementCard(app, track, quiz) {
   const record = pl.placementFor(app.state, track.id);
   const start = quiz.module;
@@ -144,7 +144,7 @@ export async function placementView(app, trackId) {
   return h(
     "section",
     { class: "page placement" },
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Dashboard"), " › ", h("a", { href: `#/track/${quiz.track}` }, `Track ${quiz.track}`)),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home"), " › ", h("a", { href: `#/track/${quiz.track}` }, `Track ${quiz.track}`)),
     h("h1", {}, `Placement quiz: ${quiz.track_title}`),
     h("p", {}, `Ten questions on ${quiz.module.id} (${quiz.module.title}). Score ${quiz.pass_mark} or more and you can skip it and start at ${quiz.next.id} (${quiz.next.title}). There is no clock.`),
     list,

@@ -3,6 +3,7 @@ import * as store from "./store.js";
 import { drillView, interviewView, taskView } from "./interview-view.js";
 import { monthsView, monthView } from "./month-view.js";
 import { placementView } from "./placement-view.js";
+import { tabFor } from "./pathways.js";
 import { roleView } from "./role-view.js";
 import { clear, h, toast } from "./ui.js";
 import {
@@ -117,19 +118,22 @@ function applyTheme() {
   else document.documentElement.dataset.theme = theme;
 }
 
+// The third element names the tab a page belongs to. Pages you reach from more than
+// one tab (tracks, modules, lessons, sheets, notes, role plans) use null and stay
+// under the tab you came from.
 const ROUTES = [
   [/^#?\/?$/, () => dashboard(app), "home"],
   [/^#\/paths$/, () => pathwaysView(app), "paths"],
   [/^#\/path\/([\w-]+)(?:\/([\w-]+))?$/, (m) => pathwayView(app, m[1], m[2]), "paths"],
-  [/^#\/library$/, () => libraryView(app), "home"],
-  [/^#\/sheet\/([\w-]+)(?:\/([\w-]+))?$/, (m) => sheetView(app, m[1], m[2]), "home"],
-  [/^#\/track\/(\w+)$/, (m) => trackView(app, m[1]), "home"],
-  [/^#\/module\/(\w+)$/, (m) => moduleView(app, m[1]), "home"],
-  [/^#\/lesson\/([\w-]+)$/, (m) => lessonView(app, m[1]), "home"],
-  [/^#\/placement\/(\w+)$/, (m) => placementView(app, m[1]), "home"],
-  [/^#\/months$/, () => monthsView(app), "paths"],
-  [/^#\/role\/([\w-]+)$/, (m) => roleView(app, m[1]), "paths"],
-  [/^#\/month\/([\w-]+)$/, (m) => monthView(app, m[1]), "paths"],
+  [/^#\/library$/, () => libraryView(app), null],
+  [/^#\/sheet\/([\w-]+)(?:\/([\w-]+))?$/, (m) => sheetView(app, m[1], m[2]), null],
+  [/^#\/track\/(\w+)$/, (m) => trackView(app, m[1]), null],
+  [/^#\/module\/(\w+)$/, (m) => moduleView(app, m[1]), null],
+  [/^#\/lesson\/([\w-]+)$/, (m) => lessonView(app, m[1]), null],
+  [/^#\/placement\/(\w+)$/, (m) => placementView(app, m[1]), null],
+  [/^#\/months$/, () => monthsView(app), null],
+  [/^#\/role\/([\w-]+)$/, (m) => roleView(app, m[1]), null],
+  [/^#\/month\/([\w-]+)$/, (m) => monthView(app, m[1]), null],
   [/^#\/interview$/, () => interviewView(app), "interview"],
   [/^#\/interview\/drill$/, () => drillView(app), "interview"],
   [/^#\/interview\/task\/([\w-]+)$/, (m) => taskView(app, m[1]), "interview"],
@@ -137,10 +141,13 @@ const ROUTES = [
   [/^#\/settings$/, () => settingsView(app), "settings"],
 ];
 
+let activeTab = "home";
+
 async function route() {
   const hash = location.hash || "#/";
   const match = ROUTES.map(([re, view, tab]) => [hash.match(re), view, tab]).find(([m]) => m);
-  document.querySelectorAll(".tabbar a").forEach((a) => a.setAttribute("aria-current", match && a.dataset.tab === match[2] ? "page" : "false"));
+  activeTab = tabFor(match?.[2], activeTab);
+  document.querySelectorAll(".tabbar a").forEach((a) => a.setAttribute("aria-current", a.dataset.tab === activeTab ? "page" : "false"));
   try {
     const view = match ? await match[1](match[0]) : h("p", {}, "Page not found.");
     clear(root).append(view);
@@ -150,7 +157,7 @@ async function route() {
     heading?.setAttribute("tabindex", "-1");
     heading?.focus({ preventScroll: true });
   } catch (error) {
-    clear(root).append(h("section", { class: "page" }, h("h1", {}, "Something went wrong"), h("p", {}, error.message), h("a", { href: "#/" }, "Back to dashboard")));
+    clear(root).append(h("section", { class: "page" }, h("h1", {}, "Something went wrong"), h("p", {}, error.message), h("a", { href: "#/" }, "Back to home")));
   }
 }
 

@@ -78,3 +78,18 @@ test("following lesson crosses modules and stages, and is null at the end or out
   assert.equal(paths.followingLesson(first, modules, "B3-L1"), null);
   assert.equal(paths.followingLesson(first, modules, "Z9-L1"), null);
 });
+
+test("Home shows the current stage and the next one", () => {
+  const pathway = { stages: [{ id: "a" }, { id: "b" }, { id: "c" }] };
+  assert.deepEqual(paths.nearStages(pathway, "a").map((s) => s.id), ["a", "b"]);
+  assert.deepEqual(paths.nearStages(pathway, "b").map((s) => s.id), ["b", "c"]);
+  assert.deepEqual(paths.nearStages(pathway, "c").map((s) => s.id), ["c"]);
+  assert.deepEqual(paths.nearStages(pathway, "missing").map((s) => s.id), ["a", "b"]);
+});
+
+test("a shared page keeps the tab you came from", () => {
+  assert.equal(paths.tabFor("paths", "home"), "paths");
+  assert.equal(paths.tabFor(null, "paths"), "paths");
+  assert.equal(paths.tabFor(null, "interview"), "interview");
+  assert.equal(paths.tabFor(undefined, undefined), "home");
+});
