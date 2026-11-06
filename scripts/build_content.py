@@ -35,6 +35,7 @@ from learnkit.loader import (  # noqa: E402
     ModuleContent,
     load_course,
     load_interview,
+    load_months,
     load_placement,
 )
 from learnkit.models import (  # noqa: E402
@@ -229,6 +230,30 @@ def download_links(stem: str) -> dict[str, str] | None:
     return None
 
 
+def quickref_link(stem: str) -> str | None:
+    """Path of a month's quick reference when its PDF exists."""
+    pdf = DOWNLOADS / "quickref" / f"{stem}.pdf"
+    return f"downloads/quickref/{pdf.name}" if pdf.exists() else None
+
+
+def months_index(course: Course) -> dict[str, Any]:
+    """The roadmap months: their stage, modules and quick-reference PDF."""
+    months = load_months(course)
+    return {
+        "pathway": months[0].pathway.id,
+        "stages": [
+            {
+                "id": m.stage.id,
+                "title": m.stage.title,
+                "summary": m.stage.summary,
+                "modules": [module.meta.id for module in m.modules],
+                "quickref": quickref_link(m.stem),
+            }
+            for m in months
+        ],
+    }
+
+
 def sheet_link(stem: str) -> str | None:
     """Path of a cheat sheet when its PDF exists."""
     pdf = DOWNLOADS / "cheatsheets" / f"{stem}.pdf"
@@ -303,6 +328,7 @@ def build_index(
         "bands": [b.model_dump() for b in course.roadmap.bands],
         "tracks": tracks,
         "pathways": pathway_index(course),
+        "months": months_index(course),
         "downloads": download_links("handbook-full"),
     }
 

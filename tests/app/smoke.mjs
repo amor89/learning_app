@@ -284,6 +284,36 @@ check((await page.locator("#placement-result").textContent()).includes("Start wi
 check(await page.locator("#placement-result .review-lessons li").count() === quizD.lessons.length, "a failed quiz lists the lessons to focus on");
 check(await page.getByRole("button", { name: /^Skip D0/ }).count() === 0, "a failed quiz offers no skip");
 
+// Monthly notes: the list, a month's one-page quick reference, notes that survive a reload, and exports
+const months = index.months.stages;
+await page.goto(`${base}${query}#/months`);
+await page.getByRole("heading", { name: "Monthly notes" }).waitFor();
+check(await page.locator(".module-list > li").count() === months.length, `monthly notes list ${months.length} months`);
+const month = months[0];
+await page.goto(`${base}${query}#/path/${index.months.pathway}/${month.id}`);
+await page.waitForFunction((title) => document.querySelector("h1")?.textContent === title, index.pathways.find((p) => p.id === index.months.pathway).title);
+check(await page.locator(`#stage-${month.id} a`, { hasText: "Quick reference and notes" }).count() === 1, "the pathway stage links to its month notes");
+await page.goto(`${base}${query}#/month/${month.id}`);
+await page.getByRole("heading", { name: month.title }).waitFor();
+await page.locator(".qr-lesson").first().waitFor();
+const monthLessons = month.modules.reduce((n, id) => n + index.tracks.flatMap((t) => t.modules).find((m) => m.id === id).lessons.length, 0);
+check(await page.locator(".qr-lesson").count() === monthLessons, `the month shows a quick reference for its ${monthLessons} lessons`);
+await page.getByRole("button", { name: "Start from the generated summary" }).click();
+check((await page.locator("#notes-quick").inputValue()).startsWith(`### ${month.modules[0]} `), "the generated summary fills your quick reference");
+await page.locator("#notes-deep").fill("Autograd builds a graph as I compute.");
+await page.waitForTimeout(700);
+await page.reload();
+await page.getByRole("heading", { name: month.title }).waitFor();
+check((await page.locator("#notes-deep").inputValue()) === "Autograd builds a graph as I compute.", "your deep dive survives a reload");
+await noHorizontalScroll("month notes");
+await page.screenshot({ path: `${shots}/08c-month.png`, fullPage: false });
+const [markdown] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Save notes as Markdown" }).click()]);
+const md = readFileSync(await markdown.path(), "utf8");
+check(markdown.suggestedFilename() === `learning-notes-${month.id}.md` && md.includes("## Deep dive\n\nAutograd builds a graph"), "notes export as one Markdown file");
+const [onePage] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Save one-page PDF" }).click()]);
+check(onePage.suggestedFilename() === `quickref-${month.id}.pdf` && readFileSync(await onePage.path()).subarray(0, 5).toString() === "%PDF-", "the one-page quick reference saves as a PDF");
+await noPdfLinks("month notes");
+
 // Interview practice: the hub, a timed drill to the end, and a timed task whose clock survives a reload
 const bank = JSON.parse(readFileSync(new URL("../../site/content/interview.json", import.meta.url), "utf8"));
 await page.getByRole("link", { name: "Interview" }).click();

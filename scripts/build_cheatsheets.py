@@ -1,8 +1,14 @@
-"""Build cheat sheets: one A5 PDF per module and per pathway stage.
+"""Build cheat sheets and quick references.
 
-Each sheet lists, for every lesson, its takeaway, its concept code snippets and
-its recap cards. Output goes to site/downloads/cheatsheets/ and is committed,
-so GitHub Pages serves it.
+Cheat sheets: one A5 PDF per module and per pathway stage. Each lists, for every
+lesson, its takeaway, its concept code snippets and its recap cards. Output goes
+to site/downloads/cheatsheets/.
+
+Quick references: one A4 page per roadmap month (content/months.yaml), with each
+lesson's takeaway and recap facts and no code. The build fails when a month no
+longer fits on one page. Output goes to site/downloads/quickref/.
+
+Both are committed, so GitHub Pages serves them.
 
 Run from the repository root: ``python scripts/build_cheatsheets.py``.
 """
@@ -20,10 +26,12 @@ from pygments.formatters import HtmlFormatter  # noqa: E402
 from weasyprint import HTML  # noqa: E402
 
 from learnkit.cheatsheet import render_sheet, sheet_scopes  # noqa: E402
-from learnkit.loader import load_course  # noqa: E402
+from learnkit.loader import Course, load_course, load_months  # noqa: E402
+from learnkit.quickref import render_quickref  # noqa: E402
 from learnkit.render import CSS_CLASS  # noqa: E402
 
 OUT = ROOT / "site" / "downloads" / "cheatsheets"
+QUICKREF_OUT = ROOT / "site" / "downloads" / "quickref"
 
 SHEET_CSS = """
 @page {
@@ -68,8 +76,32 @@ table.codetable td.src {
 """
 
 
+def build_quickrefs(course: Course) -> int:
+    """Write one single-page PDF per roadmap month and remove stale ones.
+
+    Returns:
+        The number of quick references written.
+
+    Raises:
+        ValueError: If a month's quick reference runs past one page.
+    """
+    QUICKREF_OUT.mkdir(parents=True, exist_ok=True)
+    keep = []
+    for month in load_months(course):
+        document = HTML(string=render_quickref(month), base_url=str(ROOT)).render()
+        if len(document.pages) != 1:
+            raise ValueError(f"{month.stem}: {len(document.pages)} pages, must fit on one")
+        path = QUICKREF_OUT / f"{month.stem}.pdf"
+        document.write_pdf(str(path))
+        keep.append(path.name)
+    for stale in QUICKREF_OUT.glob("quickref-*.pdf"):
+        if stale.name not in keep:
+            stale.unlink()
+    return len(keep)
+
+
 def main() -> None:
-    """Build every cheat sheet and remove stale ones."""
+    """Build every cheat sheet and quick reference, and remove stale ones."""
     course = load_course()
     OUT.mkdir(parents=True, exist_ok=True)
     css = SHEET_CSS + str(HtmlFormatter(style="friendly").get_style_defs(f".{CSS_CLASS}"))
@@ -83,6 +115,7 @@ def main() -> None:
             stale.unlink()
     (OUT / "manifest.json").write_text(json.dumps(sorted(keep), indent=1) + "\n", encoding="utf-8")
     print(f"Built {len(keep)} cheat sheets in {OUT.relative_to(ROOT)}")
+    print(f"Built {build_quickrefs(course)} quick references in {QUICKREF_OUT.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

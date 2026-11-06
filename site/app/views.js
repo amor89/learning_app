@@ -1,6 +1,7 @@
 // Page views. Each view returns a DOM node for #app.
 import { renderExercise } from "./exercises.js";
 import * as paths from "./pathways.js";
+import { monthLink } from "./month-view.js";
 import { placementCard } from "./placement-view.js";
 import * as store from "./store.js";
 import {
@@ -103,6 +104,7 @@ export function dashboard(app) {
     h("h2", {}, "Stages"),
     h("ol", { class: "stage-list" }, pathway.stages.map((stage) => stageLink(app, pathway, stage, modules, current))),
     h("p", {}, h("a", { href: "#/library" }, "All tracks, mastery and handbook downloads")),
+    pathway.id === app.index.months?.pathway ? h("p", {}, h("a", { href: "#/months" }, "Monthly notes: quick references and deep dives")) : null,
   );
 }
 
@@ -192,7 +194,10 @@ export function pathwayView(app, pathwayId, stageId) {
           h("span", { class: "muted small" }, `${p.done} of ${p.total} exercises`),
         ),
         h("p", { class: "muted small" }, stage.summary),
-        h("div", { class: "actions" }, sheetLink(stage.cheatsheet && `#/sheet/${pathway.id}/${stage.id}`, "Stage cheat sheet")),
+        h("div", { class: "actions" },
+          sheetLink(stage.cheatsheet && `#/sheet/${pathway.id}/${stage.id}`, "Stage cheat sheet"),
+          pathway.id === app.index.months?.pathway ? monthLink(app, stage.id) : null,
+        ),
         h("ol", { class: "module-list" }, paths.stageModules(stage, modules).map((m) => moduleBlock(app, m))),
       ));
     })),
@@ -308,6 +313,9 @@ export function libraryView(app) {
       h("summary", {}, h("strong", {}, pathway.title)),
       h("ul", { class: "plain-list" }, pathway.stages.map((s) => h("li", {}, h("span", {}, s.title), sheetLink(s.cheatsheet && `#/sheet/${pathway.id}/${s.id}`, "Open")))),
     )),
+    h("h2", {}, "Monthly notes"),
+    h("p", { class: "muted" }, "A one-page quick reference for each roadmap month, and space for your own quick reference and deep dive."),
+    h("div", { class: "actions" }, h("a", { class: "btn secondary", href: "#/months" }, "Open monthly notes")),
     h("h2", {}, "Handbook"),
     h("p", { class: "muted" }, "The full handbook. Solutions sit in an appendix at the end."),
     downloadButtons(index.downloads, "Full handbook"),

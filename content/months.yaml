@@ -1,0 +1,5 @@
+# The roadmap months: stages of one pathway that get a one-page quick reference and a
+# notes page for your own quick reference and deep dive (reference/roadmap.md,
+# "Monthly learning documentation"). learnkit/loader.py checks the stages exist.
+pathway: ds-roadmap
+stages: [m1-3, m4-6, m7-9, m10-12, m13-15, m16-18]
