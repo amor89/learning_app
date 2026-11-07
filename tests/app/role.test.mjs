@@ -87,3 +87,90 @@ test("the built role plan links to lessons that exist and a pathway with one sta
     assert.ok(index.roles.some((x) => x.id === r.id));
   }
 });
+
+const timed = {
+  id: "t",
+  start: "2026-12-10",
+  phases: [
+    { id: "P1", days: [1, 30], modules: ["I1", "A1"] },
+    { id: "P2", days: [31, 60], modules: ["A2", "X9"] },
+    { id: "P3", days: [61, 90], modules: [] },
+  ],
+  modules: [
+    { id: "I1", hours: 6, lessons: [{ id: "L1" }, { id: "L2" }, { id: "L3" }] },
+    { id: "A1", hours: 4, lessons: [{ id: "L3" }, { id: "L4" }] },
+    { id: "A2", hours: 5, lessons: [] },
+  ],
+};
+
+test("countdown settings default to the plan and ignore values that no longer fit", () => {
+  assert.deepEqual(role.countdownSettings(timed, undefined), { start: "2026-12-10", through: "P2", by: "start", per_week: 5, home: true });
+  const record = { countdown: { start: "2027-02-30", through: "P9", by: "P7", per_week: 9, home: "yes" } };
+  assert.deepEqual(role.countdownSettings(timed, record), role.countdownSettings(timed, undefined));
+  const one = { ...timed, phases: [timed.phases[0]] };
+  assert.equal(role.countdownSettings(one, {}).through, "P1");
+});
+
+test("setCountdown checks each setting against the plan", () => {
+  const s = store.emptyState();
+  role.setCountdown(s, timed, { start: "2027-01-04", through: "P1", by: "P1", per_week: 3, home: false });
+  assert.deepEqual(role.countdownSettings(timed, s.roles.t), { start: "2027-01-04", through: "P1", by: "P1", per_week: 3, home: false });
+  assert.throws(() => role.setCountdown(s, timed, { start: "4 January" }));
+  assert.throws(() => role.setCountdown(s, timed, { through: "P9" }));
+  assert.throws(() => role.setCountdown(s, timed, { per_week: 0 }));
+  assert.throws(() => role.setCountdown(s, timed, { per_week: 2.5 }));
+  assert.throws(() => role.setCountdown(s, timed, { colour: "red" }));
+  assert.equal(s.roles.t.countdown.per_week, 3);
+});
+
+test("studyDays counts whole weeks and the part week, never more than the days left", () => {
+  assert.equal(role.studyDays(0, 5), 0);
+  assert.equal(role.studyDays(-3, 5), 0);
+  assert.equal(role.studyDays(3, 5), 3);
+  assert.equal(role.studyDays(7, 5), 5);
+  assert.equal(role.studyDays(33, 5), 4 * 5 + 5);
+  assert.equal(role.studyDays(30, 2), 4 * 2 + 2);
+  assert.equal(role.studyDays(14, 7), 14);
+});
+
+test("countdown counts unique lessons left and the pace to the start date", () => {
+  const done = new Set(["L1"]);
+  const c = role.countdown(timed, {}, "2026-11-07", (id) => done.has(id));
+  assert.equal(c.deadline, "2026-12-10");
+  assert.equal(c.daysLeft, 33);
+  assert.equal(c.studyDays, 25);
+  assert.deepEqual(c.phases, ["P1", "P2"]);
+  assert.equal(c.lessonsTotal, 4);
+  assert.equal(c.lessonsLeft, 3);
+  // I1 has 2 of 3 lessons left (4 h), A1 2 of 2 (4 h), A2 has no lessons (5 h), X9 is unknown.
+  assert.equal(c.hoursLeft, 13);
+  assert.equal(c.lessonsPerStudyDay, 0.1);
+  assert.equal(c.hoursPerStudyDay, 0.5);
+  assert.equal(c.status, "running");
+});
+
+test("countdown follows your own start date, phase and deadline", () => {
+  const record = { countdown: { start: "2027-01-04", through: "P1", by: "P1", per_week: 3 }, done: {} };
+  const c = role.countdown(timed, record, "2027-01-04", () => false);
+  assert.equal(c.deadline, "2027-02-03");
+  assert.equal(c.daysLeft, 30);
+  assert.equal(c.studyDays, 4 * 3 + 2);
+  assert.equal(c.lessonsLeft, 4);
+  assert.equal(c.hoursLeft, 10);
+});
+
+test("a ticked assessment clears the hours of a competency with no lessons", () => {
+  const all = () => true;
+  assert.equal(role.countdown(timed, {}, "2026-11-07", all).status, "running");
+  const c = role.countdown(timed, { done: { A2: true } }, "2026-11-07", all);
+  assert.equal(c.hoursLeft, 0);
+  assert.equal(c.status, "done");
+});
+
+test("after the deadline the countdown reports passed, with no pace", () => {
+  const c = role.countdown(timed, {}, "2026-12-10", () => false);
+  assert.equal(c.daysLeft, 0);
+  assert.equal(c.studyDays, 0);
+  assert.equal(c.lessonsPerStudyDay, null);
+  assert.equal(c.status, "passed");
+});

@@ -448,6 +448,47 @@ await page.evaluate(() => document.querySelectorAll("details.path-stage").forEac
 await noHorizontalScroll("role plan");
 await page.screenshot({ path: `${shots}/08d-role.png`, fullPage: false });
 
+// Countdown: personalise the start date, deadline and study days, then show it on Home
+const localDay = (offset) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const myStart = localDay(20);
+await page.locator("#countdown summary").click();
+await page.locator("#cd-start").fill(myStart);
+await page.waitForFunction(() => document.querySelector("#countdown .countdown-head")?.textContent === "20 days to your start date");
+check(true, "a personal start date sets the countdown");
+const p1To = new Date(Date.parse(`${myStart}T00:00:00Z`) + (plan.phases[0].days[1] - 1) * 86_400_000)
+  .toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+check((await page.locator(`#phase-${plan.phases[0].id} summary`).textContent()).includes(p1To), "the phases follow your start date");
+await page.locator("#countdown summary").click();
+await page.locator("#cd-week").selectOption("3");
+check((await page.locator("#countdown .countdown-body").textContent()).includes("at 3 a week"), "study days a week change the pace");
+await page.locator("#cd-by").selectOption(plan.phases[0].id);
+check((await page.locator("#countdown .countdown-head").textContent()).includes(`to the end of ${plan.phases[0].id}`), "the deadline can be the end of a phase");
+await noHorizontalScroll("role countdown");
+await page.screenshot({ path: `${shots}/08e-countdown.png`, fullPage: false });
+await page.reload();
+await page.getByRole("heading", { name: plan.title }).waitFor();
+check(await page.locator("#cd-start").inputValue() === myStart && await page.locator("#cd-week").inputValue() === "3", "countdown settings survive a reload");
+await page.locator("#countdown summary").click();
+await page.locator("#countdown .check-line input").check();
+await page.goto(`${base}${query}#/`);
+await page.locator(".home-countdown .countdown").waitFor();
+check((await page.locator(".home-countdown .countdown-head").textContent()).includes(`to the end of ${plan.phases[0].id}`), "Home shows your countdown");
+await noHorizontalScroll("home countdown");
+await page.goto(`${base}${query}#/role/${plan.id}`);
+await page.getByRole("heading", { name: plan.title }).waitFor();
+await page.locator("#countdown summary").click();
+await page.locator("#countdown .check-line input").uncheck();
+await page.goto(`${base}${query}#/`);
+await page.getByRole("heading", { name: "Home" }).waitFor();
+await page.waitForTimeout(300);
+check(await page.locator(".home-countdown .countdown").count() === 0, "you can hide the countdown on Home");
+await page.goto(`${base}${query}#/role/${plan.id}`);
+await page.getByRole("heading", { name: plan.title }).waitFor();
+
 // Interview practice: the hub, a timed drill to the end, and a timed task whose clock survives a reload
 const bank = JSON.parse(readFileSync(new URL("../../site/content/interview.json", import.meta.url), "utf8"));
 await page.getByRole("link", { name: "Interview" }).click();

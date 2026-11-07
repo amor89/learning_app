@@ -523,6 +523,13 @@ details.drills .plain-list { margin-top: 8px; }
 .assessment { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 4px; }
 .check-line { display: flex; gap: 8px; align-items: flex-start; min-height: 32px; cursor: pointer; }
 .check-line input { width: 20px; height: 20px; margin-top: 1px; flex: none; }
+.countdown { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
+.countdown-body { display: flex; flex-direction: column; gap: 4px; }
+.countdown-head { font-size: 1.25rem; }
+.countdown-settings summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
+.countdown-form { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; align-items: center; margin-bottom: 8px; }
+.countdown-form .field-label { margin: 0; }
+.countdown-form input[type="date"] { font: 16px var(--sans); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; min-height: 44px; width: 100%; min-width: 0; box-sizing: border-box; }
 .assumptions li { justify-content: flex-start; }
 
 /* Search */

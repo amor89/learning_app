@@ -110,10 +110,15 @@ Every Track C lesson cites a row in this table. Each row was checked on the Micr
 | Purview Data Map scan of a same-tenant Fabric tenant: full, incremental and scoped scans; metadata and lineage; no classification or labels for Fabric; Purview permissions govern scanned metadata | GA (no preview label) | purview/register-scan-fabric-tenant (2026-04-28), purview/data-map-data-sources (2026-07-01) | C9-L4 |
 | OneLake catalog Govern: label coverage and unlabelled items, daily refresh, no subitems | No preview label; rolling out by region | governance/onelake-catalog-govern (2026-08-26) | C9-L4 |
 | Fabric activities in the Purview unified audit log; Audit (Standard) 180 days, Audit (Premium) up to 1 year by policy, 10 years with add-on | GA | admin/track-user-activities (2026-02-12), purview/audit-solutions-overview (2026-05-18) | C9-L4 |
+| Warehouse and SQL analytics endpoint row-level security: `CREATE SECURITY POLICY` with inline table-valued predicates that can join other tables | GA (no preview label) | data-warehouse/row-level-security (updated 2026-09-02) | C9-L5 |
+| OneLake security limits: 250 roles per item, 500 members per role; group changes take about an hour | GA | onelake/security/data-access-control-model (2026-08-28) | C9-L5 |
+| Microsoft Entra dynamic membership groups (Entra ID P1 per member; not a Fabric feature) | GA | entra/identity/users/groups-dynamic-membership (2026-08-13) | C9-L5 |
 | Lineage view, impact analysis | GA | governance/lineage, governance/impact-analysis | C9-L3 |
 | Git integration (some item types preview) | GA | cicd/git-integration/intro-to-git-integration (2026-07-21) | C10-L1 |
 | Deployment pipelines | GA | cicd/deployment-pipelines/intro-to-deployment-pipelines (2026-07-17) | C10-L2 |
 | Smoothing, throttling, surge protection, Capacity Metrics app | GA | enterprise/throttling (2026-08-14), surge-protection, metrics-app | C10-L3 |
+| F SKUs F2 to F8192, trial capacity of 64 CUs, F64 viewer licence floor, per-second billing and reservations | GA | enterprise/licenses (2026-06-15), enterprise/plan-capacity (2026-06-15) | C10-L4 |
+| Fabric SKU Estimator | Preview | enterprise/plan-capacity (2026-06-15) | C10-L4 |
 | Fabric IQ (ontology preview) | Ontology preview | iq/overview (2026-07-08) | Not taught |
 
 ## Known platform behaviours to verify before teaching
@@ -288,3 +293,8 @@ ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build en
 | ICO sample DPIA template: seven steps; likelihood remote/possible/probable, severity minimal/significant/severe, overall low/medium/high; residual risk and sign-off (E1-L4) | Search only | ICO template and Annex D copies seen through search results |
 | Deterministic and probabilistic matching, steward review, match-merge and match-link, survivorship rules, cross-reference and global IDs, chapter 10 (E2-L4) | Verified | Printed book, checked 7 November 2026 |
 | Automatic merges only on deterministic keys, in score bands (E2-L4) | Unverified | The lesson's recommended practice |
+| UK GDPR Article 4(5) definition of pseudonymisation (E1-L5) | Verified | legislation.gov.uk, 7 November 2026 |
+| Pseudonymised data stays personal data when the controller holds the additional information (recital 26) (E1-L5) | Search only | ICO pseudonymisation guidance; ico.org.uk refused automated requests |
+| Small-cell suppression thresholds such as fewer than 10 people are an organisational choice (E1-L5) | Unverified | Statistical disclosure control practice |
+| Business glossary sits within metadata management, DMBOK2 chapter 12 (E2-L5) | Search only | Secondary summaries; not in the extracts checked in the book |
+| RACI conventions: one accountable, at least one responsible (E2-L5) | Unverified | General governance practice |
