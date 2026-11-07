@@ -84,3 +84,10 @@ test("the built quizzes have ten questions with valid keys", () => {
     for (const item of q.questions) assert.ok(item.options.some((o) => o.id === item.answer), item.id);
   }
 });
+
+test("firstUnanswered points at the first question without an answer", () => {
+  const quiz = { questions: [{ id: "q1" }, { id: "q2" }, { id: "q3" }] };
+  assert.equal(pl.firstUnanswered(quiz, {}), 0);
+  assert.equal(pl.firstUnanswered(quiz, { q1: "a", q3: "b" }), 1);
+  assert.equal(pl.firstUnanswered(quiz, { q1: "a", q2: "b", q3: "c" }), -1);
+});

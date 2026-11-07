@@ -129,6 +129,7 @@ const b23 = index.tracks.flatMap((t) => t.modules).find((m) => m.id === "B23");
 check(await page.locator(".sheet-lesson").count() === b23.lessons.length, `module sheet shows all ${b23.lessons.length} B23 lessons`);
 check(await page.locator(".tabbar").isVisible(), "the tab bar stays on screen with a sheet open");
 await noHorizontalScroll("cheat sheet B23");
+check(await page.locator(".sheet .code").evaluateAll((blocks) => blocks.every((b) => b.scrollWidth <= b.clientWidth + 1)), "cheat sheet code wraps, so no block scrolls sideways");
 await noPdfLinks("cheat sheet B23");
 const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Save PDF" }).click()]);
 const saved = readFileSync(await download.path());
@@ -294,10 +295,20 @@ await page.getByRole("heading", { name: /^B0 / }).waitFor();
 check(await page.locator(".placement-card").count() === 1, "the start-here module page offers the placement quiz");
 await page.locator(".placement-card a", { hasText: "Take the placement quiz" }).click();
 await page.getByRole("heading", { name: /^Placement quiz/ }).waitFor();
-check(await page.locator(".placement-q").count() === 10, "placement quiz shows ten questions");
+check(await page.locator(".placement-q").count() === 10, "placement quiz has ten questions");
+check(await page.locator(".placement-q:visible").count() === 1, "the quiz shows one question per screen");
+check((await page.locator(".q-count").textContent()) === "Question 1 of 10", "the quiz shows which question you are on");
+await noHorizontalScroll("placement question");
+await page.screenshot({ path: `${shots}/08a-placement-question.png` });
+for (let i = 0; i < 9; i += 1) await page.getByRole("button", { name: "Next" }).click();
 await page.getByRole("button", { name: "See my result" }).click();
 check((await page.locator("[role=status].feedback").textContent()).includes("10 left"), "the quiz asks for every answer first");
-for (const q of quizB.questions) await page.locator(`input[name="pq-${q.id}"][value="${q.answer}"]`).check();
+check((await page.locator(".q-count").textContent()) === "Question 1 of 10", "and takes you back to the first unanswered question");
+for (const [i, q] of quizB.questions.entries()) {
+  await page.locator(`input[name="pq-${q.id}"][value="${q.answer}"]`).check();
+  if (i < quizB.questions.length - 1) await page.getByRole("button", { name: "Next" }).click();
+}
+check((await page.locator(".placement-head .muted").textContent()) === "10 answered", "the progress line counts the answers");
 await page.getByRole("button", { name: "See my result" }).click();
 await page.locator("#placement-result").waitFor();
 check((await page.locator(".drill-score").textContent()) === "10 of 10", "a perfect quiz scores 10 of 10");
@@ -317,9 +328,10 @@ check((await page.locator(".path-module", { hasText: "B0 " }).locator(".pill").t
 const quizD = placement.quizzes.find((q) => q.track === "D");
 await page.goto(`${base}${query}#/placement/D`);
 await page.getByRole("heading", { name: /^Placement quiz/ }).waitFor();
-for (const q of quizD.questions) {
+for (const [i, q] of quizD.questions.entries()) {
   const wrong = q.options.find((o) => o.id !== q.answer).id;
   await page.locator(`input[name="pq-${q.id}"][value="${wrong}"]`).check();
+  if (i < quizD.questions.length - 1) await page.getByRole("button", { name: "Next" }).click();
 }
 await page.getByRole("button", { name: "See my result" }).click();
 await page.locator("#placement-result").waitFor();
@@ -390,6 +402,7 @@ await page.getByRole("link", { name: "Interview" }).click();
 await page.getByRole("heading", { name: "Interview practice" }).waitFor();
 check(await page.locator(".interview .module-list > li").count() === bank.tasks.length, `interview lists ${bank.tasks.length} from-scratch tasks`);
 check(await page.locator("#drill-topic option").count() === bank.topics.length + 1, `drill offers ${bank.topics.length} topics and all topics`);
+check(await page.locator(".interview .mastery li").count() === 0 && await page.locator(".topic-empty").count() === 1, "the hub hides topic bars before your first drill");
 await noHorizontalScroll("interview hub");
 await page.selectOption("#drill-length", "5");
 await page.getByRole("button", { name: "Start drill" }).click();
@@ -415,6 +428,10 @@ await page.getByRole("heading", { name: "Drill complete" }).waitFor();
 check(await page.locator(".drill-results > li").count() === 5, "drill summary lists five answers");
 const practice = await page.evaluate(() => JSON.parse(localStorage.getItem("learning-app.progress")).interview);
 check(Object.keys(practice.theory).length === 5 && practice.drills.length === 1, "drill answers and the drill are saved");
+await page.getByRole("link", { name: "Interview home" }).click();
+await page.getByRole("heading", { name: "Interview practice" }).waitFor();
+const answeredTopics = new Set(Object.keys(practice.theory).map((id) => bank.questions.find((q) => q.id === id).topic));
+check(await page.locator(".interview .mastery li").count() === answeredTopics.size, `after a drill the hub shows bars for the ${answeredTopics.size} topics answered`);
 await page.goto(`${base}${query}#/interview/task/${bank.tasks[0].id}`);
 await page.getByRole("heading", { name: bank.tasks[0].title }).waitFor();
 check(await page.locator("textarea.editor").count() === 0, "task editor stays hidden until the clock starts");

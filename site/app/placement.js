@@ -18,6 +18,11 @@ export function unanswered(quiz, answers) {
   return quiz.questions.filter((q) => !answers[q.id]).length;
 }
 
+// The position of the first question without an answer, or -1 when all have one.
+export function firstUnanswered(quiz, answers) {
+  return quiz.questions.findIndex((q) => !answers[q.id]);
+}
+
 // Keeps the latest result per track. A retake clears an earlier skip until you choose again.
 export function recordPlacement(state, quiz, result, day) {
   state.placement ??= {};

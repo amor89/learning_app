@@ -244,11 +244,15 @@ export function pathwayView(app, pathwayId, stageId) {
 
 // Cheat sheets ------------------------------------------------------------------
 
+// Sheet code wraps on a phone. Comments padded into a column would then wrap onto a
+// line of their own, so the padding before a comment shrinks to two spaces.
+const COMMENT_PADDING = / {3,}(<span class="c[^"]*">#)/;
+
 function sheetLesson(lesson) {
   return h("section", { class: "sheet-lesson", id: `sheet-${lesson.id}` },
     h("h3", {}, h("a", { href: `#/lesson/${lesson.id}` }, `${lesson.id} ${lesson.title}`)),
     h("p", { class: "takeaway", html: lesson.takeaway_html }),
-    lesson.snippets.map((lines) => codeBlock(lines)),
+    lesson.snippets.map((lines) => codeBlock(lines.map((line) => line.replace(COMMENT_PADDING, "  $1")))),
     h("dl", { class: "recap-list" }, lesson.recap.flatMap((card) => [h("dt", { html: card.front_html }), h("dd", { html: card.back_html })])),
   );
 }

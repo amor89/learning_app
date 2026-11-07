@@ -65,7 +65,34 @@ export async function placementView(app, trackId) {
       h("div", { class: "placement-why", hidden: true }),
     );
   });
-  const list = h("ol", { class: "placement-list" }, questions);
+  const list = h("ol", { class: "placement-list paging" }, questions);
+
+  // One question per screen while you answer. The result shows them all again.
+  let at = 0;
+  const count = h("strong", { class: "q-count", tabindex: "-1" });
+  const answered = h("span", { class: "muted small" });
+  const bar = h("div", { class: "bar", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": quiz.questions.length, "aria-label": "Questions answered" }, h("div", { class: "bar-fill" }));
+  const head = h("div", { class: "placement-head" }, h("div", { class: "drill-head" }, count, answered), bar);
+  const prev = h("button", { type: "button", class: "btn secondary", onclick: () => show(at - 1) }, "Previous");
+  const next = h("button", { type: "button", class: "btn", onclick: () => show(at + 1) }, "Next");
+  const progress = () => {
+    const done = quiz.questions.length - pl.unanswered(quiz, answers);
+    answered.textContent = `${done} answered`;
+    bar.setAttribute("aria-valuenow", done);
+    bar.firstChild.style.width = `${Math.round((done / quiz.questions.length) * 100)}%`;
+  };
+  const show = (i, focus = true) => {
+    at = Math.max(0, Math.min(quiz.questions.length - 1, i));
+    questions.forEach((item, j) => (item.hidden = j !== at));
+    count.textContent = `Question ${at + 1} of ${quiz.questions.length}`;
+    prev.disabled = at === 0;
+    const last = at === quiz.questions.length - 1;
+    next.hidden = last;
+    submit.hidden = !last;
+    progress();
+    if (focus) count.focus({ preventScroll: true });
+  };
+  for (const item of questions) item.addEventListener("change", progress);
 
   const markQuestions = () => {
     quiz.questions.forEach((q, i) => {
@@ -126,6 +153,7 @@ export async function placementView(app, trackId) {
     if (left) {
       feedback.className = "feedback info";
       fill(feedback, h("p", {}, `Answer every question first. ${left} left.`));
+      show(pl.firstUnanswered(quiz, answers), false);
       return;
     }
     const graded = pl.gradeQuiz(quiz, answers);
@@ -134,21 +162,28 @@ export async function placementView(app, trackId) {
     app.save();
     fill(feedback);
     feedback.className = "feedback";
-    submit.hidden = true;
+    head.hidden = true;
+    pager.hidden = true;
+    list.classList.remove("paging");
+    for (const item of questions) item.hidden = false;
     markQuestions();
     showResult(graded);
     list.before(result);
     result.scrollIntoView();
   } }, "See my result");
 
-  return h(
+  const pager = h("div", { class: "actions pager" }, prev, next, submit);
+  const page = h(
     "section",
     { class: "page placement" },
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "Home"), " › ", h("a", { href: `#/track/${quiz.track}` }, `Track ${quiz.track}`)),
     h("h1", {}, `Placement quiz: ${quiz.track_title}`),
-    h("p", {}, `Ten questions on ${quiz.module.id} (${quiz.module.title}). Score ${quiz.pass_mark} or more and you can skip it and start at ${quiz.next.id} (${quiz.next.title}). There is no clock.`),
+    h("p", {}, `Ten questions on ${quiz.module.id} (${quiz.module.title}). Score ${quiz.pass_mark} or more and you can skip it and start at ${quiz.next.id} (${quiz.next.title}). There is no clock, and you can go back to change an answer.`),
+    head,
     list,
-    h("div", { class: "actions" }, submit),
     feedback,
+    pager,
   );
+  show(0, false);
+  return page;
 }
