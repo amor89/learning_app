@@ -71,6 +71,13 @@ export function applyKey(text, start, end, key) {
   return { text: next, start: start + key.length, end: start + key.length };
 }
 
+// The row's top edge in page coordinates, so it sits on the visual viewport's lower
+// edge, just above the on-screen keyboard. null when the browser has no visualViewport.
+export function barTop(vv, barHeight) {
+  if (!vv) return null;
+  return Math.max(0, Math.round(vv.offsetTop + vv.height - barHeight));
+}
+
 // True on phones and tablets, where the on-screen keyboard lacks these keys.
 export function wantsQuickKeys(win = globalThis) {
   return Boolean(win.matchMedia?.("(pointer: coarse)").matches);
@@ -107,15 +114,11 @@ export function installQuickKeys(doc = document, win = window) {
   doc.body.append(bar);
 
   // Sit just above the on-screen keyboard: the visual viewport ends where it starts.
+  // Only one of top and bottom may be set, or the row stretches between them.
   const place = () => {
-    const vv = win.visualViewport;
-    if (!vv) {
-      bar.style.top = "";
-      bar.style.bottom = "0px";
-      return;
-    }
-    bar.style.bottom = "";
-    bar.style.top = `${Math.round(vv.offsetTop + vv.height - bar.offsetHeight)}px`;
+    const top = barTop(win.visualViewport, bar.offsetHeight);
+    bar.style.top = top === null ? "auto" : `${top}px`;
+    bar.style.bottom = top === null ? "0px" : "auto";
   };
   win.visualViewport?.addEventListener("resize", () => target && place());
   win.visualViewport?.addEventListener("scroll", () => target && place());

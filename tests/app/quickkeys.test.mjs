@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { applyKey, KEYS, wantsQuickKeys } from "../../site/app/quickkeys.js";
+import { applyKey, barTop, KEYS, wantsQuickKeys } from "../../site/app/quickkeys.js";
 
 // Text with | marking the cursor, or [ and ] marking a selection.
 function parse(marked) {
@@ -67,4 +67,11 @@ test("quick keys show only on a coarse pointer", () => {
   assert.equal(wantsQuickKeys({ matchMedia: () => ({ matches: true }) }), true);
   assert.equal(wantsQuickKeys({ matchMedia: () => ({ matches: false }) }), false);
   assert.equal(wantsQuickKeys({}), false);
+});
+
+test("the row sits just above the keyboard", () => {
+  // iPhone with the keyboard open: the visual viewport is 400px tall, scrolled 120px down.
+  assert.equal(barTop({ offsetTop: 120, height: 400 }, 52), 468);
+  assert.equal(barTop({ offsetTop: 0, height: 30 }, 52), 0, "never above the page top");
+  assert.equal(barTop(undefined, 52), null, "no visualViewport: fall back to the bottom edge");
 });

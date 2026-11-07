@@ -250,6 +250,15 @@ await qkArea.fill("x = len");
 await qkArea.focus();
 await page.evaluate(() => { const a = document.querySelector(".exercise textarea.editor"); a.setSelectionRange(a.value.length, a.value.length); });
 await page.locator(".quick-keys").waitFor();
+const qkBox = await page.locator(".quick-keys").evaluate((bar) => ({ height: bar.getBoundingClientRect().height, top: bar.style.top, bottom: bar.style.bottom }));
+check(qkBox.height <= 56 && !(qkBox.top !== "auto" && qkBox.bottom !== "auto"), `the quick-key row stays one row tall (${JSON.stringify(qkBox)})`);
+// A short visual viewport, as with an iPhone keyboard open, must not stretch the row.
+await page.evaluate(() => {
+  const bar = document.querySelector(".quick-keys");
+  bar.style.top = "300px";
+  bar.style.bottom = "";
+});
+check((await page.locator(".quick-keys").evaluate((bar) => bar.getBoundingClientRect().height)) <= 56, "the row keeps its height wherever it is placed");
 await page.locator('.quick-keys button[aria-label="Brackets"]').tap();
 await page.locator('.quick-keys button[aria-label="Colon"]').tap();
 check((await qkArea.inputValue()) === "x = len(:)", `quick keys type into the editor (${await qkArea.inputValue()})`);
