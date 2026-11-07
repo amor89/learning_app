@@ -1,0 +1,356 @@
+id: E1-L4
+title: Writing the DPIA for a people model
+concept: |
+  Lesson E1-L3 showed when you need a DPIA. This lesson covers writing one for a model that scores people, such as attrition risk or promotion readiness.
+
+  UK GDPR **Article 35(7)** sets the minimum content:
+
+  1. a systematic **description** of the processing and its purposes;
+  2. an assessment of **necessity and proportionality**;
+  3. an assessment of the **risks** to people's rights and freedoms;
+  4. the **measures** that address those risks.
+
+  The ICO's sample template turns this into seven steps: identify the need, describe the processing, consult, assess necessity, identify and assess risks, identify measures, then sign off and record outcomes. You may adapt it.
+
+  **Risks.** For each risk, rate the likelihood of harm (remote, possible, probable) and its severity (minimal, significant, severe), then give an overall rating of low, medium or high. For a people model, name the harms plainly: a manager treats someone as a flight risk, or a group gets fewer promotion nominations.
+
+  **Fairness belongs in the risk section.** Report the test from lesson B13-L3: the model's flag rate for each group defined by a protected characteristic, the ratio between groups, and the threshold that would trigger action. A DPIA that says "the model is fair" with no figures is a statement, not an assessment.
+
+  **Measures and residual risk.** For each medium or high risk, record the measure, its effect (eliminated, reduced or accepted) and the residual risk.
+
+  **Sign-off.** Record the data protection officer's advice and who accepted each residual risk. If a high risk remains, you must consult the ICO before processing starts. Review the DPIA when the model, the data or the purpose changes.
+why_it_matters: |
+  A firm's DPIA for a promotion-readiness model said "bias has been considered". A year later, an internal review found women were flagged as ready at 0.6 times the rate of men with the same ratings. The DPIA held no fairness figures, no threshold and no owner, so nobody had checked. A DPIA with the flag-rate ratio and a trigger would have caught it at the first quarterly review.
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      # DPIA, promotion-readiness model
+      risks: bias has been considered
+      measures: the model will be monitored
+      sign_off: project manager
+    annotations:
+      - find: "risks: bias has been considered"
+        note: "No harm named, no likelihood, no severity, no figures."
+      - find: "measures: the model will be monitored"
+        note: "No metric, no threshold, no owner, no residual risk."
+      - find: "sign_off: project manager"
+        note: "No DPO advice recorded, and nobody named as accepting each residual risk."
+  strong:
+    code: |
+      # DPIA, promotion-readiness model, version 2
+      risks:
+        - id: R1
+          harm: a group receives fewer promotion nominations
+          likelihood: possible
+          severity: severe
+          overall: high
+          evidence: flag rate women 0.21, men 0.30, ratio 0.70 on 2025 data
+      measures:
+        - risk: R1
+          measure: recalibrate thresholds per review cycle; quarterly flag-rate ratio check, action below 0.80
+          effect: reduced
+          residual: medium
+          approved_by: HR director
+      dpo_advice: proceed with the quarterly check; review at the next model version
+      ico_consultation: not needed, no high residual risk
+    annotations:
+      - find: "harm: a group receives fewer promotion nominations"
+        note: "The harm in plain words, to people, not to the project."
+      - find: "evidence: flag rate women 0.21, men 0.30, ratio 0.70 on 2025 data"
+        note: "Figures from the fairness test, with the data they came from."
+      - find: "residual: medium"
+        note: "The risk after the measure, which decides whether to consult the ICO."
+      - find: "ico_consultation: not needed, no high residual risk"
+        note: "The Article 36 question, answered explicitly."
+  takeaway: |
+    Cover the four parts of Article 35(7). Name each harm, rate it, put fairness figures in the risk section, record measures and residual risk, and consult the ICO if a high risk remains.
+exercises:
+  - id: E1-L4-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which item is not one of the four parts Article 35(7) requires in a DPIA?
+    options:
+      - {id: a, text: "A return on investment calculation"}
+      - {id: b, text: "A description of the processing and its purposes"}
+      - {id: c, text: "An assessment of necessity and proportionality"}
+      - {id: d, text: "The measures that address the risks"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "The description is the first required part."
+      - answer: c
+        feedback: "Necessity and proportionality is the second required part."
+      - answer: d
+        feedback: "Measures are the fourth required part."
+    hints:
+      - "Article 35(7) is about risks to people."
+      - "Three options appear in the lesson's list of four."
+      - "The business case is not a DPIA part."
+    explanation: |
+      Description, necessity and proportionality, risks, and measures. A business case belongs elsewhere.
+
+  - id: E1-L4-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      After measures, one risk of a people model is still rated high. What must happen before processing starts?
+    options:
+      - {id: a, text: "Consult the ICO"}
+      - {id: b, text: "The project manager signs off the risk"}
+      - {id: c, text: "Nothing, as long as the DPIA is written"}
+      - {id: d, text: "Ask employees for consent"}
+    answer: a
+    reasons:
+      - {id: r1, text: "A high risk you cannot mitigate requires prior consultation with the ICO."}
+      - {id: r2, text: "Every DPIA must be sent to the ICO."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Sign-off records who accepted the risk, but a high residual risk still needs the ICO first."
+      - answer: c
+        feedback: "Writing the DPIA does not remove the duty to consult on a high residual risk."
+      - answer: d
+        feedback: "Consent does not replace prior consultation, and it is rarely valid for employees."
+      - answer: a|r2
+        feedback: "Right action, wrong reason. Only a high risk that remains after measures triggers prior consultation."
+    hints:
+      - "Which rating triggers prior consultation?"
+      - "Does every DPIA go to the ICO?"
+      - "High residual risk means the ICO first."
+    explanation: |
+      Prior consultation applies when a high risk remains after the measures.
+
+  - id: E1-L4-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the rating scales from the ICO's sample template.
+    template: |
+      Likelihood of harm:  remote, possible, [[g1]]
+      Severity of harm:    minimal, significant, [[g2]]
+      Overall risk:        low, medium, [[g3]]
+    gaps:
+      g1: {accepted: [probable], case_sensitive: false}
+      g2: {accepted: [severe], case_sensitive: false}
+      g3: {accepted: [high], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: likely}
+        feedback: "The ICO template uses remote, possible, probable."
+    hints:
+      - "Each scale has three steps."
+      - "The top of likelihood is more than possible."
+      - "`probable`, `severe`, `high`."
+    explanation: |
+      Remote, possible, probable. Minimal, significant, severe. Low, medium, high.
+
+  - id: E1-L4-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `dpia_outcome(risks: list[dict]) -> tuple[str, list[str]]`. Each risk is a dict with `"id"` and `"residual"`, where `"residual"` is `"low"`, `"medium"` or `"high"`.
+
+      Return `("consult_ico", ids)` with the sorted IDs of every risk whose residual is `"high"`, if there are any. Otherwise return `("proceed", [])`.
+
+      Raise `ValueError` if the list is empty, because a DPIA with no risks assessed is not finished, or if any residual is not one of the three levels.
+    primer: |
+      A list comprehension with a condition keeps matching items:
+
+      ```python
+      scores = [{"name": "a", "band": "top"}, {"name": "b", "band": "low"}]
+      [s["name"] for s in scores if s["band"] == "top"]   # ["a"]
+      ```
+
+      A function can return a tuple of two values: `return ("ok", [])`.
+    starter: |
+      def dpia_outcome(risks):
+          return ("proceed", [])
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: dpia_outcome
+          typed: true
+          docstring: true
+          message: "Give `dpia_outcome` type hints and a docstring."
+      tests:
+        - id: high
+          code: |
+            risks = [{"id": "R3", "residual": "high"}, {"id": "R1", "residual": "low"}, {"id": "R2", "residual": "high"}]
+            got = dpia_outcome(risks)
+            assert got == ("consult_ico", ["R2", "R3"]), got
+          message: "Return consult_ico with the sorted IDs of every high residual risk."
+        - id: proceed
+          code: |
+            got = dpia_outcome([{"id": "R1", "residual": "medium"}, {"id": "R2", "residual": "low"}])
+            assert got == ("proceed", []), got
+          message: "With no high residual risk, return (\"proceed\", [])."
+        - id: empty
+          code: |
+            try:
+                dpia_outcome([])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for a DPIA with no risks")
+          message: "Raise ValueError for an empty list. No risks assessed means the DPIA is not finished."
+        - id: bad_level
+          code: |
+            try:
+                dpia_outcome([{"id": "R1", "residual": "very high"}])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for an unknown level")
+          message: "Raise ValueError for a residual level other than low, medium or high."
+    solution: |
+      LEVELS = frozenset({"low", "medium", "high"})
+
+
+      def dpia_outcome(risks: list[dict]) -> tuple[str, list[str]]:
+          """Whether a DPIA can proceed or needs prior consultation with the ICO.
+
+          Args:
+              risks: Dicts with "id" and "residual" ("low", "medium" or "high").
+
+          Returns:
+              ("consult_ico", sorted high-risk IDs) if any residual risk is high,
+              otherwise ("proceed", []).
+
+          Raises:
+              ValueError: If no risks are given, or a residual level is unknown.
+          """
+          if not risks:
+              raise ValueError("a DPIA with no risks assessed is not finished")
+          for risk in risks:
+              if risk["residual"] not in LEVELS:
+                  raise ValueError(f"{risk['id']}: unknown residual level {risk['residual']}")
+          high = sorted(risk["id"] for risk in risks if risk["residual"] == "high")
+          if high:
+              return ("consult_ico", high)
+          return ("proceed", [])
+    seeded_bugs:
+      - |
+        def dpia_outcome(risks: list[dict]) -> tuple[str, list[str]]:
+            """An empty DPIA proceeds."""
+            for risk in risks:
+                if risk["residual"] not in {"low", "medium", "high"}:
+                    raise ValueError("unknown level")
+            high = sorted(r["id"] for r in risks if r["residual"] == "high")
+            return ("consult_ico", high) if high else ("proceed", [])
+      - |
+        def dpia_outcome(risks: list[dict]) -> tuple[str, list[str]]:
+            """Unknown levels pass silently."""
+            if not risks:
+                raise ValueError("empty")
+            high = sorted(r["id"] for r in risks if r["residual"] == "high")
+            return ("consult_ico", high) if high else ("proceed", [])
+      - |
+        def dpia_outcome(risks: list[dict]) -> tuple[str, list[str]]:
+            """Reports only the first high risk."""
+            if not risks:
+                raise ValueError("empty")
+            for risk in risks:
+                if risk["residual"] not in {"low", "medium", "high"}:
+                    raise ValueError("unknown level")
+                if risk["residual"] == "high":
+                    return ("consult_ico", [risk["id"]])
+            return ("proceed", [])
+    wrong_answers:
+      - answer: |
+          def dpia_outcome(risks: list[dict]) -> tuple[str, list[str]]:
+              """An empty DPIA proceeds."""
+              for risk in risks:
+                  if risk["residual"] not in {"low", "medium", "high"}:
+                      raise ValueError("unknown level")
+              high = sorted(r["id"] for r in risks if r["residual"] == "high")
+              return ("consult_ico", high) if high else ("proceed", [])
+        triggers: empty
+      - answer: |
+          def dpia_outcome(risks: list[dict]) -> tuple[str, list[str]]:
+              """Unknown levels pass silently."""
+              if not risks:
+                  raise ValueError("empty")
+              high = sorted(r["id"] for r in risks if r["residual"] == "high")
+              return ("consult_ico", high) if high else ("proceed", [])
+        triggers: bad_level
+      - answer: |
+          def dpia_outcome(risks: list[dict]) -> tuple[str, list[str]]:
+              """Reports only the first high risk."""
+              if not risks:
+                  raise ValueError("empty")
+              for risk in risks:
+                  if risk["residual"] not in {"low", "medium", "high"}:
+                      raise ValueError("unknown level")
+                  if risk["residual"] == "high":
+                      return ("consult_ico", [risk["id"]])
+              return ("proceed", [])
+        triggers: high
+    hints:
+      - "Check for an empty list and unknown levels before anything else."
+      - "Collect every high risk's ID, then sort them."
+      - "Return `(\"consult_ico\", ids)` only when the list of high IDs is not empty."
+    explanation: |
+      Validate first, then collect every high residual risk. One high risk is enough to require prior consultation, and the list tells the DPO which.
+
+  - id: E1-L4-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Plan the DPIA for an attrition-risk model that HR business partners will see for each employee.
+    slots:
+      - id: fairness
+        label: "Fairness in the risk section"
+        options:
+          - {id: figures, text: "Flag rates per group for each protected characteristic held, the ratio, and the action threshold"}
+          - {id: statement, text: "A statement that the vendor tested the model for bias"}
+        answer: figures
+      - id: consult
+        label: "Consultation step"
+        options:
+          - {id: views, text: "Seek views from staff and their representatives, and record them"}
+          - {id: skip, text: "Skip it, because the model only advises managers"}
+        answer: views
+      - id: review
+        label: "When to review the DPIA"
+        options:
+          - {id: change, text: "When the model, the data or the purpose changes, and at a set interval"}
+          - {id: never, text: "Never, once it is signed off"}
+        answer: change
+    model_answer: |
+      - Fairness is a risk to people, so it needs figures and a trigger in the risk section.
+      - Article 35(9) and the ICO's monitoring guidance both point to seeking staff views.
+      - A DPIA describes one version of the processing. When that changes, so must the assessment.
+    wrong_answers:
+      - answer: {fairness: statement}
+        feedback: "A vendor's claim is not your assessment. Test on your own population, as lesson B13-L3 shows."
+      - answer: {consult: skip}
+        feedback: "Advice to managers still affects how people are treated. Seek views, as lesson E3-L3 explains."
+      - answer: {review: never}
+        feedback: "Models are retrained and purposes drift. A DPIA that never changes stops describing the real processing."
+    hints:
+      - "What makes a fairness claim checkable?"
+      - "Whose views does Article 35(9) mention?"
+      - "Does the model stay the same for ever?"
+    explanation: |
+      Figures for fairness, recorded staff views, and a review trigger keep the DPIA true to the model as it runs.
+recap:
+  - front: "Article 35(7): four required parts of a DPIA"
+    back: "Description and purposes, necessity and proportionality, risks to people, and the measures that address them."
+  - front: "ICO template risk scales"
+    back: "Likelihood: remote, possible, probable. Severity: minimal, significant, severe. Overall: low, medium, high."
+  - front: "Where fairness goes in a DPIA"
+    back: "In the risk section, with flag rates per group, the ratio and the threshold for action."
+  - front: "High residual risk"
+    back: "Consult the ICO before processing starts."
+claims:
+  - claim: "UK GDPR Article 35(7) requires at least a systematic description of the processing and its purposes, an assessment of necessity and proportionality, an assessment of the risks to rights and freedoms, and the measures envisaged to address them."
+    status: search-only
+    source: "Article 35(7) text as retained in UK GDPR. Not re-checked against legislation.gov.uk, which was not reachable."
+  - claim: "The ICO's sample DPIA template has seven steps and rates likelihood (remote, possible, probable), severity (minimal, significant, severe) and overall risk (low, medium, high); measures record effect (eliminated, reduced, accepted) and residual risk; if a high residual risk is accepted, consult the ICO before going ahead."
+    status: search-only
+    source: "ICO sample DPIA template and the Annex D template of the Age Appropriate Design Code, seen through search results and mirrored copies, November 2026."

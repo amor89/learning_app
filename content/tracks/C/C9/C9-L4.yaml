@@ -1,0 +1,336 @@
+id: C9-L4
+title: Audit evidence, Purview scans, label coverage and the audit log
+concept: |
+  An auditor asks three questions about talent data. What do you hold? How is it protected? Who touched it? Answer each with evidence from a system, dated, not with a statement of intent. Fabric and Purview give you one source for each.
+
+  **What you hold: a Purview Data Map scan.** Register the Fabric tenant in the Microsoft Purview Data Map and scan it, in full, incrementally, or scoped to chosen workspaces. The scan brings in item metadata and lineage. For lakehouses it also reads tables and files. Two limits matter. The scan does not classify or label Fabric data. And once metadata reaches Purview, Purview permissions, not Fabric roles, decide who sees it, so restrict the collection that holds HR items.
+
+  **How it is protected: label coverage.** The **Govern** tab of the OneLake catalog reports the share of items with no sensitivity label, by workspace and item type. It refreshes once a day, and it does not count tables inside an item.
+
+  **Who touched it: the audit log.** Fabric records activities in the Microsoft Purview **unified audit log**. You need the Audit Logs role to search it. Export results to CSV, or script the search with `Search-UnifiedAuditLog`. **Audit (Standard)** keeps records for 180 days. **Audit (Premium)** keeps them up to a year by policy, longer with an add-on licence.
+
+  If your audit period is longer than your retention, export on a schedule into storage you control.
+
+  An evidence pack holds the scan date and scope, label coverage per workspace with the gaps listed, and the access records for sensitive items, each with the query that produced it. Status: the scan and the audit log are generally available. The Govern tab has no preview label but is still rolling out by region (Microsoft Learn, November 2026).
+why_it_matters: |
+  An internal audit asked who had opened the salary semantic model in the last financial year. The team ran an audit search in month 11. Audit (Standard) returned only the last six months, because the first five had expired. The finding read "access cannot be evidenced for 5 of 12 months". A monthly export would have closed it.
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      # Evidence pack, HR workspace
+      inventory: we know what is in there
+      labels: all sensitive items are labelled
+      access: run an audit search when the auditor asks
+    annotations:
+      - find: "inventory: we know what is in there"
+        note: "A belief, not evidence. Nothing shows when it was checked or what it covered."
+      - find: "labels: all sensitive items are labelled"
+        note: "No coverage figure and no list of gaps."
+      - find: "access: run an audit search when the auditor asks"
+        note: "Records past the 180-day retention will be gone by then."
+  strong:
+    code: |
+      # Evidence pack, HR workspace, period April 2026 to March 2027
+      inventory:
+        source: Purview Data Map scan, scoped to HR workspaces
+        run: 2027-04-02, incremental, 214 items
+      labels:
+        source: OneLake catalog, Govern, label coverage
+        coverage: 97% labelled, 6 unlabelled items listed with owners
+      access:
+        source: unified audit log, monthly CSV export to the evidence store
+        query: activities on hr_salaries_model, all users, each month
+      collection_access: Purview collection restricted to HR data stewards
+    annotations:
+      - find: "run: 2027-04-02, incremental, 214 items"
+        note: "Dated, scoped and counted. An auditor can repeat it."
+      - find: "coverage: 97% labelled, 6 unlabelled items listed with owners"
+        note: "A figure plus the gaps, each with someone to fix it."
+      - find: "source: unified audit log, monthly CSV export to the evidence store"
+        note: "Monthly exports keep a year of records that Audit (Standard) would drop after 180 days."
+      - find: "collection_access: Purview collection restricted to HR data stewards"
+        note: "Scanned metadata follows Purview permissions, so restrict who sees it."
+  takeaway: |
+    Answer what you hold, how it is protected and who touched it with dated system evidence. Export audit records before they expire, and restrict who sees scanned HR metadata in Purview.
+exercises:
+  - id: C9-L4-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which source answers "who opened the salary report last month?"
+    options:
+      - {id: a, text: "The unified audit log in Microsoft Purview"}
+      - {id: b, text: "A Purview Data Map scan"}
+      - {id: c, text: "Label coverage in the OneLake catalog"}
+      - {id: d, text: "The lineage view"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "A scan lists items and lineage. It records no user activity."
+      - answer: c
+        feedback: "Coverage shows which items carry labels, not who opened them."
+      - answer: d
+        feedback: "Lineage shows how items connect, not who used them."
+    hints:
+      - "The question is about people's actions."
+      - "Which source records activities?"
+      - "The audit log."
+    explanation: |
+      Fabric records user activities in the Purview unified audit log.
+
+  - id: C9-L4-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Your audit period is 12 months and you have Audit (Standard). What should you do?
+    options:
+      - {id: a, text: "Export audit records on a schedule into storage you control"}
+      - {id: b, text: "Search the log once, at the end of the period"}
+      - {id: c, text: "Nothing, because Audit (Standard) keeps records for a year"}
+      - {id: d, text: "Rely on the Data Map scan instead"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Audit (Standard) keeps records for 180 days, so the first months would expire before the end."}
+      - {id: r2, text: "Exports are needed because the portal cannot search more than seven days."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "By then, records older than 180 days have expired."
+      - answer: c
+        feedback: "Audit (Standard) keeps 180 days. A year needs Premium or your own exports."
+      - answer: d
+        feedback: "A scan records items, not who accessed them."
+      - answer: a|r2
+        feedback: "Right action, wrong reason. Seven days is only the default search range. Retention is the limit."
+    hints:
+      - "How long does Audit (Standard) keep records?"
+      - "Is that longer or shorter than the period?"
+      - "Export before records expire."
+    explanation: |
+      Records older than 180 days expire under Audit (Standard), so export on a schedule.
+
+  - id: C9-L4-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the three questions and their sources.
+    template: |
+      What do you hold?          a Purview Data Map [[g1]] of the Fabric tenant
+      How is it protected?       label [[g2]] in the OneLake catalog Govern tab
+      Who touched it?            the unified [[g3]] log
+    gaps:
+      g1: {accepted: [scan], case_sensitive: false}
+      g2: {accepted: [coverage], case_sensitive: false}
+      g3: {accepted: [audit], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: label}
+        feedback: "The scan lists items and lineage. It does not label Fabric data."
+    hints:
+      - "Inventory comes from scanning."
+      - "Protection is measured as a share of items labelled."
+      - "`scan`, `coverage`, `audit`."
+    explanation: |
+      A scan for inventory, label coverage for protection, the audit log for access.
+
+  - id: C9-L4-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `label_coverage(items: list[dict]) -> dict[str, float]`. Each item is a dict with `"workspace"` and `"label"`, where `"label"` is a label name or `None`.
+
+      Return, for each workspace that has items, the share of its items with a label, from 0.0 to 1.0. Return an empty dict for an empty list. Raise `ValueError` if an item has no `"workspace"` key.
+    primer: |
+      `dict.setdefault(key, default)` returns the value for `key`, adding `default` first if the key is missing:
+
+      ```python
+      counts = {}
+      counts.setdefault("red", [0, 0])[0] += 1
+      counts   # {"red": [1, 0]}
+      ```
+
+      `"key" in some_dict` checks whether a key exists: `"a" in {"a": 1}` is `True`.
+    starter: |
+      def label_coverage(items):
+          labelled = sum(1 for item in items if item["label"])
+          return {"all": labelled / len(items)}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: label_coverage
+          typed: true
+          docstring: true
+          message: "Give `label_coverage` type hints and a docstring."
+      tests:
+        - id: per_workspace
+          code: |
+            items = [
+                {"workspace": "hr", "label": "Highly Confidential"},
+                {"workspace": "hr", "label": "Confidential"},
+                {"workspace": "hr", "label": None},
+                {"workspace": "hr", "label": "General"},
+                {"workspace": "finance", "label": None},
+                {"workspace": "finance", "label": "Confidential"},
+            ]
+            got = label_coverage(items)
+            assert got == {"hr": 0.75, "finance": 0.5}, got
+          message: "Return the share of labelled items for each workspace."
+        - id: empty
+          code: |
+            assert label_coverage([]) == {}
+          message: "An empty list has no workspaces, so return an empty dict without dividing by zero."
+        - id: missing_workspace
+          code: |
+            try:
+                label_coverage([{"label": "General"}])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for an item without a workspace")
+          message: "Raise ValueError when an item has no workspace."
+    solution: |
+      def label_coverage(items: list[dict]) -> dict[str, float]:
+          """Share of items with a sensitivity label, per workspace.
+
+          Args:
+              items: Dicts with "workspace" and "label", where label is a name or None.
+
+          Returns:
+              Workspace to the share of its items that carry a label, from 0.0 to 1.0.
+
+          Raises:
+              ValueError: If an item has no "workspace" key.
+          """
+          counts: dict[str, list[int]] = {}
+          for item in items:
+              if "workspace" not in item:
+                  raise ValueError(f"item without a workspace: {item}")
+              tally = counts.setdefault(item["workspace"], [0, 0])
+              tally[1] += 1
+              if item.get("label") is not None:
+                  tally[0] += 1
+          return {workspace: labelled / total for workspace, (labelled, total) in counts.items()}
+    seeded_bugs:
+      - |
+        def label_coverage(items: list[dict]) -> dict[str, float]:
+            """One figure for the whole tenant."""
+            if not items:
+                return {}
+            labelled = sum(1 for item in items if item.get("label") is not None)
+            return {"all": labelled / len(items)}
+      - |
+        def label_coverage(items: list[dict]) -> dict[str, float]:
+            """Assumes every item has a workspace."""
+            counts = {}
+            for item in items:
+                tally = counts.setdefault(item["workspace"], [0, 0])
+                tally[1] += 1
+                if item.get("label") is not None:
+                    tally[0] += 1
+            return {w: l / t for w, (l, t) in counts.items()}
+      - |
+        def label_coverage(items: list[dict]) -> dict[str, float]:
+            """Counts unlabelled items instead of labelled ones."""
+            counts = {}
+            for item in items:
+                if "workspace" not in item:
+                    raise ValueError("no workspace")
+                tally = counts.setdefault(item["workspace"], [0, 0])
+                tally[1] += 1
+                if item.get("label") is None:
+                    tally[0] += 1
+            return {w: l / t for w, (l, t) in counts.items()}
+    wrong_answers:
+      - answer: |
+          def label_coverage(items: list[dict]) -> dict[str, float]:
+              """Assumes every item has a workspace."""
+              counts = {}
+              for item in items:
+                  tally = counts.setdefault(item["workspace"], [0, 0])
+                  tally[1] += 1
+                  if item.get("label") is not None:
+                      tally[0] += 1
+              return {w: l / t for w, (l, t) in counts.items()}
+        triggers: missing_workspace
+      - answer: |
+          def label_coverage(items: list[dict]) -> dict[str, float]:
+              """One figure for the whole tenant."""
+              if not items:
+                  return {}
+              labelled = sum(1 for item in items if item.get("label") is not None)
+              return {"all": labelled / len(items)}
+        triggers: per_workspace
+    hints:
+      - "Keep a [labelled, total] pair per workspace."
+      - "Check `\"workspace\" in item` before you use it."
+      - "Divide only for workspaces that have items, so an empty list returns `{}`."
+    explanation: |
+      Count per workspace, so the gaps show where to act. A workspace exists only once it has items, so no division is by zero.
+
+  - id: C9-L4-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Design the evidence process for the HR workspaces before the first annual audit.
+    slots:
+      - id: inventory
+        label: "Inventory"
+        options:
+          - {id: scan, text: "A scheduled Purview scan scoped to HR workspaces, with its date and item count kept"}
+          - {id: list, text: "A spreadsheet the team updates when it remembers"}
+        answer: scan
+      - id: access
+        label: "Access records"
+        options:
+          - {id: export, text: "Monthly export of audit records for sensitive items into a restricted store"}
+          - {id: later, text: "One audit search when the auditor asks"}
+        answer: export
+      - id: metadata
+        label: "Who sees scanned HR metadata in Purview"
+        options:
+          - {id: restricted, text: "A Purview collection limited to HR data stewards"}
+          - {id: inherit, text: "Whoever can see the items in Fabric, automatically"}
+        answer: restricted
+    model_answer: |
+      - A scheduled, scoped scan gives a dated inventory an auditor can repeat.
+      - Monthly exports keep records past the 180-day retention of Audit (Standard).
+      - Purview permissions, not Fabric roles, govern scanned metadata, so restrict the collection.
+    wrong_answers:
+      - answer: {inventory: list}
+        feedback: "A manual list is a statement, not system evidence."
+      - answer: {access: later}
+        feedback: "Records older than 180 days will have expired."
+      - answer: {metadata: inherit}
+        feedback: "Once in Purview, metadata follows Purview permissions. Fabric roles do not carry over."
+    hints:
+      - "Which option gives a date and a count?"
+      - "How long do audit records last?"
+      - "Whose permissions apply after the scan?"
+    explanation: |
+      Scheduled scans, monthly audit exports and a restricted Purview collection make evidence you can show.
+recap:
+  - front: "Three audit questions and their sources"
+    back: "What you hold: a Purview Data Map scan. How it is protected: label coverage in the OneLake catalog. Who touched it: the unified audit log."
+  - front: "Audit (Standard) retention"
+    back: "180 days. Audit (Premium) keeps up to a year by policy, longer with an add-on. Export on a schedule for longer periods."
+  - front: "Who sees scanned Fabric metadata in Purview?"
+    back: "Purview permissions decide, not Fabric roles. Restrict the collection that holds HR items."
+  - front: "What a Fabric scan does not do"
+    back: "It does not classify or label Fabric data. It brings in metadata and lineage."
+claims:
+  - claim: "A Purview Data Map scan of a same-tenant Fabric tenant supports full, incremental and scoped scans and brings in metadata and lineage. For items other than Power BI, only item-level metadata and lineage, with sub-item metadata for lakehouse tables and files. Once metadata is in Purview, Purview permissions, not Fabric permissions, decide who sees it."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/purview/register-scan-fabric-tenant (ms.date 2026-04-28, updated 2026-07-31)"
+  - claim: "The Data Map source table lists Fabric with no automatic classification and no sensitivity labels applied to Data Map assets, with lineage and live view supported."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/purview/data-map-data-sources (2026-07-01)"
+  - claim: "The OneLake catalog Govern section reports sensitivity label coverage and unlabelled items, refreshes from admin monitoring storage once a day, and does not include subitems such as tables. It is rolling out by region, with no preview label on the page."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/governance/onelake-catalog-govern (ms.date 2026-08-26)"
+  - claim: "Fabric activities are in the Microsoft Purview audit log; searching it needs the Audit Logs role. Audit (Standard) retains 180 days; Audit (Premium) up to one year by policy and ten years with an add-on licence; Search-UnifiedAuditLog and CSV export are available."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/admin/track-user-activities (2026-02-12) and https://learn.microsoft.com/en-us/purview/audit-solutions-overview (2026-05-18)"

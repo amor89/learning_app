@@ -107,6 +107,9 @@ Every Track C lesson cites a row in this table. Each row was checked on the Micr
 | OneLake security RLS and CLS: lakehouse, Spark, Direct Lake on OneLake, SQL analytics endpoint in user's identity mode | GA | onelake/security/read-secured-data (2026-08-28) | C9-L2 |
 | OneLake security: Eventhouse RLS, authorised third-party engines | Preview | onelake/security/read-secured-data (2026-08-28) | C9-L2 |
 | Sensitivity labels, protection policies, Purview DLP | GA | governance/information-protection (2026-07-13), protection-policies-overview | C9-L3 |
+| Purview Data Map scan of a same-tenant Fabric tenant: full, incremental and scoped scans; metadata and lineage; no classification or labels for Fabric; Purview permissions govern scanned metadata | GA (no preview label) | purview/register-scan-fabric-tenant (2026-04-28), purview/data-map-data-sources (2026-07-01) | C9-L4 |
+| OneLake catalog Govern: label coverage and unlabelled items, daily refresh, no subitems | No preview label; rolling out by region | governance/onelake-catalog-govern (2026-08-26) | C9-L4 |
+| Fabric activities in the Purview unified audit log; Audit (Standard) 180 days, Audit (Premium) up to 1 year by policy, 10 years with add-on | GA | admin/track-user-activities (2026-02-12), purview/audit-solutions-overview (2026-05-18) | C9-L4 |
 | Lineage view, impact analysis | GA | governance/lineage, governance/impact-analysis | C9-L3 |
 | Git integration (some item types preview) | GA | cicd/git-integration/intro-to-git-integration (2026-07-21) | C10-L1 |
 | Deployment pipelines | GA | cicd/deployment-pipelines/intro-to-deployment-pipelines (2026-07-17) | C10-L2 |
@@ -279,3 +282,6 @@ ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build en
 | ICE Regulations 2004: since 6 April 2020, 2% of employees, at least 15 and at most 2,500, in undertakings of 50 or more; Great Britain only (E3-L3) | Verified | legislation.gov.uk, 7 November 2026 |
 | BetrVG s87(1) no. 6 co-determination over monitoring systems; French CSE consultation (L2312-8) and the 2025 suspension rulings; Dutch WOR art. 27(1)(k) and (l) consent right (E3-L3) | Search only | Luther, GÖRG, CMS, CFDT, Rendement |
 | AI Act Article 26(7) duty to inform workers' representatives; Digital Omnibus on AI (Regulation (EU) 2026/1744) moves Annex III high-risk obligations to 2 December 2027 (E3-L3) | Unverified | Secondary sources disagree on the adoption month; the regulation number is not checked on EUR-Lex |
+| Article 35(7) minimum DPIA content (E1-L4) | Search only | Article text; not re-checked at source in this pass |
+| ICO sample DPIA template: seven steps; likelihood remote/possible/probable, severity minimal/significant/severe, overall low/medium/high; residual risk and sign-off (E1-L4) | Search only | ICO template and Annex D copies seen through search results |
+| Match bands, steward review, survivorship rules and cross-references for master data (E2-L4) | Unverified | General master data management practice, not a DMBOK2 quotation |
