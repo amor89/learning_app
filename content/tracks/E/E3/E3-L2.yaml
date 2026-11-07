@@ -1,0 +1,361 @@
+id: E3-L2
+title: Choosing a transfer mechanism and the transfer risk assessment
+concept: |
+  Once a flow is a restricted transfer, pick its route in a fixed order.
+
+  **1. Adequacy first.** If UK adequacy regulations cover the destination, the transfer can go ahead with no extra contract. The UK covers the EEA countries, among others. For the United States, the **UK Extension to the EU-US Data Privacy Framework**, the "data bridge", covers only US organisations certified under it.
+
+  **2. Appropriate safeguards next.** Three are common for talent data:
+
+  - the **IDTA**, the UK's own contract;
+  - the **UK Addendum**, which extends the EU standard contractual clauses to UK data. It suits a group that already signs the EU clauses;
+  - **binding corporate rules**, approved rules for transfers inside a group.
+
+  A contract alone is not enough. With a safeguard you complete a **transfer risk assessment** (TRA). The exporter, acting reasonably and proportionately, must judge that protection after the transfer is "not materially lower" than in the UK. UK law now calls this the **data protection test**. If the TRA fails, add protections, such as pseudonymised data or keys kept in the UK, or do not transfer.
+
+  **3. Exceptions last.** Article 49 lists them. Its last-resort exception covers only transfers that are not repetitive, so never a nightly pipeline.
+
+  Record "not yet assessed" as its own state. A TRA that is missing is not a TRA that passed, and it is not one that failed. In code, keep `None` apart from `False`. Lesson E1-L3 made the same point about missing register fields.
+why_it_matters: |
+  A firm signed the IDTA with its offshore analytics vendor and filed it. Two years later a regulator asked for the risk assessment behind it. There was none. The contract was valid, but the firm could not show the transfer met the test, and it had to pause the feed until a TRA was done.
+worked_example:
+  language: python
+  weak:
+    code: |
+      def can_transfer(adequate, safeguard, tra_passed):
+          if adequate or safeguard:
+              return True
+          return False
+    annotations:
+      - find: "if adequate or safeguard:"
+        note: "A signed safeguard alone passes. The TRA result is never read."
+      - find: "def can_transfer(adequate, safeguard, tra_passed):"
+        note: "A yes or no hides which route applied, so the register cannot record it."
+  strong:
+    code: |
+      SAFEGUARDS = frozenset({"IDTA", "Addendum", "BCR"})
+
+
+      def transfer_route(adequate: bool, safeguard: str | None, tra_passed: bool | None) -> str:
+          """The route for a restricted transfer: adequacy, safeguards or stop."""
+          if adequate:
+              return "adequacy"
+          if safeguard is None:
+              return "stop"
+          if safeguard not in SAFEGUARDS:
+              raise ValueError(f"unknown safeguard: {safeguard}")
+          if tra_passed is None:
+              raise ValueError("complete a transfer risk assessment first")
+          return "safeguards" if tra_passed else "stop"
+    annotations:
+      - find: "if adequate:"
+        note: "Adequacy comes first and needs no TRA."
+      - find: "if tra_passed is None:"
+        note: "Not yet assessed is its own state. It fails loudly instead of passing quietly."
+      - find: "return \"safeguards\" if tra_passed else \"stop\""
+        note: "A failed TRA stops the transfer until protections are added."
+  takeaway: |
+    Adequacy first, then a safeguard with a TRA that passes, then a narrow exception. Keep "not assessed" apart from "failed".
+exercises:
+  - id: E3-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Talent data goes to a company in a country covered by UK adequacy regulations. What else does the transfer need?
+    options:
+      - {id: a, text: "Nothing more for the transfer itself"}
+      - {id: b, text: "An IDTA and a transfer risk assessment"}
+      - {id: c, text: "Explicit consent from each employee"}
+      - {id: d, text: "Approval from the ICO"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "Safeguards and a TRA are for destinations without adequacy."
+      - answer: c
+        feedback: "Consent is a narrow exception, and adequacy makes it unnecessary."
+      - answer: d
+        feedback: "Adequacy regulations need no approval case by case."
+    hints:
+      - "Which route comes first?"
+      - "What does adequacy mean for the destination?"
+      - "Adequacy is enough on its own."
+    explanation: |
+      Adequacy regulations cover the transfer. The rest of UK GDPR, such as a lawful basis, still applies to the processing.
+
+  - id: E3-L2-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A group already signs the EU standard contractual clauses for its EU offices. Which safeguard fits its UK transfers best?
+    options:
+      - {id: a, text: "The UK Addendum"}
+      - {id: b, text: "Explicit consent"}
+      - {id: c, text: "No safeguard, because the EU clauses cover UK data"}
+      - {id: d, text: "An exception for each transfer"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The Addendum extends the EU clauses the group already uses to UK data."}
+      - {id: r2, text: "The Addendum removes the need for a transfer risk assessment."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: c
+        feedback: "The EU clauses alone do not cover transfers under UK GDPR. The Addendum adapts them."
+      - answer: b
+        feedback: "Consent is a narrow exception, rarely valid for employees."
+      - answer: d
+        feedback: "Exceptions suit occasional transfers, not regular group flows."
+      - answer: a|r2
+        feedback: "Right safeguard, wrong reason. Every safeguard still needs a TRA."
+    hints:
+      - "Which option reuses what the group already signs?"
+      - "Does any safeguard skip the TRA?"
+      - "The UK Addendum, with a TRA."
+    explanation: |
+      The Addendum adds UK terms to the EU clauses. A TRA is still required.
+
+  - id: E3-L2-E3
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `transfer_route(adequate: bool, safeguard: str | None, tra_passed: bool | None) -> str`.
+
+      - If `adequate` is true, return `"adequacy"`.
+      - Otherwise, if `safeguard` is `None`, return `"stop"`.
+      - If `safeguard` is not one of `"IDTA"`, `"Addendum"` or `"BCR"`, raise `ValueError`.
+      - If `tra_passed` is `None`, raise `ValueError`: the assessment is missing.
+      - Return `"safeguards"` if `tra_passed` is true, otherwise `"stop"`.
+    primer: |
+      `x is None` is true only for `None`. A falsy test such as `not x` is also true for `False`, `0` and `""`, so it cannot tell "missing" from "failed":
+
+      ```python
+      score = 0
+      score is None   # False: a score of 0 exists
+      not score       # True: 0 is falsy
+      ```
+
+      `frozenset` makes a fixed set. `in` checks membership: `"red" in frozenset({"red", "blue"})` is `True`.
+    starter: |
+      def transfer_route(adequate, safeguard, tra_passed):
+          if adequate or safeguard:
+              return "adequacy"
+          return "stop"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: transfer_route
+          typed: true
+          docstring: true
+          message: "Give `transfer_route` type hints and a docstring."
+      tests:
+        - id: adequacy
+          code: |
+            assert transfer_route(True, None, None) == "adequacy"
+            assert transfer_route(True, "IDTA", False) == "adequacy"
+          message: "Adequacy comes first, whatever the other arguments say."
+        - id: safeguards
+          code: |
+            for name in ["IDTA", "Addendum", "BCR"]:
+                got = transfer_route(False, name, True)
+                assert got == "safeguards", (name, got)
+          message: "A known safeguard with a passed TRA returns \"safeguards\"."
+        - id: stop
+          code: |
+            assert transfer_route(False, None, None) == "stop"
+            assert transfer_route(False, "IDTA", False) == "stop"
+          message: "No safeguard, or a failed TRA, returns \"stop\"."
+        - id: missing_tra
+          code: |
+            try:
+                transfer_route(False, "IDTA", None)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for a missing TRA")
+          message: "Raise ValueError when the TRA is missing. Missing is not the same as failed."
+        - id: unknown
+          code: |
+            try:
+                transfer_route(False, "a handshake", True)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for an unknown safeguard")
+          message: "Raise ValueError for a safeguard that is not IDTA, Addendum or BCR."
+    solution: |
+      SAFEGUARDS = frozenset({"IDTA", "Addendum", "BCR"})
+
+
+      def transfer_route(adequate: bool, safeguard: str | None, tra_passed: bool | None) -> str:
+          """The route for a restricted transfer.
+
+          Args:
+              adequate: True if UK adequacy regulations cover the destination.
+              safeguard: "IDTA", "Addendum", "BCR", or None if there is none.
+              tra_passed: The transfer risk assessment result, or None if not done.
+
+          Returns:
+              "adequacy", "safeguards" or "stop".
+
+          Raises:
+              ValueError: For an unknown safeguard, or a safeguard with no assessment.
+          """
+          if adequate:
+              return "adequacy"
+          if safeguard is None:
+              return "stop"
+          if safeguard not in SAFEGUARDS:
+              raise ValueError(f"unknown safeguard: {safeguard}")
+          if tra_passed is None:
+              raise ValueError("complete a transfer risk assessment first")
+          return "safeguards" if tra_passed else "stop"
+    seeded_bugs:
+      - |
+        def transfer_route(adequate: bool, safeguard: str | None, tra_passed: bool | None) -> str:
+            """A signed safeguard passes without its assessment."""
+            if adequate:
+                return "adequacy"
+            if safeguard is None:
+                return "stop"
+            if safeguard not in {"IDTA", "Addendum", "BCR"}:
+                raise ValueError("unknown safeguard")
+            return "safeguards"
+      - |
+        def transfer_route(adequate: bool, safeguard: str | None, tra_passed: bool | None) -> str:
+            """A missing assessment is treated as a failed one."""
+            if adequate:
+                return "adequacy"
+            if safeguard is None:
+                return "stop"
+            if safeguard not in {"IDTA", "Addendum", "BCR"}:
+                raise ValueError("unknown safeguard")
+            return "safeguards" if tra_passed else "stop"
+      - |
+        def transfer_route(adequate: bool, safeguard: str | None, tra_passed: bool | None) -> str:
+            """Any safeguard name is accepted."""
+            if adequate:
+                return "adequacy"
+            if safeguard is None:
+                return "stop"
+            if tra_passed is None:
+                raise ValueError("complete a transfer risk assessment first")
+            return "safeguards" if tra_passed else "stop"
+    wrong_answers:
+      - answer: |
+          def transfer_route(adequate: bool, safeguard: str | None, tra_passed: bool | None) -> str:
+              """A missing assessment is treated as a failed one."""
+              if adequate:
+                  return "adequacy"
+              if safeguard is None:
+                  return "stop"
+              if safeguard not in {"IDTA", "Addendum", "BCR"}:
+                  raise ValueError("unknown safeguard")
+              return "safeguards" if tra_passed else "stop"
+        triggers: missing_tra
+      - answer: |
+          def transfer_route(adequate: bool, safeguard: str | None, tra_passed: bool | None) -> str:
+              """Any safeguard name is accepted."""
+              if adequate:
+                  return "adequacy"
+              if safeguard is None:
+                  return "stop"
+              if tra_passed is None:
+                  raise ValueError("complete a transfer risk assessment first")
+              return "safeguards" if tra_passed else "stop"
+        triggers: unknown
+    hints:
+      - "Check the routes in order: adequacy, then the safeguard, then the assessment."
+      - "Use `is None` for the missing assessment, so `False` still means failed."
+      - "Keep the three safeguard names in a `frozenset` constant."
+    explanation: |
+      Adequacy first, then a known safeguard whose assessment exists and passed. A missing assessment raises, because it is not a failure you can act on: it is work not yet done.
+
+  - id: E3-L2-E4
+    type: order
+    difficulty: 3
+    prompt: |
+      Talent data will go to an analytics vendor in a country without UK adequacy. Put the steps in order.
+    items:
+      - {id: adequacy, text: "Confirm no adequacy regulations cover the destination"}
+      - {id: safeguard, text: "Choose a safeguard, such as the IDTA"}
+      - {id: tra, text: "Complete the transfer risk assessment against the data protection test"}
+      - {id: extra, text: "Add protections the assessment calls for, such as pseudonymised identifiers"}
+      - {id: start, text: "Start the transfer and record the route"}
+    answer: [adequacy, safeguard, tra, extra, start]
+    wrong_answers:
+      - answer: [adequacy, safeguard, start, tra, extra]
+        feedback: "The assessment comes before the first transfer, not after."
+      - answer: [safeguard, adequacy, tra, extra, start]
+        feedback: "Check adequacy first. If it applies, you need no safeguard."
+    hints:
+      - "Which route comes first?"
+      - "When is the assessment done: before or after data moves?"
+      - "Protections follow from the assessment."
+    explanation: |
+      Rule out adequacy, choose a safeguard, assess, add protections, then transfer and record.
+
+  - id: E3-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Set the transfer policy for a nightly feed of performance ratings to a group company in a country without adequacy.
+    slots:
+      - id: mechanism
+        label: "Mechanism"
+        options:
+          - {id: bcr, text: "Binding corporate rules or the IDTA between the two companies"}
+          - {id: exception, text: "An exception, because the group needs the data"}
+        answer: bcr
+      - id: tra
+        label: "Assessment"
+        options:
+          - {id: tra, text: "A transfer risk assessment before the first run, reviewed when the law there changes"}
+          - {id: none, text: "No assessment, because the contract is signed"}
+        answer: tra
+      - id: minimise
+        label: "Data sent"
+        options:
+          - {id: pseudo, text: "Pseudonymised employee IDs, with the key kept in the UK"}
+          - {id: full, text: "Full records, so the group team need not ask again"}
+        answer: pseudo
+    model_answer: |
+      - A regular group feed needs a safeguard. Exceptions are for occasional transfers.
+      - Every safeguard needs an assessment, and it goes stale when the destination's law changes.
+      - Pseudonymised IDs with the key in the UK lower the risk the assessment measures.
+    wrong_answers:
+      - answer: {mechanism: exception}
+        feedback: "A nightly feed is not occasional. Exceptions do not fit."
+      - answer: {tra: none}
+        feedback: "A signed safeguard still needs a transfer risk assessment."
+      - answer: {minimise: full}
+        feedback: "Send only what the purpose needs. Lesson E1-L2 covers data minimisation."
+    hints:
+      - "Is a nightly feed occasional?"
+      - "Does a contract replace the assessment?"
+      - "Which option sends less identifiable data?"
+    explanation: |
+      A safeguard, a live assessment and minimised data make a regular group transfer defensible.
+recap:
+  - front: "Order of routes"
+    back: "Adequacy first, then a safeguard with a transfer risk assessment, then a narrow exception."
+  - front: "Common safeguards for talent data"
+    back: "The IDTA, the UK Addendum to the EU standard contractual clauses, and binding corporate rules."
+  - front: "The data protection test"
+    back: "With a safeguard, the exporter judges, reasonably and proportionately, that protection is not materially lower than in the UK."
+  - front: "Missing or failed?"
+    back: "A missing assessment is work not done. Keep `None` apart from `False` in code."
+claims:
+  - claim: "Under Article 46(1A), as inserted by the Data (Use and Access) Act 2025, a transfer under appropriate safeguards needs the controller or processor, acting reasonably and proportionately, to consider that the data protection test is met."
+    status: verified
+    source: "https://www.legislation.gov.uk/ukpga/2025/18/schedule/7, checked 7 November 2026."
+  - claim: "With the IDTA or the UK Addendum, the exporter completes a transfer risk assessment."
+    status: search-only
+    source: "Kennedys and Freshfields commentary on the ICO's January 2026 guidance, seen through search results, November 2026. ico.org.uk refused automated requests."
+  - claim: "The UK Extension to the EU-US Data Privacy Framework, the 'data bridge', covers transfers only to US organisations on the Data Privacy Framework List as participating in the UK Extension. In force 12 October 2023."
+    status: verified
+    source: "https://www.legislation.gov.uk/uksi/2023/1028/made, regulations 1(2) and 3(2)(a), checked 7 November 2026."
+  - claim: "Binding corporate rules are an appropriate safeguard under Article 46(2)(b). Article 49's last-resort exception applies only if the transfer is not repetitive and concerns a limited number of data subjects."
+    status: verified
+    source: "https://www.legislation.gov.uk/eur/2016/679/article/46 and https://www.legislation.gov.uk/eur/2016/679/article/49, checked 7 November 2026."

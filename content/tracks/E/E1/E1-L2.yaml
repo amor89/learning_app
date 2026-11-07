@@ -2,7 +2,7 @@ id: E1-L2
 title: A lawful basis for each use of talent data
 
 concept: |
-  Article 6 of the UK GDPR gives **six lawful bases**. Each use of personal data needs one that fits it:
+  Article 6 of the UK GDPR gives **seven lawful bases**. Each use of personal data needs one that fits it:
 
   - **consent**
   - **contract**, to perform a contract with the person, such as paying their salary
@@ -10,8 +10,9 @@ concept: |
   - **vital interests**, to protect someone's life
   - **public task**
   - **legitimate interests**
+  - **recognised legitimate interests**
 
-  Since 5 February 2026, the Data (Use and Access) Act 2025 adds **recognised legitimate interests**: a short, fixed list of purposes, such as safeguarding and crime prevention, that skip the balancing test. Commercial uses are not on it.
+  The seventh came with the Data (Use and Access) Act 2025 on 5 February 2026. It covers only the purposes listed in Annex 1 of the UK GDPR, such as safeguarding, crime and emergencies, and it has no balancing test. Workforce analytics is not on the list.
 
   **Employers rarely rely on consent.** The ICO's view is that the power imbalance between employer and worker makes it hard for consent to be freely given. A worker who fears saying no has no genuine choice. Use another basis.
 
@@ -21,7 +22,7 @@ concept: |
   2. **Necessity**: does the processing serve it, and is there a less intrusive way?
   3. **Balancing**: do the person's interests, rights and freedoms override yours? Ask what a reasonable person would expect.
 
-  Two principles from Article 5 shape the platform. **Purpose limitation**: a basis covers the purposes you specified. Payroll under contract does not cover an attrition model. A new purpose needs its own check. **Data minimisation**: hold only the data each purpose needs.
+  Two principles from Article 5 shape the platform. **Purpose limitation**, Article 5(1)(b): a basis covers the purposes you specified. Payroll under contract does not cover an attrition model. A new purpose needs its own check. **Data minimisation**, Article 5(1)(c): hold only the data each purpose needs.
 
 why_it_matters: |
   A firm launched an engagement survey and stated that consent was its lawful basis. Two years later it fed the answers into a promotion-readiness model. Staff complained that they had never agreed to that use, and some withdrew consent, which removed their records from every analysis. A legitimate interests assessment for each purpose, done before launch, would have shown that the promotion use failed the balancing test.
@@ -204,8 +205,8 @@ exercises:
       Legal duties use legal obligation. Running the employment relationship uses contract or legitimate interests. A new analytics purpose gets its own assessment.
 
 recap:
-  - front: "The six lawful bases"
-    back: "Consent, contract, legal obligation, vital interests, public task, legitimate interests."
+  - front: "The seven lawful bases"
+    back: "Consent, contract, legal obligation, vital interests, public task, legitimate interests, and recognised legitimate interests since 5 February 2026."
   - front: "Consent for employee data"
     back: "Rarely appropriate. The power imbalance makes it hard to give freely. Use another basis."
   - front: "Legitimate interests assessment"
@@ -213,18 +214,18 @@ recap:
   - front: "Purpose limitation"
     back: "A basis covers the purposes you specified. A new purpose, such as an attrition model, needs its own check."
   - front: "Recognised legitimate interests"
-    back: "Added by the Data (Use and Access) Act 2025, in force 5 February 2026. A fixed list of purposes with no balancing test. Not for commercial uses."
+    back: "Article 6(1)(ea), from 5 February 2026. Only the purposes in Annex 1, with no balancing test."
 
 claims:
-  - claim: "Six Article 6 lawful bases; a new purpose needs a lawful basis that fits it; Article 5(1)(c) data minimisation and purpose limitation."
-    status: search-only
-    source: "ICO guidance 'Principle (b): Purpose limitation', 'Principle (c): Data minimisation' and 'A guide to lawful basis' (ico.org.uk), seen through search results, November 2026."
+  - claim: "Article 6(1) lists seven lawful bases since 5 February 2026; point (ea) is recognised legitimate interest. Purpose limitation is Article 5(1)(b) and data minimisation Article 5(1)(c). Article 8A sets the test for whether a new purpose is compatible."
+    status: verified
+    source: "https://www.legislation.gov.uk/eur/2016/679/article/6, /article/5 and /article/8A, checked 7 November 2026."
   - claim: "Consent is not usually appropriate for employers because of the imbalance of power; not banned where refusing has no adverse consequences."
     status: search-only
     source: "ICO guidance 'Data protection and monitoring workers' and 'Data protection and workers' health information' (ico.org.uk), seen through search results, November 2026."
   - claim: "Legitimate interests three-part test: purpose, necessity, balancing; reasonable expectations judged objectively; record in an LIA before processing."
     status: search-only
     source: "ICO guidance 'What is the legitimate interests basis?' and 'Legitimate interests' (ico.org.uk), seen through search results, November 2026."
-  - claim: "Recognised legitimate interests came into force on 5 February 2026 (Data (Use and Access) Act 2025, Commencement No. 6, SI 2026/82); listed purposes skip the balancing test; not for commercial processing."
-    status: search-only
-    source: "Commentary from Alston & Bird (January 2026), Pearl Cohen and bratby.law, seen through search results, November 2026. legislation.gov.uk was not reachable from the build environment."
+  - claim: "Recognised legitimate interests came into force on 5 February 2026 (section 70, SI 2026/82). Under Article 6(5) the basis applies only if processing meets a condition in Annex 1, with no balancing clause."
+    status: verified
+    source: "https://www.legislation.gov.uk/uksi/2026/82/made and https://www.legislation.gov.uk/eur/2016/679/article/6, checked 7 November 2026."

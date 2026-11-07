@@ -1,0 +1,350 @@
+id: E2-L4
+title: People master data, match rules and survivorship
+concept: |
+  Lesson E2-L1 named the problem: one person, two employee IDs. Master data management fixes it in two steps, and each step needs a written rule that the master data owner signs off.
+
+  **Match: which records are the same person?**
+
+  - A **deterministic** rule matches on exact keys, such as national insurance number plus date of birth. It is easy to explain and misses typos.
+  - A **probabilistic** rule scores similarity across fields, such as name, date of birth and email, and matches above a threshold. It catches more and makes some false matches.
+
+  Run both in bands. Above a high score, merge automatically. Below a low score, keep the records apart. In between, send the pair to a **data steward** queue. A false merge mixes two people's salaries and appraisals, which is worse than a missed match.
+
+  **Survivorship: which value wins?** Once records match, the **golden record** takes each field from one of them. Write a rule per field:
+
+  - **Source priority**: the HR system wins for legal name and grade, the learning platform for course history.
+  - **Most recent**: for a home address, the latest update wins.
+  - **Most complete**: a value beats a missing one. A blank must never overwrite a value.
+
+  Keep a **cross-reference** from the golden ID to every source ID it absorbed. Then a later delivery from any source still finds its person, and an unmerge stays possible when a steward finds a false match.
+
+  The rules are data, kept in a versioned file the owner signs off, not logic buried in a notebook.
+why_it_matters: |
+  A firm's master data job merged two employees called Daniel Hughes, born in the same year, because its rule matched on name and birth year only. For three weeks one Daniel saw the other's performance rating in the self-service portal. The firm reported the breach to the regulator, and rewrote the rule to need a national insurance number match before any automatic merge.
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      # Person matching, talent platform
+      match: same first name, surname and birth year
+      merge: automatic
+      survivorship: the last record loaded wins every field
+    annotations:
+      - find: "match: same first name, surname and birth year"
+        note: "Two different people share these often in a large firm."
+      - find: "merge: automatic"
+        note: "No steward review for uncertain pairs, so false merges go live."
+      - find: "survivorship: the last record loaded wins every field"
+        note: "A blank or stale field from the latest load can overwrite a correct value."
+  strong:
+    code: |
+      # Person matching, talent platform, version 3, signed off by the people master data owner
+      match:
+        auto_merge: national insurance number and date of birth agree
+        steward_review: name, date of birth and email score 0.80 to 0.95
+        keep_apart: score below 0.80
+      survivorship:
+        legal_name: {rule: source_priority, order: [hr_system, payroll, learning]}
+        grade: {rule: source_priority, order: [hr_system, payroll]}
+        home_address: {rule: most_recent}
+        any_field: never overwrite a value with a blank
+      cross_reference: golden ID to every source ID, kept for unmerge
+    annotations:
+      - find: "auto_merge: national insurance number and date of birth agree"
+        note: "Automatic merges only on a deterministic key."
+      - find: "steward_review: name, date of birth and email score 0.80 to 0.95"
+        note: "The uncertain band goes to a person."
+      - find: "legal_name: {rule: source_priority, order: [hr_system, payroll, learning]}"
+        note: "A rule per field, with the trusted source first."
+      - find: "cross_reference: golden ID to every source ID, kept for unmerge"
+        note: "Source IDs stay findable, and a false merge can be undone."
+  takeaway: |
+    Match in bands, with only deterministic keys merging automatically. Choose each field's value by a written rule, never let a blank win, and keep the cross-reference.
+exercises:
+  - id: E2-L4-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      What does a survivorship rule decide?
+    options:
+      - {id: a, text: "Which value each field of the golden record takes"}
+      - {id: b, text: "Which records belong to the same person"}
+      - {id: c, text: "Who may see the golden record"}
+      - {id: d, text: "How long the source records are kept"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "That is the match rule. Survivorship comes after the match."
+      - answer: c
+        feedback: "That is access control, a data security question."
+      - answer: d
+        feedback: "That is retention."
+    hints:
+      - "Survivorship runs after matching."
+      - "It works field by field."
+      - "Which value survives."
+    explanation: |
+      Matching finds the records. Survivorship picks each field's value for the golden record.
+
+  - id: E2-L4-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A probabilistic match scores 0.87 for two employee records. Your bands are: merge above 0.95, keep apart below 0.80. What happens?
+    options:
+      - {id: a, text: "The pair goes to the data steward queue"}
+      - {id: b, text: "The records merge automatically"}
+      - {id: c, text: "The records stay apart and nobody reviews them"}
+      - {id: d, text: "The newest record replaces the older one"}
+    answer: a
+    reasons:
+      - {id: r1, text: "A score between the bands is uncertain, and a false merge mixes two people's data."}
+      - {id: r2, text: "Stewards review every match, whatever its score."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "0.87 is below the merge band."
+      - answer: c
+        feedback: "0.87 is above the keep-apart band. Someone must decide."
+      - answer: d
+        feedback: "Replacing a record loses its source ID and history."
+      - answer: a|r2
+        feedback: "Right action, wrong reason. Stewards see only the uncertain band, or the queue would never empty."
+    hints:
+      - "Which band holds 0.87?"
+      - "Who decides uncertain pairs?"
+      - "The steward queue."
+    explanation: |
+      Scores between the two thresholds are uncertain, so a person decides.
+
+  - id: E2-L4-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the survivorship rules.
+    template: |
+      legal_name:    source [[g1]], the HR system first
+      home_address:  most [[g2]] update wins
+      any field:     never overwrite a value with a [[g3]]
+    gaps:
+      g1: {accepted: [priority], case_sensitive: false}
+      g2: {accepted: [recent], case_sensitive: false}
+      g3: {accepted: [blank, "null", "None", missing value], case_sensitive: false}
+    wrong_answers:
+      - answer: {g2: complete}
+        feedback: "An address changes when someone moves. The latest update is the best guess, so the rule is most recent."
+    hints:
+      - "The trusted system wins for legal name."
+      - "Addresses change over time."
+      - "`priority`, `recent`, `blank`."
+    explanation: |
+      Source priority for legal name, most recent for address, and a blank never wins.
+
+  - id: E2-L4-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `survive(records: list[dict], priority: list[str]) -> dict`. Each record has a `"source"` key and field values, some of which may be `None`. `priority` lists sources, most trusted first.
+
+      Return the golden record: for every field other than `"source"`, take the value from the most trusted source whose value is not `None`. Leave out a field that is `None` in every record. Raise `ValueError` if a record's source is not in `priority`.
+    primer: |
+      `list.index(item)` gives an item's position: `["a", "b", "c"].index("b")` is `1`. It raises `ValueError` for a missing item.
+
+      `sorted` takes a `key` function and returns a new list:
+
+      ```python
+      ranks = ["gold", "silver", "bronze"]
+      medals = [{"m": "bronze"}, {"m": "gold"}]
+      sorted(medals, key=lambda d: ranks.index(d["m"]))   # gold first
+      ```
+
+      Test for a missing value with `value is None`, so `0` and `""` still count as values.
+    starter: |
+      def survive(records, priority):
+          golden = {}
+          for record in records:
+              golden.update(record)
+          golden.pop("source", None)
+          return golden
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: survive
+          typed: true
+          docstring: true
+          message: "Give `survive` type hints and a docstring."
+      tests:
+        - id: priority
+          code: |
+            records = [
+                {"source": "learning", "legal_name": "Dan Hughes", "grade": None},
+                {"source": "hr_system", "legal_name": "Daniel Hughes", "grade": "Manager"},
+            ]
+            got = survive(records, ["hr_system", "payroll", "learning"])
+            assert got == {"legal_name": "Daniel Hughes", "grade": "Manager"}, got
+          message: "Take each field from the most trusted source, whatever order the records arrive in."
+        - id: no_blank_wins
+          code: |
+            records = [
+                {"source": "hr_system", "legal_name": "Asha Patel", "phone": None},
+                {"source": "payroll", "legal_name": "A Patel", "phone": "0161 496 0000"},
+            ]
+            got = survive(records, ["hr_system", "payroll"])
+            assert got == {"legal_name": "Asha Patel", "phone": "0161 496 0000"}, got
+          message: "A None from a trusted source must not beat a real value from a less trusted one."
+        - id: zero_counts
+          code: |
+            records = [{"source": "hr_system", "bonus_pct": 0}, {"source": "payroll", "bonus_pct": 5}]
+            got = survive(records, ["hr_system", "payroll"])
+            assert got == {"bonus_pct": 0}, got
+          message: "0 is a value. Test for a missing value with `is None`."
+        - id: all_blank
+          code: |
+            records = [{"source": "hr_system", "nickname": None}, {"source": "payroll", "nickname": None}]
+            assert survive(records, ["hr_system", "payroll"]) == {}
+          message: "Leave out a field that is None in every record."
+        - id: unknown_source
+          code: |
+            try:
+                survive([{"source": "spreadsheet", "grade": "Manager"}], ["hr_system"])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("no ValueError for an unknown source")
+          message: "Raise ValueError for a source that is not in the priority list."
+    solution: |
+      def survive(records: list[dict], priority: list[str]) -> dict:
+          """The golden record built from matched source records.
+
+          Args:
+              records: Matched records, each with a "source" key and field values.
+              priority: Source names, most trusted first.
+
+          Returns:
+              Each field's value from the most trusted source that has one.
+
+          Raises:
+              ValueError: If a record's source is not in priority.
+          """
+          for record in records:
+              if record["source"] not in priority:
+                  raise ValueError(f"unknown source: {record['source']}")
+          golden: dict = {}
+          for record in sorted(records, key=lambda r: priority.index(r["source"])):
+              for field, value in record.items():
+                  if field != "source" and field not in golden and value is not None:
+                      golden[field] = value
+          return golden
+    seeded_bugs:
+      - |
+        def survive(records: list[dict], priority: list[str]) -> dict:
+            """Last record wins, blanks included."""
+            golden = {}
+            for record in records:
+                golden.update(record)
+            golden.pop("source", None)
+            return golden
+      - |
+        def survive(records: list[dict], priority: list[str]) -> dict:
+            """A None from the trusted source wins."""
+            golden = {}
+            for record in sorted(records, key=lambda r: priority.index(r["source"])):
+                for field, value in record.items():
+                    if field != "source" and field not in golden:
+                        golden[field] = value
+            return {f: v for f, v in golden.items() if v is not None}
+      - |
+        def survive(records: list[dict], priority: list[str]) -> dict:
+            """Truthiness drops zero."""
+            golden = {}
+            for record in sorted(records, key=lambda r: priority.index(r["source"])):
+                for field, value in record.items():
+                    if field != "source" and field not in golden and value:
+                        golden[field] = value
+            return golden
+    wrong_answers:
+      - answer: |
+          def survive(records: list[dict], priority: list[str]) -> dict:
+              """A None from the trusted source wins."""
+              golden = {}
+              for record in sorted(records, key=lambda r: priority.index(r["source"])):
+                  for field, value in record.items():
+                      if field != "source" and field not in golden:
+                          golden[field] = value
+              return {f: v for f, v in golden.items() if v is not None}
+        triggers: no_blank_wins
+      - answer: |
+          def survive(records: list[dict], priority: list[str]) -> dict:
+              """Truthiness drops zero."""
+              golden = {}
+              for record in sorted(records, key=lambda r: priority.index(r["source"])):
+                  for field, value in record.items():
+                      if field != "source" and field not in golden and value:
+                          golden[field] = value
+              return golden
+        triggers: zero_counts
+    hints:
+      - "Check every source against `priority` first."
+      - "Sort the records by `priority.index` of their source, most trusted first."
+      - "Take a field only if it is not taken yet and its value `is not None`."
+    explanation: |
+      Sorting by trust and taking the first non-missing value per field applies source priority while keeping blanks from winning. `is None` keeps 0 as a real value.
+
+  - id: E2-L4-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Set the master data rules for the person entity on a talent platform with three sources: the HR system, payroll and the learning platform.
+    slots:
+      - id: auto
+        label: "Automatic merge"
+        options:
+          - {id: key, text: "Only when national insurance number and date of birth agree"}
+          - {id: name, text: "When name and birth year agree"}
+        answer: key
+      - id: uncertain
+        label: "Uncertain pairs"
+        options:
+          - {id: steward, text: "A data steward queue for scores in the middle band"}
+          - {id: merge, text: "Merge them, and fix complaints later"}
+        answer: steward
+      - id: xref
+        label: "Source IDs after a merge"
+        options:
+          - {id: keep, text: "Keep a cross-reference from the golden ID to every source ID"}
+          - {id: drop, text: "Drop them, since the golden ID replaces them"}
+        answer: keep
+    model_answer: |
+      - Automatic merges need a deterministic key. Name and birth year collide in a large firm.
+      - A steward decides the uncertain band, because a false merge exposes one person's data to another.
+      - The cross-reference lets later deliveries find their person and makes an unmerge possible.
+    wrong_answers:
+      - answer: {auto: name}
+        feedback: "Two people often share a name and birth year. That rule caused a reportable breach in this lesson's example."
+      - answer: {uncertain: merge}
+        feedback: "A false merge mixes two people's salaries and ratings. Complaints arrive after the harm."
+      - answer: {xref: drop}
+        feedback: "Without source IDs, the next payroll delivery cannot find its person, and you cannot undo a false merge."
+    hints:
+      - "Which rule cannot collide for two people?"
+      - "Who should decide a doubtful pair?"
+      - "How would you undo a false merge?"
+    explanation: |
+      Deterministic auto-merge, steward review for the middle band, and a kept cross-reference make the golden record safe to use.
+recap:
+  - front: "Deterministic or probabilistic matching"
+    back: "Deterministic: exact keys, easy to explain, misses typos. Probabilistic: similarity score, catches more, makes false matches."
+  - front: "Match bands"
+    back: "Merge above a high score, keep apart below a low one, and send the middle band to a data steward."
+  - front: "Common survivorship rules"
+    back: "Source priority, most recent, most complete. A blank never overwrites a value."
+  - front: "Why keep a cross-reference?"
+    back: "Later deliveries find their person by source ID, and a false merge can be undone."
+claims:
+  - claim: "Deterministic and probabilistic matching, steward review for uncertain matches, survivorship rules (source priority, most recent, most complete), golden records and cross-references are common master data management practice."
+    status: unverified
+    source: "General master data management practice. Not attributed to a specific passage of DAMA-DMBOK2, whose reference and master data chapter covers the topic."

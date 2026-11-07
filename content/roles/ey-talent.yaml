@@ -106,9 +106,9 @@ modules:
     hours: 12
     outcomes: ["Model person, position, organisation and event entities", Define match and survivorship rules]
     assessment: Entity relationship model with keys and survivorship rules for the person entity.
-    lessons: [A2-L2, C6-L1, A3-L1]
-    coverage: partial
-    gaps: The lessons cover canonical names, star schemas and deduplication before MERGE. They do not cover entity matching or survivorship rules for master data.
+    lessons: [A2-L2, C6-L1, A3-L1, E2-L4]
+    coverage: full
+    gaps: E2-L4 adds match bands, steward review and survivorship rules. Tuning a probabilistic matcher on real HR data is left to the role.
   - id: ARC-04
     stream: Architecture
     title: Data contracts with source HR systems
@@ -151,9 +151,9 @@ modules:
     hours: 8
     outcomes: [Apply sensitivity labels, Produce audit evidence]
     assessment: Scan a synthetic lakehouse and report classification coverage.
-    lessons: [C9-L3, C9-L1]
-    coverage: partial
-    gaps: The lessons cover sensitivity labels, inheritance and lineage. They do not cover Purview scans or producing audit evidence.
+    lessons: [C9-L3, C9-L1, C9-L4]
+    coverage: full
+    gaps: C9-L4 adds Purview scans, label coverage and audit log evidence. Classifying data inside Fabric tables needs other Purview tools the lessons do not cover.
   - id: SEC-04
     stream: Security
     title: Cross-border transfers and works councils
@@ -162,9 +162,9 @@ modules:
     hours: 5
     outcomes: [Select a transfer mechanism, Identify consultation triggers]
     assessment: Decision tree for when AI use on people data needs consultation.
-    lessons: []
-    coverage: gap
-    gaps: No lesson covers international transfers or works council consultation yet.
+    lessons: [E3-L1, E3-L2, E3-L3]
+    coverage: full
+    gaps: The lessons map UK, German, French and Dutch duties as examples. Other countries where EY employs people need their own rules from the employment lawyers.
 
   - id: GOV-01
     stream: Governance and standards
@@ -230,9 +230,9 @@ modules:
     hours: 8
     outcomes: [Run a fairness test on protected attributes, Write a DPIA section]
     assessment: Bias report on a synthetic hiring dataset with disparity metrics.
-    lessons: [B13-L3, B12-L3, B18-L2, E1-L3]
-    coverage: partial
-    gaps: The lessons cover subgroup rates, the fairness trade-offs, model cards and DPIA screening. They do not cover writing the assessment itself.
+    lessons: [B13-L3, B12-L3, B18-L2, E1-L3, E1-L4]
+    coverage: full
+    gaps: E1-L4 adds writing the DPIA, with fairness figures in the risk section. Legal sign-off and the firm's own DPIA template are left to the role.
   - id: AI-04
     stream: AI enablement
     title: AI-ready data products and use case selection

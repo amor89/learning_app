@@ -240,6 +240,26 @@ await page.getByRole("tab", { name: "Strong code" }).click();
 check(await page.locator(".pane.strong").isVisible(), "strong code tab shows the strong pane");
 await page.locator("#example").screenshot({ path: `${shots}/05-example.png` });
 
+// Quick keys: a row of coding keys while a code editor has focus on a touch screen
+await page.goto(`${base}${query}#/lesson/D3-L3`);
+await page.getByRole("heading", { name: /Mutable defaults/ }).waitFor();
+await page.getByRole("button", { name: "Exercise 5" }).click();
+check(await page.locator(".quick-keys").isHidden(), "quick keys stay hidden until an editor has focus");
+const qkArea = page.locator(".exercise textarea.editor");
+await qkArea.fill("x = len");
+await qkArea.focus();
+await page.evaluate(() => { const a = document.querySelector(".exercise textarea.editor"); a.setSelectionRange(a.value.length, a.value.length); });
+await page.locator(".quick-keys").waitFor();
+await page.locator('.quick-keys button[aria-label="Brackets"]').tap();
+await page.locator('.quick-keys button[aria-label="Colon"]').tap();
+check((await qkArea.inputValue()) === "x = len(:)", `quick keys type into the editor (${await qkArea.inputValue()})`);
+check(await page.evaluate(() => document.activeElement?.classList.contains("editor")), "the editor keeps focus after a quick key");
+await noHorizontalScroll("quick keys");
+await page.screenshot({ path: `${shots}/05b-quick-keys.png` });
+await page.locator("h1").click();
+await page.waitForFunction(() => document.querySelector(".quick-keys")?.hidden);
+check(true, "quick keys hide when the editor loses focus");
+
 // Python exercise through Pyodide
 if (pyodide) {
   await page.goto(`${base}${query}#/lesson/D3-L3`);

@@ -1,7 +1,7 @@
 // Service worker: fresh files whenever the network answers, the cached copy when it does not.
 // Every app file is network-first, revalidated past the browser's HTTP cache, so a deploy shows
 // on the next launch. A slow network falls back to the cache after NETWORK_WAIT_MS.
-const SHELL_CACHE = "shell-v10";
+const SHELL_CACHE = "shell-v11";
 const CONTENT_CACHE = "content-v1";
 const PYODIDE_CACHE = "pyodide-v1";
 const NETWORK_WAIT_MS = 4000;
@@ -27,6 +27,7 @@ const SHELL = [
   "app/nav.js",
   "app/search.js",
   "app/search-view.js",
+  "app/quickkeys.js",
   "app/config.js",
   "app/pyrunner.js",
   "app/pyworker.js",

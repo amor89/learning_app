@@ -107,6 +107,9 @@ Every Track C lesson cites a row in this table. Each row was checked on the Micr
 | OneLake security RLS and CLS: lakehouse, Spark, Direct Lake on OneLake, SQL analytics endpoint in user's identity mode | GA | onelake/security/read-secured-data (2026-08-28) | C9-L2 |
 | OneLake security: Eventhouse RLS, authorised third-party engines | Preview | onelake/security/read-secured-data (2026-08-28) | C9-L2 |
 | Sensitivity labels, protection policies, Purview DLP | GA | governance/information-protection (2026-07-13), protection-policies-overview | C9-L3 |
+| Purview Data Map scan of a same-tenant Fabric tenant: full, incremental and scoped scans; metadata and lineage; no classification or labels for Fabric; Purview permissions govern scanned metadata | GA (no preview label) | purview/register-scan-fabric-tenant (2026-04-28), purview/data-map-data-sources (2026-07-01) | C9-L4 |
+| OneLake catalog Govern: label coverage and unlabelled items, daily refresh, no subitems | No preview label; rolling out by region | governance/onelake-catalog-govern (2026-08-26) | C9-L4 |
+| Fabric activities in the Purview unified audit log; Audit (Standard) 180 days, Audit (Premium) up to 1 year by policy, 10 years with add-on | GA | admin/track-user-activities (2026-02-12), purview/audit-solutions-overview (2026-05-18) | C9-L4 |
 | Lineage view, impact analysis | GA | governance/lineage, governance/impact-analysis | C9-L3 |
 | Git integration (some item types preview) | GA | cicd/git-integration/intro-to-git-integration (2026-07-21) | C10-L1 |
 | Deployment pipelines | GA | cicd/deployment-pipelines/intro-to-deployment-pipelines (2026-07-17) | C10-L2 |
@@ -248,18 +251,37 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 
 ## Track E: data protection and governance sources (checked 6 November 2026)
 
-ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build environment, so every legal and DAMA fact below is search-only or unverified. A personal environment called learning_app now allows those hosts. Re-check these in a session on it before relying on them.
+ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build environment. On 7 November 2026 a session on the learning_app environment checked the statutes on legislation.gov.uk. ico.org.uk refused its automated requests, dama.org was blocked, and the DMBOK2 text is a printed book, so those rows stay search-only or unverified. The EU and national laws in E3-L3 need EUR-Lex and the national legislation sites, which no environment here reaches yet.
 
 | Item | Status | Source |
 |---|---|---|
-| UK GDPR Article 9: nine special categories; biometric only when used to identify; inferred special category data counts; age is a protected characteristic, not special category data | Search only | ICO special category data guidance |
-| Six Article 6 lawful bases; consent rarely appropriate for employers because of the power imbalance | Search only | ICO lawful basis and employment guidance |
+| UK GDPR Article 9: nine special categories; biometric only when used to identify; age is a protected characteristic (Equality Act 2010 s4), not special category data | Verified | legislation.gov.uk, 7 November 2026 |
+| Inferred special category data counts as special category data | Search only | ICO special category data guidance |
+| Seven Article 6 lawful bases since 5 February 2026, point (ea) recognised legitimate interest; purpose limitation Article 5(1)(b), data minimisation Article 5(1)(c) | Verified | legislation.gov.uk, 7 November 2026 |
+| Consent rarely appropriate for employers because of the power imbalance | Search only | ICO lawful basis and employment guidance |
 | Legitimate interests three-part test (purpose, necessity, balancing), recorded in an LIA | Search only | ICO legitimate interests guidance |
-| Recognised legitimate interests in force 5 February 2026 (Data (Use and Access) Act 2025, SI 2026/82), not for commercial uses | Search only | Law firm commentary (Alston & Bird, Pearl Cohen, bratby.law) |
+| Recognised legitimate interests in force 5 February 2026 (section 70, SI 2026/82); Article 6(5) limits it to the purposes in Annex 1, with no balancing test | Verified | legislation.gov.uk, 7 November 2026 |
 | Article 9(2)(b) with DPA 2018 Schedule 1 Part 1 paragraph 1, appropriate policy document required; not for purely contractual rights | Search only | ICO conditions for processing, monitoring workers guidance |
-| Schedule 1 paragraphs 6 to 28 (23 conditions); paragraph 8 equality of opportunity or treatment for monitoring, not for decisions about an individual | Search only | ICO substantial public interest and AI fairness guidance |
-| The Data (Use and Access) Act 2025 added a substantial public interest condition | Unverified | Mentioned in an ICO training module; details not checked |
-| Article 35 DPIA triggers, ICO list, two screening criteria, prior consultation | Search only | ICO DPIA guidance |
+| Schedule 1 paragraphs 6 to 28 (23 conditions); paragraph 8 covers four categories only (racial or ethnic origin, beliefs, health, sexual orientation) and excludes decisions about a particular data subject | Verified | legislation.gov.uk, 7 November 2026 |
+| The Data (Use and Access) Act 2025 added no new substantial public interest paragraph; it amended paragraphs 10, 13, 14, 23 and 24 | Verified | legislation.gov.uk, 7 November 2026 |
+| Article 35(3) DPIA cases (special category or criminal offence data at scale, profiling, public monitoring) and Article 36 prior consultation | Verified | legislation.gov.uk, 7 November 2026 |
+| ICO list of likely high-risk processing and the two-criteria screening rule | Search only | ICO DPIA guidance |
+| The Information Commission replaced the Information Commissioner on 30 September 2026 and keeps the ICO name (Information Commission's Office) | Search only | Lewis Silkin, LexisNexis, CMS; the UK GDPR text on legislation.gov.uk now says "the Commission" |
 | DAMA-DMBOK2: eleven knowledge areas, governance at the hub; 2024 revision kept them | Search only | Secondary summaries; book not checked |
 | DMBOK2 definition of data governance (section 3.1, p. 67) | Search only | GCcollab wiki citing DMBOK2 |
 | Maturity scale 0 to 5 (none, initial, repeatable, defined, managed, optimised) | Unverified | Sources disagree on names and numbering. E2-L2 says to agree and version the scale |
+| ICO international transfers guidance, 15 January 2026: three-step test for a restricted transfer (UK GDPR applies, you initiate a transfer outside the UK, separate legal person); a branch abroad is not a separate legal person (E3-L1) | Search only | Kennedys, Freshfields, McDermott Will & Emery, White & Case commentary |
+| Data (Use and Access) Act 2025 s85 and Schedule 7: Articles 45A and 45B, the "not materially lower" data protection test and Article 46(1A), in force 5 February 2026 (E3-L1, E3-L2) | Verified | legislation.gov.uk, 7 November 2026 |
+| EEA transfers treated as approved under Article 45A by DPA 2018 Schedule 21 paragraphs 4 and 5 (E3-L1) | Verified | legislation.gov.uk, 7 November 2026 |
+| EU adequacy decisions for the UK renewed 19 December 2025, to 27 December 2031 (E3-L1) | Search only | Hunton, Freeths, RPC |
+| IDTA or UK Addendum needs a transfer risk assessment (E3-L2) | Search only | Kennedys, Freshfields commentary on ICO guidance; ico.org.uk refused automated requests |
+| Binding corporate rules under Article 46(2)(b); Article 49 last-resort exception only for transfers that are not repetitive (E3-L2) | Verified | legislation.gov.uk, 7 November 2026 |
+| UK Extension to the EU-US Data Privacy Framework covers only US organisations participating in the UK Extension, from 12 October 2023 (SI 2023/1028) (E3-L2) | Verified | legislation.gov.uk, 7 November 2026 |
+| ICO monitoring workers guidance, 3 October 2023: consult workers and representatives before monitoring unless good reason (E3-L3) | Search only | Baker McKenzie, Cooley, HFW |
+| UK GDPR Article 35(9): seek views of data subjects or their representatives where appropriate (E3-L3) | Verified | legislation.gov.uk, 7 November 2026 |
+| ICE Regulations 2004: since 6 April 2020, 2% of employees, at least 15 and at most 2,500, in undertakings of 50 or more; Great Britain only (E3-L3) | Verified | legislation.gov.uk, 7 November 2026 |
+| BetrVG s87(1) no. 6 co-determination over monitoring systems; French CSE consultation (L2312-8) and the 2025 suspension rulings; Dutch WOR art. 27(1)(k) and (l) consent right (E3-L3) | Search only | Luther, GÖRG, CMS, CFDT, Rendement |
+| AI Act Article 26(7) duty to inform workers' representatives; Digital Omnibus on AI (Regulation (EU) 2026/1744) moves Annex III high-risk obligations to 2 December 2027 (E3-L3) | Unverified | Secondary sources disagree on the adoption month; the regulation number is not checked on EUR-Lex |
+| Article 35(7) minimum DPIA content (E1-L4) | Search only | Article text; not re-checked at source in this pass |
+| ICO sample DPIA template: seven steps; likelihood remote/possible/probable, severity minimal/significant/severe, overall low/medium/high; residual risk and sign-off (E1-L4) | Search only | ICO template and Annex D copies seen through search results |
+| Match bands, steward review, survivorship rules and cross-references for master data (E2-L4) | Unverified | General master data management practice, not a DMBOK2 quotation |
