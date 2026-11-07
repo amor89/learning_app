@@ -162,9 +162,9 @@ modules:
     hours: 5
     outcomes: [Select a transfer mechanism, Identify consultation triggers]
     assessment: Decision tree for when AI use on people data needs consultation.
-    lessons: []
-    coverage: gap
-    gaps: No lesson covers international transfers or works council consultation yet.
+    lessons: [E3-L1, E3-L2, E3-L3]
+    coverage: full
+    gaps: The lessons map UK, German, French and Dutch duties as examples. Other countries where EY employs people need their own rules from the employment lawyers.
 
   - id: GOV-01
     stream: Governance and standards

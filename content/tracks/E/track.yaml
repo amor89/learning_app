@@ -9,7 +9,10 @@ checklist:
   - Screen every new use of people data for a DPIA. Large-scale special category data always needs one.
   - Govern with a frame everyone shares. Map each knowledge area to the talent domains, with an owner.
   - Score maturity with evidence, per knowledge area and domain. Never average a gap away.
+  - Run the three-step test on every flow that leaves the UK, access included. Adequacy first, then a safeguard with a transfer risk assessment.
+  - Consult works councils and workers before go-live wherever a tool monitors people. The rules differ by country.
   - The legal team and the data protection officer decide on compliance. These lessons teach you to ask the right questions.
 modules:
   - {id: E1, title: "UK GDPR and special category data in HR", tags: [role-ey, current-work], summary: "Personal and special category data, lawful bases for talent data, Article 9 conditions, appropriate policy documents and DPIA screening."}
   - {id: E2, title: "DAMA-DMBOK applied to talent data", tags: [role-ey, current-work], summary: "The eleven knowledge areas, governance at the hub, and an evidence-based maturity baseline across talent domains."}
+  - {id: E3, title: "Cross-border transfers and works councils", tags: [role-ey, current-work], summary: "Restricted transfers and the three-step test, choosing a transfer mechanism with a risk assessment, and consulting works councils before people analytics or AI."}

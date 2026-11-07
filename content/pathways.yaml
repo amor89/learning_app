@@ -137,7 +137,7 @@ pathways:
       - id: p3
         title: "Phase 3, days 61 to 90: Prove"
         summary: "Success: one domain runs bronze to gold with a data contract, masking, lineage and an audit trail."
-        modules: [B5, A10, B13, B12]
+        modules: [B5, E3, A10, B13, B12]
       - id: p4
         title: "Phase 4, days 91 to 180: Enable"
         summary: "Success: one AI-ready data product passes a data protection impact assessment and a bias review."

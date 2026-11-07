@@ -1,0 +1,221 @@
+id: E3-L1
+title: Restricted transfers, when people data leaves the UK
+concept: |
+  Talent data rarely stays in one country. A shared service centre runs payroll, a vendor hosts the learning platform, a group company abroad builds the dashboards. UK GDPR Chapter V controls these flows as **restricted transfers**.
+
+  Since the ICO's January 2026 guidance, a **three-step test** tells you whether a flow is restricted. Answer yes to all three and it is:
+
+  1. Does UK GDPR apply to your processing of the data?
+  2. Do you **initiate** the transfer, by sending the data or by making it available to someone outside the UK?
+  3. Is the receiver a **separate legal person**, such as another company in your group?
+
+  A UK branch sending data to its own overseas head office fails step 3, so it is not restricted. A UK company sending data to a sister company in India is restricted, even inside one group.
+
+  A restricted transfer needs one of three routes:
+
+  - **Adequacy regulations**: UK law approves the destination. Transfers to the EEA countries are treated as approved.
+  - **Appropriate safeguards**: a contract such as the International Data Transfer Agreement (**IDTA**), plus a check that protection is "not materially lower" than in the UK. Lesson E3-L2 covers how to choose.
+  - **Exceptions**: narrow, for occasional transfers. Explicit consent rarely works for employees, for the reason lesson E1-L2 gives.
+
+  The **Data (Use and Access) Act 2025** set the "not materially lower" standard. It took effect on 5 February 2026.
+
+  The direction matters. The EU's adequacy decision for the UK, renewed to 27 December 2031, covers data flowing into the UK from the EU. It says nothing about data you send out.
+why_it_matters: |
+  A UK HR team gave a sister company in another country read access to a performance dashboard "so they could help". Nobody saw it as a transfer, because no file moved. An audit found 9,000 employee records available to a separate legal entity with no contract in place. Access was withdrawn for three months while legal put an agreement in place.
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      # Data flows, talent platform
+      - flow: performance dashboard shared with group analytics team abroad
+        transfer: no, nothing is copied
+      - flow: payroll extract to UK branch office in Dublin
+        transfer: no, same company
+    annotations:
+      - find: "transfer: no, nothing is copied"
+        note: "Making data available abroad is a transfer. Access counts, not only copies."
+      - find: "transfer: no, same company"
+        note: "Dublin is outside the UK. Ask step 3 explicitly: is the receiver the same legal person?"
+  strong:
+    code: |
+      # Data flows, talent platform
+      - flow: performance dashboard shared with group analytics team abroad
+        uk_gdpr_applies: yes
+        initiated_by_us: yes, we grant access
+        separate_legal_person: yes, a sister company
+        restricted: yes
+        route: to be chosen, see E3-L2
+      - flow: payroll extract to our own branch office in Dublin
+        separate_legal_person: no, same company
+        restricted: no
+    annotations:
+      - find: "initiated_by_us: yes, we grant access"
+        note: "Granting access initiates the transfer."
+      - find: "restricted: yes"
+        note: "Three yeses make a restricted transfer. Record each answer, not only the verdict."
+      - find: "separate_legal_person: no, same company"
+        note: "A branch is the same legal person, so step 3 fails."
+  takeaway: |
+    Run the three-step test on every flow, access included. Record each answer, then pick a route: adequacy, safeguards or a narrow exception.
+exercises:
+  - id: E3-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which flow is a restricted transfer under UK GDPR?
+    options:
+      - {id: a, text: "A UK company sends appraisal data to its sister company in India"}
+      - {id: b, text: "A UK company sends appraisal data to its own branch office in India"}
+      - {id: c, text: "A UK company moves appraisal data between two UK data centres"}
+      - {id: d, text: "A UK company deletes appraisal data after the retention period"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "A branch is part of the same legal person, so step 3 of the test fails."
+      - answer: c
+        feedback: "Nothing leaves the UK."
+      - answer: d
+        feedback: "Deletion sends nothing anywhere."
+    hints:
+      - "Run the three steps on each option."
+      - "Step 3 asks whether the receiver is a separate legal person."
+      - "A sister company is a separate legal person."
+    explanation: |
+      A sister company abroad is a separate legal person outside the UK, so all three steps answer yes.
+
+  - id: E3-L1-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A UK team gives a group company in Singapore read access to a talent dashboard. No file is copied. Is this a restricted transfer?
+    options:
+      - {id: a, text: "Yes"}
+      - {id: b, text: "No"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Making data available to a separate legal person abroad initiates a transfer, even without a copy."}
+      - {id: r2, text: "Any data viewed from abroad is a transfer, whoever the viewer works for."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Access counts. You initiate the transfer when you make the data available."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Your own employee travelling abroad is not a separate legal person. The group company is."
+    hints:
+      - "Does a transfer need a copy?"
+      - "Who receives the data: your company or another one?"
+      - "Access plus a separate legal person abroad."
+    explanation: |
+      Granting access is how you initiate the transfer, and the group company is a separate legal person outside the UK.
+
+  - id: E3-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the three routes for a restricted transfer.
+    template: |
+      1. [[g1]] regulations: the UK has recognised the destination.
+      2. Appropriate [[g2]], such as the IDTA, with protection not materially lower than in the UK.
+      3. [[g3]], narrow and for occasional transfers.
+    gaps:
+      g1: {accepted: [Adequacy], case_sensitive: false}
+      g2: {accepted: [safeguards], case_sensitive: false}
+      g3: {accepted: [Exceptions], case_sensitive: false}
+    wrong_answers:
+      - answer: {g3: Consent}
+        feedback: "Consent is one narrow exception, and it rarely works for employees. The route is called exceptions."
+    hints:
+      - "The first route is a decision about a country."
+      - "The second route is a contract plus a check."
+      - "`Adequacy`, `safeguards`, `Exceptions`."
+    explanation: |
+      Adequacy, appropriate safeguards, or a narrow exception. Every restricted transfer needs one.
+
+  - id: E3-L1-E4
+    type: order
+    difficulty: 3
+    prompt: |
+      Put the steps for a new talent data flow in order.
+    items:
+      - {id: applies, text: "Check that UK GDPR applies to the processing"}
+      - {id: initiate, text: "Check whether you send the data or make it available outside the UK"}
+      - {id: entity, text: "Check whether the receiver is a separate legal person"}
+      - {id: route, text: "Choose a route: adequacy, safeguards or an exception"}
+      - {id: record, text: "Record each answer and the route in the data flow register"}
+    answer: [applies, initiate, entity, route, record]
+    wrong_answers:
+      - answer: [route, applies, initiate, entity, record]
+        feedback: "Choose a route only after the test shows the transfer is restricted."
+      - answer: [applies, initiate, entity, record, route]
+        feedback: "The register needs the route too, so choose it before you record."
+    hints:
+      - "The three-step test comes first, in its own order."
+      - "A route only matters once the transfer is restricted."
+      - "Record last, with every answer."
+    explanation: |
+      The three steps in order, then the route, then a record of each answer and the route.
+
+  - id: E3-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A group analytics team abroad asks for the UK performance data. Decide how to handle the request.
+    slots:
+      - id: test
+        label: "First step"
+        options:
+          - {id: three, text: "Run the three-step test on the flow, access included"}
+          - {id: copies, text: "Check only whether files will be copied abroad"}
+        answer: three
+      - id: entity
+        label: "The receiver"
+        options:
+          - {id: legal, text: "Confirm which legal entity employs the team"}
+          - {id: group, text: "Treat the whole group as one organisation"}
+        answer: legal
+      - id: route
+        label: "If the transfer is restricted"
+        options:
+          - {id: mechanism, text: "Use adequacy or a safeguard, and record the choice"}
+          - {id: consent, text: "Ask each employee for consent"}
+        answer: mechanism
+    model_answer: |
+      - Access abroad counts, so test the whole flow, not only file copies.
+      - Step 3 turns on the legal entity, not the group's brand.
+      - Use adequacy or a safeguard. Consent from employees is rarely freely given.
+    wrong_answers:
+      - answer: {test: copies}
+        feedback: "Read access from abroad is a transfer too."
+      - answer: {entity: group}
+        feedback: "A group is several legal persons. Step 3 asks about the receiving entity."
+      - answer: {route: consent}
+        feedback: "Employees can rarely refuse an employer freely, so consent is a weak route."
+    hints:
+      - "Does access count?"
+      - "Who is the separate legal person?"
+      - "Which route does not depend on employee consent?"
+    explanation: |
+      Test the flow with access included, name the receiving entity, then use adequacy or a safeguard.
+recap:
+  - front: "The ICO's three-step test"
+    back: "UK GDPR applies, you initiate a transfer outside the UK, and the receiver is a separate legal person. Three yeses make it restricted."
+  - front: "Access or copies?"
+    back: "Making data available abroad initiates a transfer. No copy is needed."
+  - front: "Three routes for a restricted transfer"
+    back: "Adequacy regulations, appropriate safeguards such as the IDTA, or a narrow exception."
+  - front: "EU adequacy for the UK"
+    back: "Renewed to 27 December 2031. It covers data coming into the UK, not data you send out."
+claims:
+  - claim: "The ICO updated its international transfers guidance on 15 January 2026, with a three-step test: UK GDPR applies, the sender initiates a transfer outside the UK, and the receiver is a separate legal person. A UK branch sending data to its overseas head office is not a restricted transfer."
+    status: search-only
+    source: "Commentary by Kennedys, Freshfields, McDermott Will & Emery and White & Case on the ICO guidance, seen through search results, November 2026. ico.org.uk was not reachable from the build environment."
+  - claim: "Section 85 and Schedule 7 of the Data (Use and Access) Act 2025 replaced Article 45 with Articles 45A and 45B and set the data protection test: protection 'not materially lower' than under UK GDPR. In force from 5 February 2026 (SI 2026/82)."
+    status: verified
+    source: "https://www.legislation.gov.uk/ukpga/2025/18/schedule/7 and https://www.legislation.gov.uk/ukpga/2025/18/section/85, checked 7 November 2026."
+  - claim: "Transfers to an EEA state are treated as approved by regulations under Article 45A (DPA 2018 Schedule 21, paragraphs 4 and 5)."
+    status: verified
+    source: "https://www.legislation.gov.uk/ukpga/2018/12/schedule/21/paragraph/5, checked 7 November 2026."
+  - claim: "The European Commission renewed its adequacy decisions for the UK on 19 December 2025, until 27 December 2031."
+    status: search-only
+    source: "Hunton, Freeths, RPC and Computer Weekly reports, seen through search results, November 2026."

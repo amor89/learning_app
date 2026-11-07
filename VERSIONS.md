@@ -248,7 +248,7 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 
 ## Track E: data protection and governance sources (checked 6 November 2026)
 
-ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build environment, so every legal and DAMA fact below is search-only or unverified. A personal environment called learning_app now allows those hosts. Re-check these in a session on it before relying on them.
+ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build environment. On 7 November 2026 a session on the learning_app environment checked the statutes on legislation.gov.uk. ico.org.uk refused its automated requests, dama.org was blocked, and the DMBOK2 text is a printed book, so those rows stay search-only or unverified. The EU and national laws in E3-L3 need EUR-Lex and the national legislation sites, which no environment here reaches yet.
 
 | Item | Status | Source |
 |---|---|---|
@@ -263,3 +263,15 @@ ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build en
 | DAMA-DMBOK2: eleven knowledge areas, governance at the hub; 2024 revision kept them | Search only | Secondary summaries; book not checked |
 | DMBOK2 definition of data governance (section 3.1, p. 67) | Search only | GCcollab wiki citing DMBOK2 |
 | Maturity scale 0 to 5 (none, initial, repeatable, defined, managed, optimised) | Unverified | Sources disagree on names and numbering. E2-L2 says to agree and version the scale |
+| ICO international transfers guidance, 15 January 2026: three-step test for a restricted transfer (UK GDPR applies, you initiate a transfer outside the UK, separate legal person); a branch abroad is not a separate legal person (E3-L1) | Search only | Kennedys, Freshfields, McDermott Will & Emery, White & Case commentary |
+| Data (Use and Access) Act 2025 s85 and Schedule 7: Articles 45A and 45B, the "not materially lower" data protection test and Article 46(1A), in force 5 February 2026 (E3-L1, E3-L2) | Verified | legislation.gov.uk, 7 November 2026 |
+| EEA transfers treated as approved under Article 45A by DPA 2018 Schedule 21 paragraphs 4 and 5 (E3-L1) | Verified | legislation.gov.uk, 7 November 2026 |
+| EU adequacy decisions for the UK renewed 19 December 2025, to 27 December 2031 (E3-L1) | Search only | Hunton, Freeths, RPC |
+| IDTA or UK Addendum needs a transfer risk assessment (E3-L2) | Search only | Kennedys, Freshfields commentary on ICO guidance; ico.org.uk refused automated requests |
+| Binding corporate rules under Article 46(2)(b); Article 49 last-resort exception only for transfers that are not repetitive (E3-L2) | Verified | legislation.gov.uk, 7 November 2026 |
+| UK Extension to the EU-US Data Privacy Framework covers only US organisations participating in the UK Extension, from 12 October 2023 (SI 2023/1028) (E3-L2) | Verified | legislation.gov.uk, 7 November 2026 |
+| ICO monitoring workers guidance, 3 October 2023: consult workers and representatives before monitoring unless good reason (E3-L3) | Search only | Baker McKenzie, Cooley, HFW |
+| UK GDPR Article 35(9): seek views of data subjects or their representatives where appropriate (E3-L3) | Verified | legislation.gov.uk, 7 November 2026 |
+| ICE Regulations 2004: since 6 April 2020, 2% of employees, at least 15 and at most 2,500, in undertakings of 50 or more; Great Britain only (E3-L3) | Verified | legislation.gov.uk, 7 November 2026 |
+| BetrVG s87(1) no. 6 co-determination over monitoring systems; French CSE consultation (L2312-8) and the 2025 suspension rulings; Dutch WOR art. 27(1)(k) and (l) consent right (E3-L3) | Search only | Luther, GÖRG, CMS, CFDT, Rendement |
+| AI Act Article 26(7) duty to inform workers' representatives; Digital Omnibus on AI (Regulation (EU) 2026/1744) moves Annex III high-risk obligations to 2 December 2027 (E3-L3) | Unverified | Secondary sources disagree on the adoption month; the regulation number is not checked on EUR-Lex |
