@@ -252,14 +252,18 @@ ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build en
 
 | Item | Status | Source |
 |---|---|---|
-| UK GDPR Article 9: nine special categories; biometric only when used to identify; inferred special category data counts; age is a protected characteristic, not special category data | Search only | ICO special category data guidance |
-| Six Article 6 lawful bases; consent rarely appropriate for employers because of the power imbalance | Search only | ICO lawful basis and employment guidance |
+| UK GDPR Article 9: nine special categories; biometric only when used to identify; age is a protected characteristic (Equality Act 2010 s4), not special category data | Verified | legislation.gov.uk, 7 November 2026 |
+| Inferred special category data counts as special category data | Search only | ICO special category data guidance |
+| Seven Article 6 lawful bases since 5 February 2026, point (ea) recognised legitimate interest; purpose limitation Article 5(1)(b), data minimisation Article 5(1)(c) | Verified | legislation.gov.uk, 7 November 2026 |
+| Consent rarely appropriate for employers because of the power imbalance | Search only | ICO lawful basis and employment guidance |
 | Legitimate interests three-part test (purpose, necessity, balancing), recorded in an LIA | Search only | ICO legitimate interests guidance |
-| Recognised legitimate interests in force 5 February 2026 (Data (Use and Access) Act 2025, SI 2026/82), not for commercial uses | Search only | Law firm commentary (Alston & Bird, Pearl Cohen, bratby.law) |
+| Recognised legitimate interests in force 5 February 2026 (section 70, SI 2026/82); Article 6(5) limits it to the purposes in Annex 1, with no balancing test | Verified | legislation.gov.uk, 7 November 2026 |
 | Article 9(2)(b) with DPA 2018 Schedule 1 Part 1 paragraph 1, appropriate policy document required; not for purely contractual rights | Search only | ICO conditions for processing, monitoring workers guidance |
-| Schedule 1 paragraphs 6 to 28 (23 conditions); paragraph 8 equality of opportunity or treatment for monitoring, not for decisions about an individual | Search only | ICO substantial public interest and AI fairness guidance |
-| The Data (Use and Access) Act 2025 added a substantial public interest condition | Unverified | Mentioned in an ICO training module; details not checked |
-| Article 35 DPIA triggers, ICO list, two screening criteria, prior consultation | Search only | ICO DPIA guidance |
+| Schedule 1 paragraphs 6 to 28 (23 conditions); paragraph 8 covers four categories only (racial or ethnic origin, beliefs, health, sexual orientation) and excludes decisions about a particular data subject | Verified | legislation.gov.uk, 7 November 2026 |
+| The Data (Use and Access) Act 2025 added no new substantial public interest paragraph; it amended paragraphs 10, 13, 14, 23 and 24 | Verified | legislation.gov.uk, 7 November 2026 |
+| Article 35(3) DPIA cases (special category or criminal offence data at scale, profiling, public monitoring) and Article 36 prior consultation | Verified | legislation.gov.uk, 7 November 2026 |
+| ICO list of likely high-risk processing and the two-criteria screening rule | Search only | ICO DPIA guidance |
+| The Information Commission replaced the Information Commissioner on 30 September 2026 and keeps the ICO name (Information Commission's Office) | Search only | Lewis Silkin, LexisNexis, CMS; the UK GDPR text on legislation.gov.uk now says "the Commission" |
 | DAMA-DMBOK2: eleven knowledge areas, governance at the hub; 2024 revision kept them | Search only | Secondary summaries; book not checked |
 | DMBOK2 definition of data governance (section 3.1, p. 67) | Search only | GCcollab wiki citing DMBOK2 |
 | Maturity scale 0 to 5 (none, initial, repeatable, defined, managed, optimised) | Unverified | Sources disagree on names and numbering. E2-L2 says to agree and version the scale |

@@ -6,11 +6,11 @@ concept: |
 
   **Article 9(2)(b), employment, social security and social protection.** It covers duties and rights in employment law, such as recording sickness absence or making reasonable adjustments. The UK condition is Schedule 1, Part 1, **paragraph 1**. It does not cover purely contractual rights.
 
-  **Article 9(2)(g), substantial public interest.** It needs one of the 23 conditions in Schedule 1, **paragraphs 6 to 28**. Diversity monitoring usually relies on **paragraph 8, equality of opportunity or treatment**. Paragraph 8 supports reviewing equality across groups. It cannot support a decision about one person, so keep monitoring data apart from promotion or hiring decisions.
+  **Article 9(2)(g), substantial public interest.** It needs one of the 23 conditions in Schedule 1, **paragraphs 6 to 28**. Diversity monitoring usually relies on **paragraph 8, equality of opportunity or treatment**. It covers four categories only: racial or ethnic origin, religious or philosophical beliefs, health, and sexual orientation. Paragraph 8 supports reviewing equality across groups. It cannot support a decision about one person, so keep monitoring data apart from promotion or hiring decisions.
 
   Both routes need an **appropriate policy document** (APD). The ICO says it needs no set form. It names the Schedule 1 condition, explains how you meet the principles, and sets your retention and erasure rules. One APD can cover several purposes. Your record of processing activities also names the condition.
 
-  Before you start processing likely to result in **high risk**, carry out a **data protection impact assessment** (DPIA) under Article 35. Three cases always need one, including **large-scale special category data** and extensive profiling with significant effects. The ICO's list adds others, such as innovative technology like AI combined with another risk factor. Two risk factors usually mean a DPIA. If you cannot reduce a high risk, consult the ICO before you start.
+  Before you start processing likely to result in **high risk**, carry out a **data protection impact assessment** (DPIA) under Article 35. Three cases always need one, including **large-scale special category or criminal offence data** and extensive profiling with significant effects. The ICO's list adds others, such as innovative technology like AI combined with another risk factor. Two risk factors usually mean a DPIA. If you cannot reduce a high risk, consult the ICO before you start. Since 30 September 2026 the ICO is the Information Commission's Office.
 
 why_it_matters: |
   A retailer used its equal opportunities survey, collected under paragraph 8, to pick candidates for a leadership programme that favoured under-represented groups. The survey data now drove decisions about individuals, which paragraph 8 does not support. The programme paused while the team rebuilt it on aggregate statistics and a separate, voluntary application form.
@@ -359,9 +359,15 @@ claims:
   - claim: "Article 9(2)(b) relies on DPA 2018 Schedule 1 Part 1 paragraph 1 and needs an appropriate policy document; the employment condition does not cover purely contractual rights; APD needs no set form, outlines condition, principles procedures and retention; one APD can cover several purposes; record of processing activities must note the condition."
     status: search-only
     source: "ICO guidance 'What are the conditions for processing?', 'What are the rules on special category data?' and 'Data protection and monitoring workers' (ico.org.uk), seen through search results, November 2026."
-  - claim: "23 substantial public interest conditions in Schedule 1 paragraphs 6 to 28; paragraph 8 equality of opportunity or treatment supports monitoring with Article 9(2)(g); it cannot be relied on for decisions about a particular individual; APD required."
+  - claim: "Schedule 1 paragraphs 6 to 28 hold 23 substantial public interest conditions and paragraph 5 requires an APD. Paragraph 8 covers racial or ethnic origin, religious or philosophical beliefs, health and sexual orientation only, and excludes measures or decisions about a particular data subject. The 2025 Act added no new paragraph; it amended paragraphs 10, 13, 14, 23 and 24."
+    status: verified
+    source: "https://www.legislation.gov.uk/ukpga/2018/12/schedule/1, checked 7 November 2026."
+  - claim: "Paragraph 8 equality of opportunity or treatment is the usual condition for diversity monitoring with Article 9(2)(g)."
     status: search-only
-    source: "ICO guidance 'What are the substantial public interest conditions?' and 'What about fairness, bias and discrimination?' (ico.org.uk), seen through search results, November 2026. The Data (Use and Access) Act 2025 added a substantial public interest condition, not checked here."
-  - claim: "Article 35(3): large-scale special category data, systematic extensive profiling with significant effects and large-scale public monitoring always need a DPIA; ICO list includes innovative technology such as AI when combined with another criterion; two screening criteria usually indicate a DPIA; consult the ICO if high risk cannot be mitigated."
+    source: "ICO guidance 'What are the substantial public interest conditions?' and 'What about fairness, bias and discrimination?' (ico.org.uk), seen through search results, November 2026."
+  - claim: "Article 35(3): large-scale special category or criminal offence data, systematic extensive profiling with significant effects and large-scale public monitoring always need a DPIA. Article 36(1): consult the Commission before processing if the DPIA shows a high risk without mitigation. The Information Commission replaced the Information Commissioner on 30 September 2026 and keeps the ICO name."
+    status: verified
+    source: "https://www.legislation.gov.uk/eur/2016/679/article/35 and /article/36, checked 7 November 2026; Lewis Silkin and LexisNexis on the 30 September 2026 commencement."
+  - claim: "The ICO's list of likely high-risk processing includes innovative technology such as AI combined with another criterion; two screening criteria usually indicate a DPIA."
     status: search-only
     source: "ICO guidance 'When do we need to do a DPIA?' and 'Examples of processing likely to result in high risk' (ico.org.uk), seen through search results, November 2026."

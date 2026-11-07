@@ -317,9 +317,12 @@ recap:
     back: "An Article 6 lawful basis for all personal data, plus an Article 9 condition for special category data."
 
 claims:
-  - claim: "UK GDPR Article 9 lists nine special categories; biometric data is special category only when used to identify someone uniquely; inferring a special category means processing special category data; age is a protected characteristic but not special category data; special category data needs a lawful basis and an Article 9 condition."
+  - claim: "UK GDPR Article 9 lists nine special categories; biometric data counts only when used to identify someone uniquely; age is not among them but is a protected characteristic under section 4 of the Equality Act 2010; special category data needs an Article 6 basis and an Article 9 condition."
+    status: verified
+    source: "https://www.legislation.gov.uk/eur/2016/679/article/9 and https://www.legislation.gov.uk/ukpga/2010/15/section/4, checked 7 November 2026."
+  - claim: "Inferring a special category means processing special category data."
     status: search-only
     source: "ICO guidance pages 'What is special category data?', 'Biometric recognition: key data protection concepts' and 'What about fairness, bias and discrimination?' (ico.org.uk), seen through search results, November 2026. ico.org.uk was not reachable from the build environment."
   - claim: "The Data Protection Act 2018 supplements the UK GDPR with UK-specific conditions in Schedule 1."
-    status: search-only
-    source: "ICO guidance 'What are the conditions for processing?' (ico.org.uk), seen through search results, November 2026."
+    status: verified
+    source: "https://www.legislation.gov.uk/ukpga/2018/12/section/10, checked 7 November 2026."
