@@ -6,6 +6,8 @@ import { backTarget, isRoot, visit } from "./nav.js";
 import { placementView } from "./placement-view.js";
 import { tabFor } from "./pathways.js";
 import { roleView } from "./role-view.js";
+import { prepare } from "./search.js";
+import { searchView } from "./search-view.js";
 import { clear, h, toast } from "./ui.js";
 import {
   dashboard,
@@ -26,6 +28,7 @@ const sheets = new Map();
 let interviewBank = null;
 let placementBank = null;
 let roleBank = null;
+let searchIndex = null;
 
 const app = {
   index: null,
@@ -68,6 +71,19 @@ const app = {
       return await placementBank;
     } catch (error) {
       placementBank = null;
+      throw error;
+    }
+  },
+  // The search index loads on first use and is prepared once.
+  async search() {
+    searchIndex ??= fetch("content/search.json").then((r) => {
+      if (!r.ok) throw new Error(`Search failed to load (${r.status}).`);
+      return r.json();
+    }).then(prepare);
+    try {
+      return await searchIndex;
+    } catch (error) {
+      searchIndex = null;
       throw error;
     }
   },
@@ -138,9 +154,18 @@ const ROUTES = [
   [/^#\/interview$/, () => interviewView(app), "interview"],
   [/^#\/interview\/drill$/, () => drillView(app), "interview"],
   [/^#\/interview\/task\/([\w-]+)$/, (m) => taskView(app, m[1]), "interview"],
+  [/^#\/search(?:\?q=([^&]*))?$/, (m) => searchView(app, safeDecode(m[1] ?? "")), null],
   [/^#\/review$/, () => reviewView(app), "review"],
   [/^#\/settings$/, () => settingsView(app), "settings"],
 ];
+
+function safeDecode(text) {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
 
 let activeTab = "home";
 let visited = [];
@@ -148,12 +173,14 @@ let titleWatch = null;
 
 const backButton = document.querySelector(".topbar .back");
 const barTitle = document.querySelector(".topbar-title");
+const searchButton = document.querySelector(".topbar .search-btn");
 
 // The header shows Back on every page but the five tab pages, and the page title
 // once the page's own heading has scrolled under the header.
 function updateHeader(hash, heading) {
   const root = isRoot(hash);
   backButton.hidden = root;
+  searchButton.hidden = hash.startsWith("#/search");
   const brand = root ? "Learning app" : "";
   barTitle.textContent = brand;
   titleWatch?.disconnect();

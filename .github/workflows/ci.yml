@@ -38,7 +38,7 @@ jobs:
       - name: Python quality gates
         run: pytest
       - name: JavaScript quality gates
-        run: node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs tests/app/notes.test.mjs tests/app/role.test.mjs tests/app/nav.test.mjs
+        run: node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs tests/app/notes.test.mjs tests/app/role.test.mjs tests/app/nav.test.mjs tests/app/search.test.mjs
 
   parity:
     # Reruns every checker test on the package versions Pyodide 314.0.7 ships,

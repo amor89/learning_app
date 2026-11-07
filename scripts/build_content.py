@@ -7,6 +7,7 @@ Writes:
     site/content/interview.json      timed theory questions and from-scratch tasks
     site/content/placement.json      the placement quiz for each track's start-here module
     site/content/roles.json          role plans: phases, competencies, lesson maps and gaps
+    site/content/search.json         lessons, recap cards and key terms for the search page
     site/py/checkers/*.py            the checker package for Pyodide
     site/app/highlight.css           Pygments styles for light and dark themes
 
@@ -56,6 +57,7 @@ from learnkit.models import (  # noqa: E402
     TheoryQuestion,
 )
 from learnkit.render import CSS_CLASS, code_lines, md_inline, md_to_html, unknown_tags  # noqa: E402
+from learnkit.search import build_search_index  # noqa: E402
 
 SITE = ROOT / "site"
 OUT = SITE / "content"
@@ -559,6 +561,7 @@ def main() -> None:
     placement = build_placement(course, quizzes)
     check_html(placement, "placement")
     write_json(OUT / "placement.json", placement)
+    write_json(OUT / "search.json", build_search_index(course))
     version = content_version()
     write_json(OUT / "index.json", build_index(course, version, {q.track: q for q in quizzes}))
     write_json(TEST_FIXTURE, [ex.model_dump(mode="json") for ex in all_exercises(course)])
