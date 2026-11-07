@@ -1,0 +1,337 @@
+id: C10-L4
+title: Sizing a capacity, from trial to the right F SKU
+concept: |
+  Lesson C10-L3 showed how a capacity smooths and throttles. This lesson picks its size.
+
+  A Fabric **F SKU** gives a number of **capacity units** (CUs) equal to its name: F2 has 2, F64 has 64, F8192 has 8,192. The sizes double each step. A **trial** capacity has 64 CUs, like an F64, for 60 days.
+
+  The Capacity Metrics app measures use in **30-second windows**. A SKU's budget per window is its CUs times 30, so an F64 has 1,920 CU-seconds per window. Size against that number.
+
+  Microsoft's method, from the planning guide:
+
+  1. Run a real workload on a trial capacity: a week of the HR feeds, the notebooks and the reports.
+  2. In the Metrics app, find the busiest timepoint and read the CUs it used.
+  3. Choose the smallest SKU whose 30-second budget covers that peak, with headroom for growth.
+  4. Scale, then check the utilisation chart again.
+
+  **Licences can set a floor.** Below F64, everyone who views Power BI content needs a Pro or Premium Per User licence. From F64 up, users with a free licence and a viewer role can view it. A people dashboard for 3,000 managers can justify F64 on licences alone.
+
+  **Cost levers.** F SKUs are billed per second, with a one-minute minimum and no commitment. A yearly reservation costs less. You can pause a capacity, or scale it up for month-end and down after.
+
+  Keep development on its own capacity, so a heavy notebook in dev cannot throttle production reports. Status: F SKUs and the Metrics app are generally available. The SKU Estimator is in preview (Microsoft Learn, November 2026).
+why_it_matters: |
+  A team sized its first Fabric capacity on a guess and bought an F32 reservation. The HR dashboards went to 2,500 line managers, who then each needed a Pro licence, because the capacity was below F64. The licences cost more than the step up to F64 would have, and the reservation ran for a year.
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      # Capacity decision, talent platform
+      sku: F32
+      reason: similar team uses F32
+      viewers: 2,500 line managers
+      billing: yearly reservation from day one
+    annotations:
+      - find: "reason: similar team uses F32"
+        note: "Another team's load says nothing about yours. Measure your own on a trial."
+      - find: "viewers: 2,500 line managers"
+        note: "Below F64, every one of them needs a Pro licence to view Power BI content."
+      - find: "billing: yearly reservation from day one"
+        note: "Reserve after you know the size, not before."
+  strong:
+    code: |
+      # Capacity decision, talent platform
+      trial: 2 weeks with the HR feeds, notebooks and manager reports
+      peak_30s_cu: 1,450 at Monday 09:00 refresh
+      headroom: 20%  # 1,450 x 1.2 = 1,740
+      sku: F64  # 64 x 30 = 1,920 CU-seconds per window, also lets free-licence viewers in
+      dev: separate F8, paused at night
+      billing: pay as you go for 3 months, then reserve if steady
+    annotations:
+      - find: "peak_30s_cu: 1,450 at Monday 09:00 refresh"
+        note: "A measured peak from the Metrics app, with the time it happened."
+      - find: "sku: F64  # 64 x 30 = 1,920 CU-seconds per window, also lets free-licence viewers in"
+        note: "The smallest SKU whose budget covers the peak plus headroom, and the licence floor agrees."
+      - find: "dev: separate F8, paused at night"
+        note: "Dev load cannot throttle production, and pausing cuts cost."
+  takeaway: |
+    Measure a real peak on a trial, compare it with each SKU's 30-second budget plus headroom, check the F64 licence floor, then reserve only once the load is steady.
+exercises:
+  - id: C10-L4-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      How many capacity units does an F64 provide?
+    options:
+      - {id: a, text: "64"}
+      - {id: b, text: "1,920"}
+      - {id: c, text: "8"}
+      - {id: d, text: "640"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "1,920 is its budget per 30-second window: 64 times 30."
+      - answer: c
+        feedback: "8 is the number of Power BI v-cores the table lists for F64, not its CUs."
+      - answer: d
+        feedback: "The CUs match the number in the SKU name."
+    hints:
+      - "Look at the SKU's name."
+      - "F2 has 2 CUs."
+      - "64."
+    explanation: |
+      An F SKU's capacity units equal the number in its name.
+
+  - id: C10-L4-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      An HR dashboard will reach 2,000 line managers who have only free Fabric licences. Which capacity lets them view it with a viewer role?
+    options:
+      - {id: a, text: "F64 or larger"}
+      - {id: b, text: "Any F SKU"}
+      - {id: c, text: "F32"}
+      - {id: d, text: "Premium Per User licences on the workspace"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Below F64, each viewer of Power BI content needs a Pro or Premium Per User licence."}
+      - {id: r2, text: "Smaller SKUs cannot host Power BI reports at all."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Below F64, viewers need a Pro or PPU licence."
+      - answer: c
+        feedback: "F32 is below F64, so each viewer would need a Pro licence."
+      - answer: d
+        feedback: "PPU is a per-user licence. It does not let free users view content."
+      - answer: a|r2
+        feedback: "Right size, wrong reason. Smaller SKUs host reports. The limit is on who can view them without a paid licence."
+    hints:
+      - "Which SKU is the licence threshold?"
+      - "What do viewers need below it?"
+      - "F64 or larger."
+    explanation: |
+      From F64 up, free-licence users with a viewer role can view Power BI content.
+
+  - id: C10-L4-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the sizing arithmetic.
+    template: |
+      The Metrics app measures use in [[g1]]-second windows.
+      An F32 has 32 x 30 = [[g2]] CU-seconds per window.
+      A trial capacity has the same [[g3]] CUs as an F64.
+    gaps:
+      g1: {accepted: ["30"], case_sensitive: false}
+      g2: {accepted: ["960"], case_sensitive: false}
+      g3: {accepted: ["64"], case_sensitive: false}
+    wrong_answers:
+      - answer: {g2: "32"}
+        feedback: "32 is the CUs. The budget per window is CUs times 30."
+    hints:
+      - "The window is half a minute."
+      - "Multiply the CUs by 30."
+      - "`30`, `960`, `64`."
+    explanation: |
+      Thirty-second windows, so an F32 has 960 CU-seconds per window. A trial matches an F64.
+
+  - id: C10-L4-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `smallest_sku(peak: float, headroom: float = 0.2, free_viewers: bool = False) -> str`. `peak` is the busiest 30-second CU use from the Metrics app.
+
+      - The SKUs are F2, F4, F8 and so on, doubling up to F8192. Each has a budget of its CUs times 30 per window.
+      - Return the name of the smallest SKU, such as `"F64"`, whose budget is at least `peak * (1 + headroom)`.
+      - If `free_viewers` is true, never return a SKU below F64.
+      - Raise `ValueError` if `peak` or `headroom` is negative, or if even F8192 is too small.
+    primer: |
+      A list of numbers can be built by doubling: `[2 ** n for n in range(1, 4)]` is `[2, 4, 8]`.
+
+      `max(a, b)` returns the larger of two values: `max(16, 64)` is `64`.
+
+      An f-string builds a name: `f"F{64}"` is `"F64"`.
+    starter: |
+      def smallest_sku(peak, headroom=0.2, free_viewers=False):
+          return "F64"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: smallest_sku
+          typed: true
+          docstring: true
+          message: "Give `smallest_sku` type hints and a docstring."
+      tests:
+        - id: budget
+          code: |
+            assert smallest_sku(900, headroom=0) == "F32", smallest_sku(900, headroom=0)
+            assert smallest_sku(961, headroom=0) == "F64"
+            assert smallest_sku(50, headroom=0) == "F2"
+          message: "Pick the smallest SKU whose 30-second budget (CUs x 30) covers the peak."
+        - id: headroom
+          code: |
+            assert smallest_sku(1450) == "F64", smallest_sku(1450)
+            assert smallest_sku(1700) == "F128", smallest_sku(1700)
+          message: "Add the headroom before you compare: peak x (1 + headroom)."
+        - id: floor
+          code: |
+            assert smallest_sku(100, free_viewers=True) == "F64"
+            assert smallest_sku(5000, free_viewers=True) == "F256"
+          message: "With free-licence viewers, never go below F64."
+        - id: invalid
+          code: |
+            for args in [(-1,), (100, -0.1), (10_000_000,)]:
+                try:
+                    smallest_sku(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {args}")
+          message: "Raise ValueError for a negative peak or headroom, or a peak no SKU can cover."
+    solution: |
+      SKU_UNITS = [2 ** n for n in range(1, 14)]
+      WINDOW_SECONDS = 30
+      FREE_VIEWER_FLOOR = 64
+
+
+      def smallest_sku(peak: float, headroom: float = 0.2, free_viewers: bool = False) -> str:
+          """The smallest Fabric F SKU whose 30-second budget covers a peak.
+
+          Args:
+              peak: The busiest 30-second CU use from the Capacity Metrics app.
+              headroom: Extra share to allow for growth, such as 0.2 for 20%.
+              free_viewers: True if free-licence users must view Power BI content.
+
+          Returns:
+              The SKU name, such as "F64".
+
+          Raises:
+              ValueError: If peak or headroom is negative, or no SKU is big enough.
+          """
+          if peak < 0 or headroom < 0:
+              raise ValueError("peak and headroom must not be negative")
+          need = peak * (1 + headroom)
+          for units in SKU_UNITS:
+              if units * WINDOW_SECONDS >= need:
+                  chosen = max(units, FREE_VIEWER_FLOOR) if free_viewers else units
+                  return f"F{chosen}"
+          raise ValueError(f"no F SKU covers a peak of {peak}")
+    seeded_bugs:
+      - |
+        def smallest_sku(peak: float, headroom: float = 0.2, free_viewers: bool = False) -> str:
+            """Compares the peak with CUs, not with CUs times 30."""
+            if peak < 0 or headroom < 0:
+                raise ValueError("negative")
+            need = peak * (1 + headroom)
+            for units in [2 ** n for n in range(1, 14)]:
+                if units >= need:
+                    return f"F{max(units, 64) if free_viewers else units}"
+            raise ValueError("too big")
+      - |
+        def smallest_sku(peak: float, headroom: float = 0.2, free_viewers: bool = False) -> str:
+            """Ignores the headroom."""
+            if peak < 0 or headroom < 0:
+                raise ValueError("negative")
+            for units in [2 ** n for n in range(1, 14)]:
+                if units * 30 >= peak:
+                    return f"F{max(units, 64) if free_viewers else units}"
+            raise ValueError("too big")
+      - |
+        def smallest_sku(peak: float, headroom: float = 0.2, free_viewers: bool = False) -> str:
+            """Forgets the F64 floor for free-licence viewers."""
+            if peak < 0 or headroom < 0:
+                raise ValueError("negative")
+            need = peak * (1 + headroom)
+            for units in [2 ** n for n in range(1, 14)]:
+                if units * 30 >= need:
+                    return f"F{units}"
+            raise ValueError("too big")
+    wrong_answers:
+      - answer: |
+          def smallest_sku(peak: float, headroom: float = 0.2, free_viewers: bool = False) -> str:
+              """Ignores the headroom."""
+              if peak < 0 or headroom < 0:
+                  raise ValueError("negative")
+              for units in [2 ** n for n in range(1, 14)]:
+                  if units * 30 >= peak:
+                      return f"F{max(units, 64) if free_viewers else units}"
+              raise ValueError("too big")
+        triggers: headroom
+      - answer: |
+          def smallest_sku(peak: float, headroom: float = 0.2, free_viewers: bool = False) -> str:
+              """Forgets the F64 floor for free-licence viewers."""
+              if peak < 0 or headroom < 0:
+                  raise ValueError("negative")
+              need = peak * (1 + headroom)
+              for units in [2 ** n for n in range(1, 14)]:
+                  if units * 30 >= need:
+                      return f"F{units}"
+              raise ValueError("too big")
+        triggers: floor
+    hints:
+      - "List the SKU sizes from 2 to 8192 by doubling."
+      - "Compare each size times 30 with the peak times one plus the headroom."
+      - "Apply the F64 floor with `max` when free-licence viewers need access."
+    explanation: |
+      The budget per window is CUs times 30. Headroom protects against growth, and the licence floor can raise the answer further.
+
+  - id: C10-L4-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Plan the first capacity for the talent platform.
+    slots:
+      - id: measure
+        label: "How to size"
+        options:
+          - {id: trial, text: "Run the real feeds and reports on a trial, then read the peak in the Metrics app"}
+          - {id: copy, text: "Copy the SKU another team uses"}
+        answer: trial
+      - id: environments
+        label: "Development"
+        options:
+          - {id: separate, text: "A small separate capacity for dev, paused when idle"}
+          - {id: shared, text: "Dev and production on one capacity to save money"}
+        answer: separate
+      - id: billing
+        label: "Billing"
+        options:
+          - {id: payg, text: "Pay as you go until the load is steady, then a yearly reservation"}
+          - {id: reserve, text: "A yearly reservation from the first day"}
+        answer: payg
+    model_answer: |
+      - Only your own peak sizes your capacity.
+      - A dev notebook on the production capacity can throttle the managers' reports.
+      - Reserve once you know the size, so you do not pay a year for the wrong one.
+    wrong_answers:
+      - answer: {measure: copy}
+        feedback: "Another team's workload is not yours. Measure on a trial."
+      - answer: {environments: shared}
+        feedback: "Smoothing spreads a heavy dev job across later windows, so it can throttle production."
+      - answer: {billing: reserve}
+        feedback: "A reservation fixes the size for a year before you have measured it."
+    hints:
+      - "Where does a trustworthy peak come from?"
+      - "Can dev load affect production on one capacity?"
+      - "When do you know enough to commit?"
+    explanation: |
+      Measure on a trial, keep dev apart, and reserve once the load is known.
+recap:
+  - front: "Capacity units of an F SKU"
+    back: "The number in its name: F2 has 2, F64 has 64. Trial capacity has 64."
+  - front: "Budget per 30-second window"
+    back: "CUs times 30. An F64 has 1,920 CU-seconds per window."
+  - front: "The F64 licence floor"
+    back: "Below F64, every Power BI viewer needs Pro or PPU. From F64, free-licence users with a viewer role can view."
+  - front: "Sizing method"
+    back: "Trial, read the peak in the Metrics app, pick the smallest SKU covering peak plus headroom, scale and check."
+claims:
+  - claim: "F SKUs F2 to F8192 provide CUs equal to their number; trial capacity has 64 CUs; below F64 each Power BI viewer needs Pro, PPU or an individual trial, and from F64 free-licence users with a viewer role can view; F SKUs bill per second with a one-minute minimum and an optional yearly reservation; the trial lasts 60 days."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/enterprise/licenses (ms.date 2026-06-15)"
+  - claim: "Capacity planning uses 30-second windows (CUs x 30); the method is trial, Metrics app utilisation and timepoint pages, scale up, recheck; the Fabric SKU Estimator is in preview."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/enterprise/plan-capacity (ms.date 2026-06-15)"

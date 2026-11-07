@@ -1,0 +1,369 @@
+id: E2-L5
+title: A RACI and a business glossary for talent data
+concept: |
+  Lesson E2-L3 named who decides. A **RACI** turns that into a table people can check, and a **business glossary** records what they decided.
+
+  **RACI.** Rows are activities, columns are roles, and each cell holds one letter:
+
+  - **R, responsible**: does the work. At least one per activity.
+  - **A, accountable**: owns the outcome and signs it off. **Exactly one** per activity.
+  - **C, consulted**: asked before the decision, a two-way conversation.
+  - **I, informed**: told after it, one way.
+
+  Two common failures: an activity with two As, so each waits for the other, and one with no A, so nobody signs off. Name roles, not people, so the table survives a reorganisation.
+
+  **Business glossary.** One entry per business term, such as "active employee" or "regretted leaver". Each entry holds:
+
+  - the **term** and a plain **definition**;
+  - the **calculation rule**, where it is a measure, such as which contract types count;
+  - the **owner** (the A for its definition) and the **steward** who maintains it;
+  - the **system of record** that holds the data;
+  - **related terms** and the ones it must not be confused with;
+  - a **status** (draft or approved), a version and the date approved.
+
+  A definition changes only through the escalation path in lesson E2-L3, and every change gets a new version, so a report can say which definition it used.
+
+  DMBOK2 places the business glossary in **metadata management**. Start with the 15 terms that appear most in people reports, not the whole vocabulary.
+why_it_matters: |
+  Two HR directors each believed they owned the definition of "headcount", and the RACI listed both as accountable. Each approved a different version for their own reports, so the board pack showed two headcounts 4% apart. Making one of them accountable, and recording the approved definition in the glossary with a version, ended it.
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      # RACI, talent data
+      define headcount: {HR director: A, People analytics lead: A, Data steward: R}
+      grant access to ratings: {Platform team: R}
+      glossary: a shared page where anyone adds terms
+    annotations:
+      - find: "define headcount: {HR director: A, People analytics lead: A, Data steward: R}"
+        note: "Two accountable roles. Each will approve their own definition."
+      - find: "grant access to ratings: {Platform team: R}"
+        note: "Nobody is accountable for who sees performance ratings."
+      - find: "glossary: a shared page where anyone adds terms"
+        note: "No owner, no status, no version. Nobody knows which definition is approved."
+  strong:
+    code: |
+      # RACI, talent data
+      define headcount: {Workforce data owner: A, Data steward: R, Finance: C, Report owners: I}
+      grant access to ratings: {Performance data owner: A, Platform team: R, DPO: C}
+      # Glossary entry
+      term: Headcount
+      definition: People with an active employment contract on the reporting date
+      rule: count contracts of type permanent or fixed-term; exclude contractors and agency staff
+      owner: Workforce data owner
+      steward: Workforce data steward
+      system_of_record: HR system, employment table
+      not_to_confuse_with: [FTE, contractor count]
+      status: approved, version 2, 2026-11-07
+    annotations:
+      - find: "define headcount: {Workforce data owner: A, Data steward: R, Finance: C, Report owners: I}"
+        note: "One A, at least one R, and the people consulted and informed are named."
+      - find: "rule: count contracts of type permanent or fixed-term; exclude contractors and agency staff"
+        note: "The calculation rule settles the dispute a definition alone leaves open."
+      - find: "status: approved, version 2, 2026-11-07"
+        note: "A version and a date let a report say which definition it used."
+  takeaway: |
+    Give every activity exactly one A and at least one R, name roles rather than people, and keep each glossary term with a rule, an owner, a steward, a system of record and a versioned status.
+exercises:
+  - id: E2-L5-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      How many accountable roles should each activity in a RACI have?
+    options:
+      - {id: a, text: "Exactly one"}
+      - {id: b, text: "At least one"}
+      - {id: c, text: "One per team involved"}
+      - {id: d, text: "None, if someone is responsible"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "Two accountable roles wait for each other or approve different things. Exactly one."
+      - answer: c
+        feedback: "Teams can be responsible or consulted. Only one role owns the outcome."
+      - answer: d
+        feedback: "Without an A, nobody signs the work off."
+    hints:
+      - "A owns the outcome."
+      - "What happens with two owners?"
+      - "Exactly one."
+    explanation: |
+      Exactly one accountable role per activity, so one person signs off.
+
+  - id: E2-L5-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      The data protection officer must give a view before ratings access is granted. Which letter fits the DPO?
+    options:
+      - {id: a, text: "C"}
+      - {id: b, text: "I"}
+      - {id: c, text: "A"}
+      - {id: d, text: "R"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Consulted means asked before the decision, in a two-way exchange."}
+      - {id: r2, text: "Consulted means told after the decision."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Informed is told after the decision. The DPO's view is needed before it."
+      - answer: c
+        feedback: "The performance data owner is accountable for access. The DPO advises."
+      - answer: d
+        feedback: "Responsible does the work of granting. The DPO does not."
+      - answer: a|r2
+        feedback: "Right letter, wrong reason. Being told afterwards is I. C is asked before."
+    hints:
+      - "Before or after the decision?"
+      - "One-way or two-way?"
+      - "Consulted."
+    explanation: |
+      C is asked before the decision; I is told after it.
+
+  - id: E2-L5-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the glossary entry fields.
+    template: |
+      term, definition, calculation [[g1]]
+      [[g2]] (accountable for the definition) and steward
+      system of [[g3]]
+      status, version and date approved
+    gaps:
+      g1: {accepted: [rule], case_sensitive: false}
+      g2: {accepted: [owner], case_sensitive: false}
+      g3: {accepted: [record], case_sensitive: false}
+    wrong_answers:
+      - answer: {g2: steward}
+        feedback: "The steward maintains the entry. The owner is accountable for the definition."
+    hints:
+      - "How a measure is computed."
+      - "The A for the definition."
+      - "`rule`, `owner`, `record`."
+    explanation: |
+      A calculation rule, an owner and a system of record make a definition usable and checkable.
+
+  - id: E2-L5-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `raci_problems(raci: dict[str, dict[str, str]]) -> list[str]`. `raci` maps each activity to a dict of role to letter.
+
+      Return a sorted list of problems, using exactly these messages:
+
+      - `"<activity>: no accountable role"` when no role has `"A"`;
+      - `"<activity>: <n> accountable roles"` when more than one has `"A"`;
+      - `"<activity>: no responsible role"` when no role has `"R"`;
+      - `"<activity>: unknown letter <x> for <role>"` for any letter other than R, A, C or I.
+
+      Return an empty list when every activity is sound.
+    primer: |
+      `list.count(x)` counts how many items equal `x`:
+
+      ```python
+      grades = ["pass", "fail", "pass"]
+      grades.count("pass")   # 2
+      ```
+
+      `dict.values()` gives the values of a dict, and `list(d.values())` turns them into a list.
+    starter: |
+      def raci_problems(raci):
+          return []
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: raci_problems
+          typed: true
+          docstring: true
+          message: "Give `raci_problems` type hints and a docstring."
+      tests:
+        - id: sound
+          code: |
+            raci = {"define headcount": {"Owner": "A", "Steward": "R", "Finance": "C", "Reports": "I"}}
+            assert raci_problems(raci) == [], raci_problems(raci)
+          message: "A sound activity has no problems."
+        - id: accountable
+          code: |
+            raci = {
+                "define headcount": {"HR director": "A", "Analytics lead": "A", "Steward": "R"},
+                "grant access": {"Platform team": "R"},
+            }
+            got = raci_problems(raci)
+            assert got == ["define headcount: 2 accountable roles", "grant access: no accountable role"], got
+          message: "Report a missing accountable role, and more than one, with the exact messages."
+        - id: responsible
+          code: |
+            got = raci_problems({"approve glossary": {"Owner": "A", "Steward": "C"}})
+            assert got == ["approve glossary: no responsible role"], got
+          message: "Report an activity with no responsible role."
+        - id: letters
+          code: |
+            got = raci_problems({"publish": {"Owner": "A", "Steward": "R", "Legal": "X"}})
+            assert got == ["publish: unknown letter X for Legal"], got
+          message: "Report any letter other than R, A, C or I."
+    solution: |
+      VALID_LETTERS = frozenset({"R", "A", "C", "I"})
+
+
+      def raci_problems(raci: dict[str, dict[str, str]]) -> list[str]:
+          """Problems in a RACI: missing or duplicate accountable roles, no responsible role, bad letters.
+
+          Args:
+              raci: Activity to a dict of role to letter.
+
+          Returns:
+              The problems found, sorted. Empty when the RACI is sound.
+          """
+          problems: list[str] = []
+          for activity, cells in raci.items():
+              letters = list(cells.values())
+              accountable = letters.count("A")
+              if accountable == 0:
+                  problems.append(f"{activity}: no accountable role")
+              elif accountable > 1:
+                  problems.append(f"{activity}: {accountable} accountable roles")
+              if letters.count("R") == 0:
+                  problems.append(f"{activity}: no responsible role")
+              for role, letter in cells.items():
+                  if letter not in VALID_LETTERS:
+                      problems.append(f"{activity}: unknown letter {letter} for {role}")
+          return sorted(problems)
+    seeded_bugs:
+      - |
+        def raci_problems(raci: dict[str, dict[str, str]]) -> list[str]:
+            """Only checks that an A exists."""
+            return sorted(f"{a}: no accountable role" for a, cells in raci.items() if "A" not in cells.values())
+      - |
+        def raci_problems(raci: dict[str, dict[str, str]]) -> list[str]:
+            """Forgets the responsible check."""
+            problems = []
+            for activity, cells in raci.items():
+                n = list(cells.values()).count("A")
+                if n == 0:
+                    problems.append(f"{activity}: no accountable role")
+                elif n > 1:
+                    problems.append(f"{activity}: {n} accountable roles")
+                for role, letter in cells.items():
+                    if letter not in {"R", "A", "C", "I"}:
+                        problems.append(f"{activity}: unknown letter {letter} for {role}")
+            return sorted(problems)
+      - |
+        def raci_problems(raci: dict[str, dict[str, str]]) -> list[str]:
+            """Accepts any letter."""
+            problems = []
+            for activity, cells in raci.items():
+                letters = list(cells.values())
+                n = letters.count("A")
+                if n == 0:
+                    problems.append(f"{activity}: no accountable role")
+                elif n > 1:
+                    problems.append(f"{activity}: {n} accountable roles")
+                if letters.count("R") == 0:
+                    problems.append(f"{activity}: no responsible role")
+            return sorted(problems)
+    wrong_answers:
+      - answer: |
+          def raci_problems(raci: dict[str, dict[str, str]]) -> list[str]:
+              """Only checks that an A exists."""
+              return sorted(f"{a}: no accountable role" for a, cells in raci.items() if "A" not in cells.values())
+        triggers: accountable
+      - answer: |
+          def raci_problems(raci: dict[str, dict[str, str]]) -> list[str]:
+              """Forgets the responsible check."""
+              problems = []
+              for activity, cells in raci.items():
+                  n = list(cells.values()).count("A")
+                  if n == 0:
+                      problems.append(f"{activity}: no accountable role")
+                  elif n > 1:
+                      problems.append(f"{activity}: {n} accountable roles")
+                  for role, letter in cells.items():
+                      if letter not in {"R", "A", "C", "I"}:
+                          problems.append(f"{activity}: unknown letter {letter} for {role}")
+              return sorted(problems)
+        triggers: responsible
+      - answer: |
+          def raci_problems(raci: dict[str, dict[str, str]]) -> list[str]:
+              """Accepts any letter."""
+              problems = []
+              for activity, cells in raci.items():
+                  letters = list(cells.values())
+                  n = letters.count("A")
+                  if n == 0:
+                      problems.append(f"{activity}: no accountable role")
+                  elif n > 1:
+                      problems.append(f"{activity}: {n} accountable roles")
+                  if letters.count("R") == 0:
+                      problems.append(f"{activity}: no responsible role")
+              return sorted(problems)
+        triggers: letters
+    hints:
+      - "For each activity, count the As and the Rs in its letters."
+      - "Check every letter against R, A, C and I."
+      - "Collect the messages and return them sorted."
+    explanation: |
+      Counting As and Rs per activity catches the two failures that stall decisions, and checking letters catches typos before the table is published.
+
+  - id: E2-L5-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Start the glossary and RACI for the talent platform's first month.
+    slots:
+      - id: scope
+        label: "Which terms first"
+        options:
+          - {id: top, text: "The 15 terms used most in people reports"}
+          - {id: all, text: "Every term in the HR system, at once"}
+        answer: top
+      - id: names
+        label: "RACI columns"
+        options:
+          - {id: roles, text: "Roles, such as workforce data owner"}
+          - {id: people, text: "People's names"}
+        answer: roles
+      - id: change
+        label: "Changing a definition"
+        options:
+          - {id: path, text: "Through the escalation path, with a new version and date"}
+          - {id: edit, text: "Any steward edits the entry in place"}
+        answer: path
+    model_answer: |
+      - The most-used terms cause most disputes, so they repay the effort first.
+      - Roles survive reorganisations; names go stale.
+      - Versioned changes let every report say which definition it used.
+    wrong_answers:
+      - answer: {scope: all}
+        feedback: "Hundreds of terms at once means none get approved. Start where the disputes are."
+      - answer: {names: people}
+        feedback: "When someone moves on, a name-based RACI points nowhere."
+      - answer: {change: edit}
+        feedback: "An edit in place silently changes every report that uses the term."
+    hints:
+      - "Where do disputes happen most?"
+      - "What happens when someone leaves?"
+      - "How would a report know the definition changed?"
+    explanation: |
+      Start with the busiest terms, name roles, and version every change.
+recap:
+  - front: "RACI letters"
+    back: "R does the work, A owns and signs off (exactly one), C is asked before, I is told after."
+  - front: "Two RACI failures"
+    back: "Two accountable roles, so each waits or approves their own; no accountable role, so nobody signs off."
+  - front: "Glossary entry fields"
+    back: "Term, definition, calculation rule, owner, steward, system of record, related terms, status with version and date."
+  - front: "Where to start a glossary"
+    back: "The 15 terms used most in people reports, not the whole vocabulary."
+claims:
+  - claim: "DMBOK2 places the business glossary within metadata management."
+    status: search-only
+    source: "DMBOK2 chapter 12 as summarised in secondary sources; not part of the extracts checked in the book."
+  - claim: "RACI conventions (exactly one accountable, at least one responsible, consulted before, informed after) and the glossary fields listed are common practice."
+    status: unverified
+    source: "General governance practice, not a quotation from a standard."

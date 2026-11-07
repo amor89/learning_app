@@ -1,0 +1,321 @@
+id: E1-L5
+title: Personal data in each medallion layer
+concept: |
+  A medallion design decides where personal data lives in a readable form. Make that decision per layer, and write it down.
+
+  **Bronze** keeps the delivery as received, names and national insurance numbers included. Few people need it: give access to the pipeline identity and one named engineering group. Keep it only as long as reprocessing needs it.
+
+  **Silver** is where you **pseudonymise**. UK GDPR Article 4(5) defines pseudonymisation as processing personal data so it can no longer be attributed to a person without additional information, which is kept separately and protected. In practice:
+
+  - Replace each direct identifier with a **keyed hash**, such as HMAC-SHA256 of the employee ID with a secret key.
+  - Keep the key in a secret store, not in the lakehouse. Without the key, nobody can rebuild the mapping.
+  - Drop fields no use needs, and coarsen others: date of birth becomes an age band.
+
+  A plain hash without a key is not enough. National insurance numbers follow a known pattern, so anyone can hash every possible value and match them.
+
+  Pseudonymised data is **still personal data**: you hold the key. It lowers the risk, so it changes how you protect the data, not whether the law applies.
+
+  **Gold** serves aggregates. Suppress any group smaller than a threshold you agree with the data protection officer, such as fewer than 10 people, so a team of three cannot be singled out. Mask any identifying column that remains with column-level security, as lesson C9-L2 showed.
+
+  Record each layer's choices in the architecture decision record, with the reason.
+why_it_matters: |
+  A team hashed employee IDs in silver with plain SHA-256 and shared the tables with an analytics vendor. A vendor analyst hashed every employee ID in the firm's known format and matched them all within an hour. The hashed tables were as identifying as the originals. A keyed hash, with the key kept by the firm, would have made the match impossible.
+worked_example:
+  language: python
+  weak:
+    code: |
+      import hashlib
+
+
+      def mask_id(employee_id):
+          return hashlib.sha256(employee_id.encode()).hexdigest()
+    annotations:
+      - find: "return hashlib.sha256(employee_id.encode()).hexdigest()"
+        note: "No key. Anyone can hash every ID in the known format and match them."
+      - find: "def mask_id(employee_id):"
+        note: "No check for an empty ID, which would hash to the same value every time."
+  strong:
+    code: |
+      import hashlib
+      import hmac
+
+
+      def pseudonymise(employee_id: str, key: bytes) -> str:
+          """A keyed pseudonym for an employee ID; the key stays in the secret store."""
+          if not employee_id or not key:
+              raise ValueError("employee ID and key are both required")
+          return hmac.new(key, employee_id.encode(), hashlib.sha256).hexdigest()
+    annotations:
+      - find: "return hmac.new(key, employee_id.encode(), hashlib.sha256).hexdigest()"
+        note: "HMAC-SHA256 with a secret key. Without the key, the mapping cannot be rebuilt."
+      - find: "def pseudonymise(employee_id: str, key: bytes) -> str:"
+        note: "The key is a parameter, read from a secret store at run time, never hardcoded."
+  takeaway: |
+    Keep raw identifiers in bronze for a few people, pseudonymise with a keyed hash in silver, suppress small groups in gold, and record each choice. Pseudonymised data is still personal data.
+exercises:
+  - id: E1-L5-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      In which layer should direct identifiers be replaced with pseudonyms?
+    options:
+      - {id: a, text: "Silver"}
+      - {id: b, text: "Bronze"}
+      - {id: c, text: "Gold only"}
+      - {id: d, text: "None, because access control is enough"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "Bronze keeps the delivery as received, so reprocessing stays possible."
+      - answer: c
+        feedback: "By gold, the readable identifiers have already spread through silver."
+      - answer: d
+        feedback: "Access control limits who reads the data. Pseudonymisation limits what a reader learns."
+    hints:
+      - "Which layer keeps the delivery as received?"
+      - "Where do canonical, cleaned tables live?"
+      - "Silver."
+    explanation: |
+      Bronze stays raw for reprocessing. Silver is the first layer most analysts read, so pseudonymise there.
+
+  - id: E1-L5-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Silver holds employee IDs replaced by a keyed hash. Is it still personal data under UK GDPR?
+    options:
+      - {id: a, text: "Yes"}
+      - {id: b, text: "No"}
+    answer: a
+    reasons:
+      - {id: r1, text: "The organisation holds the key and can attribute the data to a person, so it is pseudonymised, not anonymous."}
+      - {id: r2, text: "Any data about employees is personal data, even when no one can identify anyone."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Article 4(5) describes pseudonymised data: attributable with the separately kept information. You hold that information."
+      - answer: a|r2
+        feedback: "Right answer, wrong reason. Truly anonymous data is not personal data. This data is pseudonymous because you hold the key."
+    hints:
+      - "Who holds the key?"
+      - "Can anyone in the organisation reverse it?"
+      - "Pseudonymised, not anonymous."
+    explanation: |
+      You can attribute it with the key you hold, so it remains personal data with a lower risk.
+
+  - id: E1-L5-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the plan for personal data in each layer.
+    template: |
+      bronze: raw, read by the pipeline identity and one [[g1]] group
+      silver: direct identifiers replaced by a [[g2]] hash, key in the secret store
+      gold:   aggregates, with groups under 10 people [[g3]]
+    gaps:
+      g1: {accepted: [engineering, named engineering, named], case_sensitive: false}
+      g2: {accepted: [keyed, HMAC, HMAC-SHA256], case_sensitive: false}
+      g3: {accepted: [suppressed, hidden], case_sensitive: false}
+    wrong_answers:
+      - answer: {g2: plain}
+        feedback: "A plain hash of a known format can be reversed by hashing every possible value. Use a keyed hash."
+    hints:
+      - "Very few people read bronze."
+      - "The hash needs a secret."
+      - "`engineering`, `keyed`, `suppressed`."
+    explanation: |
+      Bronze for a named few, a keyed hash in silver, small groups suppressed in gold.
+
+  - id: E1-L5-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `pseudonymise(employee_id: str, key: bytes) -> str`. Return the HMAC-SHA256 of the employee ID, encoded as UTF-8, under `key`, as a hex string. Raise `ValueError` if the ID is empty or the key is empty.
+    primer: |
+      `hmac.new(key, message, hashlib.sha256)` builds a keyed hash. `.hexdigest()` returns it as hex text. Both arguments must be bytes, so encode text first:
+
+      ```python
+      import hashlib
+      import hmac
+
+      hmac.new(b"secret", "hello".encode(), hashlib.sha256).hexdigest()[:8]   # '88aab3ed'
+      hashlib.sha256("hello".encode()).hexdigest()[:8]                          # '2cf24dba', no key
+      ```
+
+      The same message and key always give the same result. A different key gives a different one.
+    starter: |
+      import hashlib
+
+
+      def pseudonymise(employee_id, key):
+          return hashlib.sha256(employee_id.encode()).hexdigest()
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: pseudonymise
+          typed: true
+          docstring: true
+          message: "Give `pseudonymise` type hints and a docstring."
+      tests:
+        - id: keyed
+          code: |
+            import hashlib
+            import hmac
+            got = pseudonymise("E1001", b"k1")
+            assert got == hmac.new(b"k1", b"E1001", hashlib.sha256).hexdigest(), got
+            assert got != hashlib.sha256(b"E1001").hexdigest(), "this is an unkeyed hash"
+          message: "Return the HMAC-SHA256 of the ID under the key, not a plain hash."
+        - id: stable
+          code: |
+            assert pseudonymise("E1001", b"k1") == pseudonymise("E1001", b"k1")
+            assert pseudonymise("E1001", b"k1") != pseudonymise("E1001", b"k2")
+            assert pseudonymise("E1001", b"k1") != pseudonymise("E1002", b"k1")
+          message: "The same ID and key always give the same pseudonym; a different key or ID gives a different one."
+        - id: empty
+          code: |
+            for args in [("", b"k1"), ("E1001", b"")]:
+                try:
+                    pseudonymise(*args)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {args}")
+          message: "Raise ValueError for an empty ID or an empty key."
+    solution: |
+      import hashlib
+      import hmac
+
+
+      def pseudonymise(employee_id: str, key: bytes) -> str:
+          """A keyed pseudonym for an employee ID.
+
+          Args:
+              employee_id: The direct identifier to replace.
+              key: The secret key, read from a secret store at run time.
+
+          Returns:
+              The HMAC-SHA256 of the ID under the key, as a hex string.
+
+          Raises:
+              ValueError: If the ID or the key is empty.
+          """
+          if not employee_id or not key:
+              raise ValueError("employee ID and key are both required")
+          return hmac.new(key, employee_id.encode("utf-8"), hashlib.sha256).hexdigest()
+    seeded_bugs:
+      - |
+        import hashlib
+
+
+        def pseudonymise(employee_id: str, key: bytes) -> str:
+            """Plain hash: no key."""
+            if not employee_id or not key:
+                raise ValueError("missing")
+            return hashlib.sha256(employee_id.encode()).hexdigest()
+      - |
+        import hashlib
+
+
+        def pseudonymise(employee_id: str, key: bytes) -> str:
+            """Key appended to the ID and hashed, not HMAC."""
+            if not employee_id or not key:
+                raise ValueError("missing")
+            return hashlib.sha256(employee_id.encode() + key).hexdigest()
+      - |
+        import hashlib
+        import hmac
+
+
+        def pseudonymise(employee_id: str, key: bytes) -> str:
+            """No check for an empty key."""
+            return hmac.new(key, employee_id.encode(), hashlib.sha256).hexdigest()
+    wrong_answers:
+      - answer: |
+          import hashlib
+
+
+          def pseudonymise(employee_id: str, key: bytes) -> str:
+              """Plain hash: no key."""
+              if not employee_id or not key:
+                  raise ValueError("missing")
+              return hashlib.sha256(employee_id.encode()).hexdigest()
+        triggers: keyed
+      - answer: |
+          import hashlib
+          import hmac
+
+
+          def pseudonymise(employee_id: str, key: bytes) -> str:
+              """No check for an empty key."""
+              return hmac.new(key, employee_id.encode(), hashlib.sha256).hexdigest()
+        triggers: empty
+    hints:
+      - "Import `hmac` and `hashlib`."
+      - "Encode the ID to bytes before hashing."
+      - "Check for an empty ID or key first, and raise `ValueError`."
+    explanation: |
+      HMAC-SHA256 with a secret key is deterministic, so joins still work, and it cannot be reversed by hashing every possible ID without the key.
+
+  - id: E1-L5-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Set the personal data rules for a performance-ratings pipeline.
+    slots:
+      - id: bronze
+        label: "Bronze access"
+        options:
+          - {id: narrow, text: "The pipeline identity and one named engineering group, with short retention"}
+          - {id: all, text: "Everyone in the analytics workspace, so they can debug"}
+        answer: narrow
+      - id: silver
+        label: "Identifiers in silver"
+        options:
+          - {id: hmac, text: "HMAC-SHA256 with a key in the secret store"}
+          - {id: plain, text: "Plain SHA-256, because it cannot be reversed"}
+        answer: hmac
+      - id: gold
+        label: "Small teams in gold"
+        options:
+          - {id: suppress, text: "Suppress groups under the threshold agreed with the DPO"}
+          - {id: show, text: "Show every team, however small"}
+        answer: suppress
+    model_answer: |
+      - Raw identifiers stay with the few who must reprocess them.
+      - A keyed hash cannot be matched by hashing every possible ID.
+      - Small groups in an aggregate can single people out.
+    wrong_answers:
+      - answer: {bronze: all}
+        feedback: "Bronze holds raw identifiers. Debugging should use silver, or a named few."
+      - answer: {silver: plain}
+        feedback: "A plain hash of a known ID format is matched by hashing every possible value."
+      - answer: {gold: show}
+        feedback: "A team of three in a ratings report identifies each person."
+    hints:
+      - "Who needs raw identifiers?"
+      - "Can a known-format ID be guessed?"
+      - "What does a group of three reveal?"
+    explanation: |
+      Narrow bronze, keyed pseudonyms in silver, and suppression in gold keep each layer's risk in proportion.
+recap:
+  - front: "Pseudonymisation, UK GDPR Article 4(5)"
+    back: "Data no longer attributable to a person without additional information that is kept separately and protected."
+  - front: "Is pseudonymised data personal data?"
+    back: "Yes. You hold the key. It lowers the risk; the law still applies."
+  - front: "Why a keyed hash?"
+    back: "A plain hash of a known-format ID is matched by hashing every possible value. HMAC with a secret key prevents that."
+  - front: "Personal data per layer"
+    back: "Bronze raw for a named few, silver pseudonymised, gold aggregated with small groups suppressed."
+claims:
+  - claim: "UK GDPR Article 4(5) defines pseudonymisation as processing personal data so it can no longer be attributed to a specific data subject without additional information, kept separately and subject to technical and organisational measures."
+    status: verified
+    source: "https://www.legislation.gov.uk/eur/2016/679/article/4, checked 7 November 2026."
+  - claim: "Pseudonymised data remains personal data when the controller can attribute it with additional information it holds."
+    status: search-only
+    source: "UK GDPR recital 26 and ICO guidance on pseudonymisation, not re-checked at source: ico.org.uk refused automated requests."
+  - claim: "Small-cell suppression thresholds, such as fewer than 10 people, are an organisational choice agreed with the data protection officer, not a legal figure."
+    status: unverified
+    source: "Common statistical disclosure control practice."

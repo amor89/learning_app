@@ -3,7 +3,7 @@ import { renderExercise } from "./exercises.js";
 import * as paths from "./pathways.js";
 import { monthLink } from "./month-view.js";
 import { placementCard } from "./placement-view.js";
-import { roleCard } from "./role-view.js";
+import { homeCountdown, roleCard } from "./role-view.js";
 import * as store from "./store.js";
 import {
   codeBlock,
@@ -115,6 +115,7 @@ export function dashboard(app) {
       statsLine(state, streak),
     ),
     placementPrompt(app, next),
+    homeCountdown(app, pathway.id),
     h("div", { class: "card pathway-card" },
       h("span", { class: "track-id" }, "Your pathway"),
       h("strong", {}, pathway.title),

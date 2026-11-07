@@ -80,3 +80,95 @@ export function levelGap(record, module) {
   const level = record.levels[module.id];
   return level ? module.target - level : null;
 }
+
+// Countdown --------------------------------------------------------------------
+// Your own settings for the countdown on the role page and Home: your start date
+// (it also dates the phases), the phases whose lessons you want done, the deadline
+// (your start date or the end of a phase) and the days a week you study.
+
+export const COUNTDOWN_DEFAULTS = { through: "P2", by: "start", per_week: 5, home: true };
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+function validDay(day) {
+  if (typeof day !== "string" || !ISO_DAY.test(day)) return false;
+  return new Date(toUtc(day)).toISOString().slice(0, 10) === day;
+}
+
+// Saved settings over the defaults. A value that no longer fits the plan falls back.
+export function countdownSettings(plan, record) {
+  const saved = record?.countdown ?? {};
+  const ids = plan.phases.map((p) => p.id);
+  return {
+    start: validDay(saved.start) ? saved.start : plan.start,
+    through: ids.includes(saved.through) ? saved.through : ids.includes(COUNTDOWN_DEFAULTS.through) ? COUNTDOWN_DEFAULTS.through : ids[0],
+    by: saved.by === "start" || ids.includes(saved.by) ? saved.by : COUNTDOWN_DEFAULTS.by,
+    per_week: Number.isInteger(saved.per_week) && saved.per_week >= 1 && saved.per_week <= 7 ? saved.per_week : COUNTDOWN_DEFAULTS.per_week,
+    home: typeof saved.home === "boolean" ? saved.home : COUNTDOWN_DEFAULTS.home,
+  };
+}
+
+// Saves one or more settings after checking them against the plan.
+export function setCountdown(state, plan, changes) {
+  const ids = plan.phases.map((p) => p.id);
+  const checks = {
+    start: (v) => validDay(v),
+    through: (v) => ids.includes(v),
+    by: (v) => v === "start" || ids.includes(v),
+    per_week: (v) => Number.isInteger(v) && v >= 1 && v <= 7,
+    home: (v) => typeof v === "boolean",
+  };
+  for (const [key, value] of Object.entries(changes)) {
+    if (!(key in checks)) throw new Error(`unknown countdown setting ${key}`);
+    if (!checks[key](value)) throw new Error(`invalid ${key}: ${value}`);
+  }
+  const record = roleRecord(state, plan.id);
+  record.countdown = { ...(record.countdown ?? {}), ...changes };
+}
+
+// Study days from today up to the day before the deadline, at `perWeek` days a week.
+export function studyDays(daysLeft, perWeek) {
+  if (daysLeft <= 0) return 0;
+  return Math.floor(daysLeft / 7) * perWeek + Math.min(daysLeft % 7, perWeek);
+}
+
+// The work left in the chosen phases and the pace it needs by the deadline.
+// `isDone(lessonId)` says whether you have completed a lesson. A competency's hours
+// count in proportion to its lessons left. One with no lessons counts in full until
+// you tick its assessment.
+export function countdown(plan, record, today, isDone) {
+  const settings = countdownSettings(plan, record);
+  const upTo = plan.phases.findIndex((p) => p.id === settings.through);
+  const phases = plan.phases.slice(0, upTo + 1);
+  const byId = new Map(plan.modules.map((m) => [m.id, m]));
+  const lessons = new Map();
+  let hoursLeft = 0;
+  for (const phase of phases) {
+    for (const id of phase.modules) {
+      const module = byId.get(id);
+      if (!module) continue;
+      const ids = module.lessons.map((l) => (typeof l === "string" ? l : l.id));
+      for (const lessonId of ids) lessons.set(lessonId, isDone(lessonId));
+      if (ids.length) hoursLeft += (module.hours * ids.filter((l) => !isDone(l)).length) / ids.length;
+      else if (!record?.done?.[id]) hoursLeft += module.hours;
+    }
+  }
+  const deadlinePhase = plan.phases.find((p) => p.id === settings.by);
+  const deadline = deadlinePhase ? dayToDate(settings.start, deadlinePhase.days[1] + 1) : settings.start;
+  const daysLeft = Math.round((toUtc(deadline) - toUtc(today)) / DAY_MS);
+  const days = studyDays(daysLeft, settings.per_week);
+  const left = [...lessons.values()].filter((done) => !done).length;
+  return {
+    settings,
+    phases: phases.map((p) => p.id),
+    deadline,
+    daysLeft: Math.max(0, daysLeft),
+    studyDays: days,
+    lessonsLeft: left,
+    lessonsTotal: lessons.size,
+    hoursLeft: Math.round(hoursLeft * 10) / 10,
+    lessonsPerStudyDay: days ? Math.round((left / days) * 10) / 10 : null,
+    hoursPerStudyDay: days ? Math.round((hoursLeft / days) * 10) / 10 : null,
+    status: left === 0 && hoursLeft === 0 ? "done" : daysLeft <= 0 ? "passed" : "running",
+  };
+}

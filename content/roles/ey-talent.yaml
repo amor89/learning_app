@@ -48,9 +48,9 @@ modules:
     hours: 6
     outcomes: [Choose capacity SKU and workspace layout, "Separate dev, test and production"]
     assessment: Write a workspace and environment standard of two pages.
-    lessons: [C1-L1, C1-L3, C5-L2, C10-L2, A4-L1]
-    coverage: partial
-    gaps: The lessons cover capacities, workspace roles and environment separation. They do not cover choosing a capacity SKU size for a given load.
+    lessons: [C1-L1, C1-L3, C5-L2, C10-L2, A4-L1, C10-L4]
+    coverage: full
+    gaps: C10-L4 adds sizing an F SKU from trial measurements. The employer's actual capacity and its load are assumptions to confirm in month 1.
   - id: INF-02
     stream: Infrastructure
     title: CI/CD for Fabric items
@@ -94,9 +94,9 @@ modules:
     hours: 8
     outcomes: ["Define bronze, silver and gold contracts", Place PII handling per layer]
     assessment: Architecture decision record for layer design.
-    lessons: [A0-L3, A2-L1, A2-L2, A2-L3, B18-L3]
-    coverage: partial
-    gaps: The lessons cover layer contracts and decision logs. They do not cover where to pseudonymise or mask personal data in each layer.
+    lessons: [A0-L3, A2-L1, A2-L2, A2-L3, B18-L3, E1-L5]
+    coverage: full
+    gaps: E1-L5 adds where to pseudonymise, mask and suppress personal data in each layer. Key management for the pseudonymisation key is out of scope.
   - id: ARC-03
     stream: Architecture
     title: Canonical talent model and people master data
@@ -139,9 +139,9 @@ modules:
     hours: 8
     outcomes: ["Apply workspace roles, item permissions, row and column security", Design attribute-based access]
     assessment: Access matrix for four personas, tested on a synthetic dataset.
-    lessons: [C1-L3, C9-L2, A4-L2, A4-L3]
-    coverage: partial
-    gaps: The lessons cover role-based access down to rows and columns. They do not design attribute-based access.
+    lessons: [C1-L3, C9-L2, A4-L2, A4-L3, C9-L5]
+    coverage: full
+    gaps: C9-L5 adds attribute-based access through Entra dynamic groups and Warehouse security policies. Whether the employer licenses Entra ID P1 for every member is an assumption to confirm.
   - id: SEC-03
     stream: Security
     title: Purview classification, labels and audit
@@ -185,9 +185,9 @@ modules:
     hours: 8
     outcomes: [Draft RACI, Write glossary entries, Set naming conventions]
     assessment: RACI, 15 glossary entries and a naming standard.
-    lessons: [E2-L3, C9-L1, A1-L1, B18-L3]
-    coverage: partial
-    gaps: The lessons cover decision rights, escalation, domains, endorsement, naming in code and decision logs. They do not cover a RACI or a business glossary.
+    lessons: [E2-L3, C9-L1, A1-L1, B18-L3, E2-L5]
+    coverage: full
+    gaps: E2-L5 adds a RACI and business glossary entries. The employer's existing glossary tool and owners are assumptions to confirm.
   - id: GOV-03
     stream: Governance and standards
     title: Data quality rules and lineage

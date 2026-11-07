@@ -1,0 +1,323 @@
+id: C9-L5
+title: Attribute-based access, rows by business unit
+concept: |
+  **RBAC and ABAC.** Role-based access control (RBAC) grants access by membership: you are in the HR analysts role, so you read the HR tables. Attribute-based access control (ABAC) decides from attributes such as department, country or business unit. Talent data needs ABAC, because the usual rule is "a manager sees their own business unit".
+
+  **OneLake security is role-based.** Roles only grant, and deny is the default. Its row filters are static: "RLS roles don't support dynamic and multitable queries" (Microsoft Learn, page dated 19 August 2026). A role cannot look up who is asking. Two patterns bring attributes in.
+
+  **Pattern 1: attributes build the groups.** A Microsoft Entra dynamic membership group adds every user whose attributes match a rule, such as `user.department -eq "HR"`. Map each group to a OneLake security role with a static row filter for that value. Limits: each member needs a Microsoft Entra ID P1 licence, an item holds 250 roles, and a group change takes about an hour to reach OneLake.
+
+  **Pattern 2: an entitlements table.** In a Warehouse or the SQL analytics endpoint, `CREATE SECURITY POLICY` adds a filter predicate written as an inline table-valued function. The function can join an entitlements table on `USER_NAME()`, so one policy serves every user. It filters T-SQL queries on those items only.
+
+  **Who writes the attributes?** Access is only as safe as the attribute behind it. Microsoft advises you to audit who can write each attribute a dynamic group rule reads, in Entra and in on-premises Active Directory. Treat the entitlements table the same way.
+
+  Status: OneLake security RLS, Warehouse RLS and Entra dynamic groups are GA (Microsoft Learn, November 2026).
+why_it_matters: |
+  A talent team built one OneLake role per manager, with the manager's name in each row filter. After a reorganisation, 40 roles needed edits by hand, and 6 were missed for two weeks. Managers who had moved still saw their old teams' salaries. An entitlements table that HR maintains, read by one policy, would have needed one data change per move.
+worked_example:
+  language: sql
+  weak:
+    code: |
+      CREATE FUNCTION Security.fn_unit(@unit AS varchar(50))
+          RETURNS TABLE
+      WITH SCHEMABINDING
+      AS
+          RETURN SELECT 1 AS allowed
+          WHERE (@unit = 'Retail' AND USER_NAME() = 'a.khan@example.com')
+             OR (@unit = 'Audit' AND USER_NAME() = 'j.lee@example.com');
+    annotations:
+      - find: "@unit = 'Retail' AND USER_NAME() = 'a.khan@example.com'"
+        note: "People and units hardcoded in the predicate. Every move means a code change, and personal data sits in code."
+      - find: "OR (@unit = 'Audit'"
+        note: "The function grows by one line per manager and has to be dropped and recreated with its policy each time."
+  strong:
+    code: |
+      CREATE FUNCTION Security.fn_unit(@unit AS varchar(50))
+          RETURNS TABLE
+      WITH SCHEMABINDING
+      AS
+          RETURN SELECT 1 AS allowed
+          FROM Security.entitlements AS e
+          WHERE e.upn = USER_NAME() AND e.business_unit = @unit;
+      GO
+
+      CREATE SECURITY POLICY Security.unit_filter
+      ADD FILTER PREDICATE Security.fn_unit(business_unit)
+      ON talent.fact_headcount
+      WITH (STATE = ON);
+    annotations:
+      - find: "FROM Security.entitlements AS e"
+        note: "Who sees which unit is data, maintained by HR data stewards, not code."
+      - find: "WHERE e.upn = USER_NAME() AND e.business_unit = @unit;"
+        note: "Dynamic: the predicate looks up the person asking. No entitlement row means no rows, deny by default."
+      - find: "ADD FILTER PREDICATE Security.fn_unit(business_unit)"
+        note: "One policy on the table serves every user."
+  takeaway: |
+    OneLake security row filters are static. For "each manager sees their own unit", build groups from Entra attributes or join an entitlements table in a Warehouse security policy. Audit who can write the attributes and the table.
+exercises:
+  - id: C9-L5-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You want one OneLake security role whose row filter shows each user the rows for their own business unit. Why does this not work?
+    options:
+      - {id: a, text: "OneLake RLS roles don't support dynamic queries, so a filter cannot look up who is asking"}
+      - {id: b, text: "OneLake security has no row-level security"}
+      - {id: c, text: "Roles can contain only users, not groups"}
+      - {id: d, text: "OneLake security only supports deny roles"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "OneLake security has RLS. Its filters are static values."
+      - answer: c
+        feedback: "Roles accept Entra users and groups."
+      - answer: d
+        feedback: "The reverse. OneLake security supports only grant roles, with deny by default."
+    hints:
+      - "Think about what the filter would need to know."
+      - "Can a OneLake row filter refer to the current user?"
+      - "Static filters only."
+    explanation: |
+      OneLake RLS rules are static. Bring attributes in through groups or an entitlements table.
+
+  - id: C9-L5-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      You plan Entra dynamic groups with the rule `user.department -eq "HR"` to grant access to salary rows. What do you check first?
+    options:
+      - {id: a, text: "Who can write the department attribute, in Entra and in on-premises Active Directory"}
+      - {id: b, text: "Whether the group has a display name"}
+      - {id: c, text: "Whether the rule uses the rule builder or the text box"}
+      - {id: d, text: "Nothing, because Entra controls dynamic groups"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Membership is only as safe as the write controls on the attribute the rule reads."}
+      - {id: r2, text: "Dynamic membership groups are in preview."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "The name has no effect on who becomes a member."
+      - answer: c
+        feedback: "Both produce the same rule. The risk lies in the attribute."
+      - answer: d
+        feedback: "If users can edit their own department, they can add themselves to the group."
+      - answer: a|r2
+        feedback: "Right check, wrong reason. Dynamic groups are GA. The risk is who can change the attribute."
+    hints:
+      - "Where does the group get its members from?"
+      - "Who could change that value?"
+      - "Audit write permissions on the attribute."
+    explanation: |
+      A user who can edit the attribute can join the group. Audit attribute write permissions at the source.
+
+  - id: C9-L5-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the two patterns.
+    template: |
+      Entra dynamic group rule:     user.department [[g1]] "HR"
+      Warehouse row security:       CREATE [[g2]] POLICY ... ADD FILTER PREDICATE ...
+      Current user in the predicate: [[g3]]()
+    gaps:
+      g1: {accepted: ["-eq"], case_sensitive: false}
+      g2: {accepted: [SECURITY], case_sensitive: false}
+      g3: {accepted: [USER_NAME], case_sensitive: false}
+    wrong_answers:
+      - answer: {g2: "ROW ACCESS"}
+        feedback: "`CREATE ROW ACCESS POLICY` is Snowflake syntax. Fabric Warehouse uses `CREATE SECURITY POLICY`."
+    hints:
+      - "The Entra equals operator starts with a hyphen."
+      - "The T-SQL statement names a security policy."
+      - "`-eq`, `SECURITY`, `USER_NAME`."
+    explanation: |
+      Entra rules use `-eq`. Warehouse RLS uses `CREATE SECURITY POLICY` with a predicate that reads `USER_NAME()`.
+
+  - id: C9-L5-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `allowed_rows(rows: list[dict], entitlements: dict[str, list[str]], user: str) -> list[dict]`. It mirrors an entitlements predicate.
+
+      Each row has a `"business_unit"` key. `entitlements` maps a user principal name, in lower case, to the business units that user may see. Return the rows whose business unit the user may see, in their original order.
+
+      - Match `user` without regard to case, because user principal names are case-insensitive.
+      - A user with no entry sees no rows.
+      - A row with no `"business_unit"` key is never returned.
+    primer: |
+      `dict.get(key, default)` returns the value for `key`, or `default` when the key is missing:
+
+      ```python
+      prices = {"tea": 2}
+      prices.get("tea", 0)      # 2
+      prices.get("coffee", 0)   # 0
+      ```
+
+      `str.lower()` returns a lower-case copy: `"Ann@Example.com".lower()` is `"ann@example.com"`.
+    starter: |
+      def allowed_rows(rows, entitlements, user):
+          return rows
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: allowed_rows
+          typed: true
+          docstring: true
+          message: "Give `allowed_rows` type hints and a docstring."
+      tests:
+        - id: filters
+          code: |
+            rows = [
+                {"employee": "e1", "business_unit": "Retail"},
+                {"employee": "e2", "business_unit": "Audit"},
+                {"employee": "e3", "business_unit": "Retail"},
+                {"employee": "e4", "business_unit": "Tax"},
+            ]
+            ents = {"a.khan@example.com": ["Retail", "Tax"]}
+            got = allowed_rows(rows, ents, "a.khan@example.com")
+            assert [r["employee"] for r in got] == ["e1", "e3", "e4"], got
+          message: "Return only the rows for the user's business units, in their original order."
+        - id: unknown_user
+          code: |
+            rows = [{"employee": "e1", "business_unit": "Retail"}]
+            ents = {"a.khan@example.com": ["Retail"]}
+            assert allowed_rows(rows, ents, "j.lee@example.com") == []
+          message: "A user with no entitlement sees no rows. Deny by default."
+        - id: case
+          code: |
+            rows = [{"employee": "e1", "business_unit": "Retail"}]
+            ents = {"a.khan@example.com": ["Retail"]}
+            got = allowed_rows(rows, ents, "A.Khan@Example.com")
+            assert [r["employee"] for r in got] == ["e1"], got
+          message: "Match the user principal name without regard to case."
+        - id: missing_unit
+          code: |
+            rows = [{"employee": "e1"}, {"employee": "e2", "business_unit": "Retail"}]
+            ents = {"a.khan@example.com": ["Retail"]}
+            got = allowed_rows(rows, ents, "a.khan@example.com")
+            assert [r["employee"] for r in got] == ["e2"], got
+          message: "Skip a row with no business unit instead of failing or returning it."
+    solution: |
+      def allowed_rows(
+          rows: list[dict], entitlements: dict[str, list[str]], user: str
+      ) -> list[dict]:
+          """Rows the user may see, from an entitlements map.
+
+          Args:
+              rows: Dicts with a "business_unit" key.
+              entitlements: Lower-case user principal name to allowed business units.
+              user: The user principal name of the person asking.
+
+          Returns:
+              The allowed rows in their original order. Empty for a user with no entry.
+          """
+          units = set(entitlements.get(user.lower(), []))
+          return [row for row in rows if row.get("business_unit") in units]
+    seeded_bugs:
+      - |
+        def allowed_rows(rows: list[dict], entitlements: dict[str, list[str]], user: str) -> list[dict]:
+            """Falls back to every row for an unknown user."""
+            if user.lower() not in entitlements:
+                return rows
+            units = set(entitlements[user.lower()])
+            return [row for row in rows if row.get("business_unit") in units]
+      - |
+        def allowed_rows(rows: list[dict], entitlements: dict[str, list[str]], user: str) -> list[dict]:
+            """Case-sensitive lookup."""
+            units = set(entitlements.get(user, []))
+            return [row for row in rows if row.get("business_unit") in units]
+      - |
+        def allowed_rows(rows: list[dict], entitlements: dict[str, list[str]], user: str) -> list[dict]:
+            """Assumes every row has a business unit."""
+            units = set(entitlements.get(user.lower(), []))
+            return [row for row in rows if row["business_unit"] in units]
+    wrong_answers:
+      - answer: |
+          def allowed_rows(rows: list[dict], entitlements: dict[str, list[str]], user: str) -> list[dict]:
+              """Falls back to every row for an unknown user."""
+              if user.lower() not in entitlements:
+                  return rows
+              units = set(entitlements[user.lower()])
+              return [row for row in rows if row.get("business_unit") in units]
+        triggers: unknown_user
+      - answer: |
+          def allowed_rows(rows: list[dict], entitlements: dict[str, list[str]], user: str) -> list[dict]:
+              """Case-sensitive lookup."""
+              units = set(entitlements.get(user, []))
+              return [row for row in rows if row.get("business_unit") in units]
+        triggers: case
+    hints:
+      - "Look up the user's units once, with an empty list as the default."
+      - "Lower-case the user before the lookup."
+      - "Use `row.get(\"business_unit\")` so a row without the key is skipped."
+    explanation: |
+      Deny by default: no entitlement, no rows. Lower-case the user principal name, and never let a row without a unit through.
+
+  - id: C9-L5-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Design row access for talent reports across 40 business units. Managers see their own unit. HR business partners see the units they support.
+    slots:
+      - id: source
+        label: "Where the mapping lives"
+        options:
+          - {id: table, text: "An entitlements table keyed on user principal name, maintained by HR data stewards, read by one Warehouse security policy"}
+          - {id: code, text: "Names and units written into the predicate function"}
+        answer: table
+      - id: unknown
+        label: "A user with no entitlement"
+        options:
+          - {id: none, text: "Sees no rows"}
+          - {id: all, text: "Sees every row, so reports never look empty"}
+        answer: none
+      - id: writes
+        label: "Who may change the mapping"
+        options:
+          - {id: audited, text: "HR data stewards only, with every change logged and reviewed"}
+          - {id: anyone, text: "Any report author, so managers get access quickly"}
+        answer: audited
+    model_answer: |
+      - Keep who sees what as data in an entitlements table, read by one security policy.
+      - No entitlement means no rows. Deny by default.
+      - Restrict and audit writes to the table, because the policy trusts it.
+    wrong_answers:
+      - answer: {source: code}
+        feedback: "Every move becomes a code change, and personal data sits in code."
+      - answer: {unknown: all}
+        feedback: "A missing entry would expose every unit. Deny by default."
+      - answer: {writes: anyone}
+        feedback: "Anyone who can edit the table can grant themselves access."
+    hints:
+      - "Which option survives a reorganisation with a data change?"
+      - "What does deny by default mean for a missing entry?"
+      - "The policy is only as safe as the table it reads."
+    explanation: |
+      One policy over a stewarded entitlements table, deny by default, with audited writes.
+recap:
+  - front: "RBAC and ABAC"
+    back: "RBAC grants by role membership. ABAC decides from attributes such as department or business unit."
+  - front: "Can a OneLake security row filter depend on the current user?"
+    back: "No. OneLake RLS roles don't support dynamic or multitable queries. Use Entra dynamic groups mapped to roles, or Warehouse RLS."
+  - front: "Dynamic row security in a Fabric Warehouse"
+    back: "`CREATE SECURITY POLICY` with a filter predicate: an inline table-valued function that joins an entitlements table on `USER_NAME()`."
+  - front: "Entra dynamic groups for access: limits and risks"
+    back: "Each member needs Entra ID P1. A group change takes about an hour to reach OneLake. Audit who can write the attributes the rule reads."
+claims:
+  - claim: "OneLake security RLS roles don't support dynamic and multitable queries; OneLake security uses grant roles only and is deny by default."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/onelake/security/table-column-row-security (ms.date 2026-08-19); data-access-control-model (ms.date 2026-08-28)"
+  - claim: "OneLake security allows 250 roles per item (1,000 on request) and 500 members per role; role definition changes take about 5 minutes and user group changes about an hour, with some engines needing an extra hour."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/onelake/security/data-access-control-model (ms.date 2026-08-28, updated 2026-10-16)"
+  - claim: "Warehouse and SQL analytics endpoint RLS uses CREATE SECURITY POLICY with inline table-valued function predicates; a predicate can join another table; the documented example compares a column with USER_NAME(); Direct Lake on a warehouse falls back to DirectQuery under RLS."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/fabric/data-warehouse/row-level-security (updated 2026-09-02)"
+  - claim: "Entra dynamic membership group rules such as user.department -eq \"Sales\"; each unique member needs a Microsoft Entra ID P1 licence; Microsoft advises auditing write permissions on attributes used in rules, including those synced from on-premises Active Directory."
+    status: verified
+    source: "https://learn.microsoft.com/en-us/entra/identity/users/groups-dynamic-membership (ms.date 2026-08-13)"

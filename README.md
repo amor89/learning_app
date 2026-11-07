@@ -24,10 +24,11 @@ A role plan turns a job description into a dated plan you can check yourself aga
 
 Open it from the **EY: Talent Data Strategy** pathway, or from the dashboard while that pathway is yours (`#/role/ey-talent`). It shows:
 
-- **Where you are**: the start date, 10 December 2026, and today's day of the 180-day plan.
+- **Where you are**: the start date, 10 December 2026 unless you set your own, and today's day of the 180-day plan.
+- **A countdown you personalise**: your start date (it also dates the phases), the phases whose lessons you want done, the deadline (your start date or the end of a phase) and your study days a week. It shows the days left, the lessons and hours left, and the pace you need. Home shows it while you follow the pathway or after you personalise it. Untick **Show on Home** to hide it.
 - **Four phases**: Orient, Design, Prove and Enable, with dates and their success criteria to tick off.
 - **18 competencies** in five streams. Each one shows its target level, the day-one level your brief assumes, the outcomes, the hours and the assessment. A **Level 1 to 4** picker records where you are now and shows the gap to the target.
-- **The lessons that teach each competency**, with your progress, and a plain note on what the app does not cover yet. Competencies with no lesson at all are marked **Not in the app yet**: UK GDPR and special category data, cross-border transfers and works councils, DAMA-DMBOK, and EYQ.
+- **The lessons that teach each competency**, with your progress, and a plain note on what the app does not cover yet. Competencies with no lesson at all are marked **Not in the app yet**. Only EYQ remains.
 - **A self-assessment summary**: your mean level against the mean target in each stream, and the competencies below target.
 - **Assumptions to confirm**, each with a tick box.
 
