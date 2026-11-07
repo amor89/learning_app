@@ -11,7 +11,7 @@ concept: |
   - **4** managed: measured, with targets and reviews
   - **5** optimised: improved continuously from the measures
 
-  Each level builds on the last, so none can be skipped.
+  Each level builds on the last.
 
   Score a **grid**, not a single number: knowledge areas down the side, talent domains across the top. A talent platform has six domains: workforce and organisation, recruitment, learning, performance, mobility and skills. Data quality can be at 3 for workforce data and at 1 for skills.
 
@@ -323,9 +323,9 @@ recap:
     back: "A whole level with cited evidence: a document, a metric or a log."
 
 claims:
-  - claim: "DMBOK2 describes a data management maturity assessment; a common scale runs 0 no capability, 1 initial or ad hoc, 2 repeatable, 3 defined, 4 managed, 5 optimised; levels cannot be skipped."
-    status: unverified
-    source: "Practitioner and consultancy sources (datacrossroads.nl, DAMA chapter presentations on SlideShare), seen through search results, November 2026. Sources disagree on names and numbering, and DMBOK2 itself was not checked."
+  - claim: "DMBOK2 chapter 15, Data Management Maturity Assessment, uses six levels: 0 no capability, 1 initial or ad hoc, 2 repeatable, 3 defined, 4 managed, 5 optimised. It starts at 0, unlike CMM models that start at 1."
+    status: verified
+    source: "DAMA-DMBOK2, checked in the printed book by the course owner, 7 November 2026."
   - claim: "The six talent domains (workforce and organisation, recruitment, learning, performance, mobility, skills) come from the role brief, not from DAMA."
     status: verified
     source: "content/roles/ey-talent.yaml, the job description in the brief."

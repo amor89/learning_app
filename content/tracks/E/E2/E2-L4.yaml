@@ -16,7 +16,9 @@ concept: |
   - **Most recent**: for a home address, the latest update wins.
   - **Most complete**: a value beats a missing one. A blank must never overwrite a value.
 
-  Keep a **cross-reference** from the golden ID to every source ID it absorbed. Then a later delivery from any source still finds its person, and an unmerge stays possible when a steward finds a false match.
+  DMBOK2 names two patterns. **Match-merge** builds one physical record. **Match-link** only links source records to a global ID, which is easier to reverse.
+
+  Either way, keep a **cross-reference** from the golden ID to every source ID it absorbed. Then a later delivery from any source still finds its person, and an unmerge stays possible when a steward finds a false match.
 
   The rules are data, kept in a versioned file the owner signs off, not logic buried in a notebook.
 why_it_matters: |
@@ -345,6 +347,9 @@ recap:
   - front: "Why keep a cross-reference?"
     back: "Later deliveries find their person by source ID, and a false merge can be undone."
 claims:
-  - claim: "Deterministic and probabilistic matching, steward review for uncertain matches, survivorship rules (source priority, most recent, most complete), golden records and cross-references are common master data management practice."
+  - claim: "DMBOK2 chapter 10 describes deterministic and probabilistic matching, referring candidate duplicates to data stewards, match-merge and match-link, survivorship rules (most trusted source, most recent, most complete), golden records, and cross-reference management between source IDs and a global ID."
+    status: verified
+    source: "DAMA-DMBOK2, checked in the printed book by the course owner, 7 November 2026."
+  - claim: "Automatic merging in score bands, with only deterministic keys merging automatically, is this lesson's recommended practice."
     status: unverified
-    source: "General master data management practice. Not attributed to a specific passage of DAMA-DMBOK2, whose reference and master data chapter covers the topic."
+    source: "General master data management practice, not a DMBOK2 quotation."

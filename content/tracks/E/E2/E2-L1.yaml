@@ -4,7 +4,7 @@ title: The DAMA wheel, eleven knowledge areas around governance
 concept: |
   The **DAMA-DMBOK** (Data Management Body of Knowledge, second edition, revised in 2024) gives data teams a shared map. It splits data management into **eleven knowledge areas**, drawn as a wheel.
 
-  **Data governance** sits at the hub. It decides and oversees how the other ten are run. DMBOK2 defines it as the exercise of authority and control, planning, monitoring and enforcement, over the management of data assets.
+  **Data governance** sits at the hub. It decides and oversees how the other ten are run. DMBOK2 defines it as the exercise of authority, control and shared decision-making (planning, monitoring and enforcement) over the management of data assets.
 
   The ten spokes, with a talent example for each:
 
@@ -227,16 +227,22 @@ recap:
   - front: "DAMA wheel"
     back: "Data governance at the hub, ten knowledge areas around it. DMBOK2, revised in 2024."
   - front: "DMBOK2 definition of data governance"
-    back: "The exercise of authority and control (planning, monitoring and enforcement) over the management of data assets."
+    back: "The exercise of authority, control and shared decision-making (planning, monitoring and enforcement) over the management of data assets."
   - front: "Reference data, master data, metadata"
     back: "Reference: lists of codes. Master: the agreed record of a core entity. Metadata: data about data."
   - front: "First move on any data problem"
     back: "Name the knowledge area, then its owner, then the fix."
 
 claims:
-  - claim: "DAMA-DMBOK2 has eleven knowledge areas with data governance at the centre of the wheel: data architecture, data modelling and design, data storage and operations, data security, data integration and interoperability, document and content management, reference and master data, data warehousing and business intelligence, metadata management and data quality. A 2024 revision kept the framework and areas."
-    status: search-only
-    source: "Secondary summaries (Dawiso glossary, OvalEdge, a reproduced DMBOK2 table of contents), seen through search results, November 2026. www.dama.org was not reachable from the build environment, and the book was not checked."
-  - claim: "DMBOK2 section 3.1 (p. 67) defines data governance as the exercise of authority and control (planning, monitoring, and enforcement) over the management of data assets. The older DAMA Dictionary adds 'shared decision making'."
+  - claim: "DAMA-DMBOK2 has eleven knowledge areas with data governance at the centre of the wheel: data architecture, data modelling and design, data storage and operations, data security, data integration and interoperability, document and content management, reference and master data, data warehousing and business intelligence, metadata management and data quality."
+    status: verified
+    source: "DAMA-DMBOK2, checked in the printed book by the course owner, 7 November 2026: chapter 1, the DAMA Wheel figure."
+  - claim: "The 2024 revision of DMBOK2 kept the DAMA Wheel and its eleven knowledge areas."
+    status: verified
+    source: "Confirmed by the course owner from the revised edition, 7 November 2026."
+  - claim: "DMBOK2 chapter 3, section 1, defines data governance as 'the exercise of authority, control, and shared decision-making (planning, monitoring, and enforcement) over the management of data assets' (page 77 in the copy checked)."
+    status: verified
+    source: "DAMA-DMBOK2, checked in the printed book by the course owner, 7 November 2026."
+  - claim: "Earlier summaries quoted the definition without 'shared decision-making' and gave page 67."
     status: search-only
     source: "Government of Canada GCcollab wiki 'Data Governance' citing DMBOK2, and Perficient (2012) citing the DAMA Dictionary, seen through search results, November 2026."
