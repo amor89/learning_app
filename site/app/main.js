@@ -3,6 +3,7 @@ import * as store from "./store.js";
 import { drillView, interviewView, taskView } from "./interview-view.js";
 import { monthsView, monthView } from "./month-view.js";
 import { backTarget, isRoot, visit } from "./nav.js";
+import { installQuickKeys } from "./quickkeys.js";
 import { placementView } from "./placement-view.js";
 import { tabFor } from "./pathways.js";
 import { roleView } from "./role-view.js";
@@ -230,6 +231,7 @@ async function start() {
     return;
   }
   window.addEventListener("hashchange", route);
+  installQuickKeys();
   await route();
   watchForUpdates();
 }

@@ -63,7 +63,7 @@ The magnifier in the header opens **Search**. Type a word or two and results app
 
 Every word you type must start a word in the result. Title matches rank first, and words found side by side rank above the same words scattered. Matched words are marked. The query sits in the address, so Back from a result returns to the same results.
 
-`scripts/build_content.py` writes the index to `site/content/search.json` through `learnkit/search.py`. The app loads it the first time you search, and the service worker keeps it for offline use. `tests/content/test_search.py` checks that every lesson and recap card is in the index, and `tests/app/search.test.mjs` tests matching, ranking, highlights and extracts.
+`scripts/build_content.py` writes the index to `site/content/search.json` through `learnkit/search.py`. The app loads it the first time you search, and the service worker keeps it for offline use. `tests/content/test_search.py` checks that every lesson and recap card is in the index, and `tests/app/search.test.mjs tests/app/quickkeys.test.mjs` tests matching, ranking, highlights and extracts.
 
 ## Interview practice
 
@@ -141,7 +141,7 @@ pip install -e . --group dev
 python scripts/build_all.py
 ruff check . && ruff format --check . && mypy
 pytest                                   # Python checkers: solutions pass, seeded bugs fail
-node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs tests/app/notes.test.mjs tests/app/role.test.mjs tests/app/nav.test.mjs tests/app/search.test.mjs
+node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs tests/app/notes.test.mjs tests/app/role.test.mjs tests/app/nav.test.mjs tests/app/search.test.mjs tests/app/quickkeys.test.mjs
 ```
 
 WeasyPrint needs Pango. On macOS: `brew install pango`. On Ubuntu: `apt install libpango-1.0-0 libpangoft2-1.0-0`.

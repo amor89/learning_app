@@ -540,3 +540,18 @@ details.drills .plain-list { margin-top: 8px; }
 }
 .search-hit:hover { border-color: var(--accent); }
 .search mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
+
+/* Quick keys above the on-screen keyboard */
+.quick-keys {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  display: flex; gap: 4px; overflow-x: auto; padding: 6px 8px;
+  background: var(--surface-2); border-top: 1px solid var(--border);
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.quick-keys::-webkit-scrollbar { display: none; }
+.quick-keys button {
+  flex: none; min-width: 40px; min-height: 40px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text);
+  font: 600 1rem var(--mono); touch-action: manipulation;
+}
+.quick-keys button:active { background: var(--select); }
