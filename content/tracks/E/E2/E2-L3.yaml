@@ -220,9 +220,9 @@ recap:
     back: "Data steward, data owner, governance council. Log every decision with its reason."
 
 claims:
-  - claim: "DMBOK2 frames data governance as authority and control over data management, establishing decision rights over data."
-    status: search-only
-    source: "GCcollab wiki 'Data Governance' citing DMBOK2 section 3.1, and summaries of DMBOK2 chapter 3, seen through search results, November 2026."
+  - claim: "DMBOK2 chapter 3 separates governance, a formal system of decision rights over data with an escalation path for issues, from data management, which carries out the work. A Data Governance Council is the highest functional authority for policy and data disputes."
+    status: verified
+    source: "DAMA-DMBOK2, checked in the printed book by the course owner, 7 November 2026."
   - claim: "Policy, standard and procedure as three levels of rules, and the steward, owner, council escalation path, are common governance practice, not quotations from DMBOK2."
     status: unverified
     source: "General practice. Not attributed to a specific DMBOK2 passage."

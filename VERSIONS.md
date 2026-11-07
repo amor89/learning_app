@@ -251,7 +251,7 @@ Every Track B lesson lists its claims with a status. Measured numbers come from 
 
 ## Track E: data protection and governance sources (checked 6 November 2026)
 
-ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build environment. On 7 November 2026 a session on the learning_app environment checked the statutes on legislation.gov.uk. ico.org.uk refused its automated requests, dama.org was blocked, and the DMBOK2 text is a printed book, so those rows stay search-only or unverified. The EU and national laws in E3-L3 need EUR-Lex and the national legislation sites, which no environment here reaches yet.
+ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build environment. On 7 November 2026 a session on the learning_app environment checked the statutes on legislation.gov.uk. Later the same day this session checked EUR-Lex and gesetze-im-internet.de, and the DMBOK2 rows were checked in the printed book. ico.org.uk, legifrance.gouv.fr, wetten.overheid.nl and the National Archives web archive refuse automated requests, so those rows stay search-only.
 
 | Item | Status | Source |
 |---|---|---|
@@ -267,9 +267,10 @@ ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build en
 | Article 35(3) DPIA cases (special category or criminal offence data at scale, profiling, public monitoring) and Article 36 prior consultation | Verified | legislation.gov.uk, 7 November 2026 |
 | ICO list of likely high-risk processing and the two-criteria screening rule | Search only | ICO DPIA guidance |
 | The Information Commission replaced the Information Commissioner on 30 September 2026 and keeps the ICO name (Information Commission's Office) | Search only | Lewis Silkin, LexisNexis, CMS; the UK GDPR text on legislation.gov.uk now says "the Commission" |
-| DAMA-DMBOK2: eleven knowledge areas, governance at the hub; 2024 revision kept them | Search only | Secondary summaries; book not checked |
-| DMBOK2 definition of data governance (section 3.1, p. 67) | Search only | GCcollab wiki citing DMBOK2 |
-| Maturity scale 0 to 5 (none, initial, repeatable, defined, managed, optimised) | Unverified | Sources disagree on names and numbering. E2-L2 says to agree and version the scale |
+| DAMA-DMBOK2: eleven knowledge areas, governance at the hub (chapter 1, DAMA Wheel) | Verified | Printed book, checked 7 November 2026 |
+| The 2024 revision kept the wheel and its areas | Verified | Revised edition, checked by the course owner, 7 November 2026 |
+| DMBOK2 definition of data governance, with "shared decision-making" (chapter 3, section 1, page 77 in the copy checked) | Verified | Printed book, checked 7 November 2026 |
+| Maturity scale 0 to 5 (no capability, initial or ad hoc, repeatable, defined, managed, optimised), chapter 15 | Verified | Printed book, checked 7 November 2026 |
 | ICO international transfers guidance, 15 January 2026: three-step test for a restricted transfer (UK GDPR applies, you initiate a transfer outside the UK, separate legal person); a branch abroad is not a separate legal person (E3-L1) | Search only | Kennedys, Freshfields, McDermott Will & Emery, White & Case commentary |
 | Data (Use and Access) Act 2025 s85 and Schedule 7: Articles 45A and 45B, the "not materially lower" data protection test and Article 46(1A), in force 5 February 2026 (E3-L1, E3-L2) | Verified | legislation.gov.uk, 7 November 2026 |
 | EEA transfers treated as approved under Article 45A by DPA 2018 Schedule 21 paragraphs 4 and 5 (E3-L1) | Verified | legislation.gov.uk, 7 November 2026 |
@@ -280,8 +281,10 @@ ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build en
 | ICO monitoring workers guidance, 3 October 2023: consult workers and representatives before monitoring unless good reason (E3-L3) | Search only | Baker McKenzie, Cooley, HFW |
 | UK GDPR Article 35(9): seek views of data subjects or their representatives where appropriate (E3-L3) | Verified | legislation.gov.uk, 7 November 2026 |
 | ICE Regulations 2004: since 6 April 2020, 2% of employees, at least 15 and at most 2,500, in undertakings of 50 or more; Great Britain only (E3-L3) | Verified | legislation.gov.uk, 7 November 2026 |
-| BetrVG s87(1) no. 6 co-determination over monitoring systems; French CSE consultation (L2312-8) and the 2025 suspension rulings; Dutch WOR art. 27(1)(k) and (l) consent right (E3-L3) | Search only | Luther, GÖRG, CMS, CFDT, Rendement |
-| AI Act Article 26(7) duty to inform workers' representatives; Digital Omnibus on AI (Regulation (EU) 2026/1744) moves Annex III high-risk obligations to 2 December 2027 (E3-L3) | Unverified | Secondary sources disagree on the adoption month; the regulation number is not checked on EUR-Lex |
+| BetrVG s87(1) no. 6 co-determination over technical devices intended to monitor behaviour or performance (E3-L3) | Verified | gesetze-im-internet.de, 7 November 2026 |
+| Wide reading of s87(1) no. 6 by the Federal Labour Court; French CSE consultation (L2312-8) and the 2025 suspension rulings; Dutch WOR art. 27(1)(k) and (l) consent right (E3-L3) | Search only | Luther, GÖRG, CMS, CFDT, Rendement; legifrance.gouv.fr and wetten.overheid.nl refused automated requests |
+| AI Act Article 26(7) duty to inform workers' representatives; Digital Omnibus on AI, Regulation (EU) 2026/1744 of 8 July 2026, moves Annex III high-risk obligations to 2 December 2027 (E3-L3) | Verified | eur-lex.europa.eu, 7 November 2026 |
 | Article 35(7) minimum DPIA content (E1-L4) | Search only | Article text; not re-checked at source in this pass |
 | ICO sample DPIA template: seven steps; likelihood remote/possible/probable, severity minimal/significant/severe, overall low/medium/high; residual risk and sign-off (E1-L4) | Search only | ICO template and Annex D copies seen through search results |
-| Match bands, steward review, survivorship rules and cross-references for master data (E2-L4) | Unverified | General master data management practice, not a DMBOK2 quotation |
+| Deterministic and probabilistic matching, steward review, match-merge and match-link, survivorship rules, cross-reference and global IDs, chapter 10 (E2-L4) | Verified | Printed book, checked 7 November 2026 |
+| Automatic merges only on deterministic keys, in score bands (E2-L4) | Unverified | The lesson's recommended practice |

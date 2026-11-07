@@ -11,7 +11,7 @@ concept: |
 
   **EU countries** go further. A few examples:
 
-  - **Germany**: the works council has a **co-determination** right over technical systems able to monitor behaviour or performance. Courts read this widely, so most HR software is in scope.
+  - **Germany**: the works council has a **co-determination** right over technical systems designed to monitor behaviour or performance. Courts read "designed" as "able", so most HR software is in scope.
   - **France**: the works council (CSE) must be consulted before new technology goes live. Courts have suspended AI tools deployed early.
   - **Netherlands**: the works council has a **consent right** over personnel monitoring systems and rules on employee data.
 
@@ -364,7 +364,10 @@ claims:
   - claim: "Since 6 April 2020, a request for information and consultation arrangements under the ICE Regulations 2004 needs 2% of employees, at least 15 and at most 2,500, in an undertaking with 50 or more employees. The Regulations cover Great Britain."
     status: verified
     source: "https://www.legislation.gov.uk/uksi/2004/3426/regulation/7 and schedule 1, checked 7 November 2026."
-  - claim: "Section 87(1) no. 6 BetrVG gives German works councils co-determination over technical systems objectively able to monitor employees' behaviour or performance, read widely by the Federal Labour Court."
+  - claim: "Section 87(1) no. 6 BetrVG gives German works councils co-determination over the introduction and use of technical devices intended to monitor employees' behaviour or performance."
+    status: verified
+    source: "https://www.gesetze-im-internet.de/betrvg/__87.html, checked 7 November 2026."
+  - claim: "The Federal Labour Court reads section 87(1) no. 6 widely: a device objectively able to monitor is enough."
     status: search-only
     source: "Luther, GÖRG and Rödl commentary, seen through search results, November 2026."
   - claim: "French courts (Nanterre, 14 February 2025; Créteil, 15 July 2025) suspended AI tools deployed before the CSE was consulted under article L2312-8 of the Code du travail."
@@ -374,5 +377,5 @@ claims:
     status: search-only
     source: "Rendement and Responsible AI Platform summaries, seen through search results, November 2026."
   - claim: "AI Act Article 26(7) requires deployers who are employers to inform workers' representatives and affected workers before using a high-risk AI system at the workplace. The Digital Omnibus on AI, Regulation (EU) 2026/1744, moved the Annex III high-risk obligations to 2 December 2027."
-    status: unverified
-    source: "Article 26(7) text from the AI Act Service Desk, seen through search results. The Omnibus regulation number and dates come from secondary sources that disagree on the adoption month, November 2026."
+    status: verified
+    source: "Regulation (EU) 2024/1689 Article 26(7) and Regulation (EU) 2026/1744 of 8 July 2026 (OJ L, 24 July 2026), recital on dates of application, on eur-lex.europa.eu, checked 7 November 2026."
