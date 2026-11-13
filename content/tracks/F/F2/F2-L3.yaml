@@ -1,0 +1,220 @@
+id: F2-L3
+title: Influence without authority
+concept: |
+  Most of what a data platform needs sits with people you do not manage: the HR system owner who must add a field, the security team who must approve access, the finance lead who funds capacity. You cannot order them. You can trade.
+
+  **The exchange model.** Allan Cohen and David Bradford's *Influence Without Authority* (first edition 1991, third edition 2017) rests on reciprocity: people help those who help them. You influence by giving something the other person values in exchange for what you need. The authors set it out as steps:
+
+  1. **Assume everyone is a potential ally**, including the person blocking you.
+  2. **Clarify your goals and priorities.** Know what you need most, and what you can let go.
+  3. **Diagnose the other person's world**: their goals, pressures and how their performance is judged.
+  4. **Identify the currencies** they value and the ones you hold.
+  5. **Deal with the relationship.** Trust makes every exchange easier.
+  6. **Influence through give and take.**
+
+  **Currencies.** The book groups what people value into five kinds:
+
+  - **Inspiration**: a vision, doing the right thing.
+  - **Task**: resources, help, information, faster results.
+  - **Position**: recognition, visibility to senior people, reputation.
+  - **Relationship**: being understood, belonging, personal support.
+  - **Personal**: gratitude, ownership, feeling competent.
+
+  **An example.** The HR system owner has no reason to add a change-notification field for you. Their world: a backlog and a monthly board report built by hand. Offer to automate that report from the platform (task), and credit their team when you present it (position). Now the field serves their goals too.
+
+  **Avoid negative currencies**, such as escalating over someone's head. Use them only as a last resort.
+why_it_matters: |
+  A data engineer asked the payroll system owner three times for an extract and escalated twice. Each escalation made the owner less willing. A colleague asked what was overloading the payroll team, offered to take over a quarterly reconciliation they hated, and had the extract in a week.
+worked_example:
+  language: text
+  weak:
+    code: |
+      To: HR system owner
+      We need a change-notification field added to the employee table by
+      the end of the month. This is a priority for the talent data platform.
+      If it is not possible, I will raise it with the CHRO.
+    annotations:
+      - find: "This is a priority for the talent data platform."
+        note: "Your priority, not theirs. Nothing in it is something they value."
+      - find: "If it is not possible, I will raise it with the CHRO."
+        note: "A threat of escalation, a negative currency, used first instead of last."
+  strong:
+    code: |
+      Before asking: their team rebuilds the monthly headcount report by hand
+      and is judged on backlog size.
+      To: HR system owner
+      I could automate your monthly headcount report from the platform. It needs
+      a change-notification field on the employee table, which would also feed
+      our data quality checks. Could we look at it together this week? I will
+      credit your team when we present the platform to the CHRO.
+    annotations:
+      - find: "their team rebuilds the monthly headcount report by hand"
+        note: "Diagnosing their world first: their pressure and how they are judged."
+      - find: "I could automate your monthly headcount report from the platform."
+        note: "A task currency they value, offered before the ask."
+      - find: "credit your team when we present the platform to the CHRO."
+        note: "A position currency: visibility to senior people."
+  takeaway: |
+    Diagnose what the other person values, offer currencies they care about, such as task help or visibility, and trade for what you need. Keep escalation for the last resort.
+exercises:
+  - id: F2-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You offer to mention a colleague's work to the CHRO. Which kind of currency is that?
+    options:
+      - {id: a, text: "Position"}
+      - {id: b, text: "Task"}
+      - {id: c, text: "Inspiration"}
+      - {id: d, text: "Relationship"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "Task currencies are resources, help and information. Visibility is position."
+      - answer: c
+        feedback: "Inspiration is a vision or a cause. Visibility to senior people is position."
+      - answer: d
+        feedback: "Relationship is being understood or supported. Recognition upwards is position."
+    hints:
+      - "What does the colleague gain?"
+      - "Visibility to senior people."
+      - "Position."
+    explanation: |
+      Recognition and visibility to senior people are position currencies.
+
+  - id: F2-L3-E2
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the five kinds of currency.
+    template: |
+      [[g1]]: a vision, doing the right thing
+      Task: resources, help, information
+      [[g2]]: recognition, visibility, reputation
+      [[g3]]: being understood, belonging, support
+      Personal: gratitude, ownership, feeling competent
+    gaps:
+      g1: {accepted: [inspiration], case_sensitive: false}
+      g2: {accepted: [position], case_sensitive: false}
+      g3: {accepted: [relationship], case_sensitive: false}
+    wrong_answers:
+      - answer: {g2: relationship}
+        feedback: "Relationship is about being understood. Recognition and visibility are position."
+    hints:
+      - "Vision and purpose."
+      - "Standing in the organisation."
+      - "`inspiration`, `position`, `relationship`."
+    explanation: |
+      Inspiration, task, position, relationship and personal.
+
+  - id: F2-L3-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      Put the steps of the exchange model in order.
+    items:
+      - {id: ally, text: "Assume the other person is a potential ally"}
+      - {id: goals, text: "Clarify your own goals and priorities"}
+      - {id: world, text: "Diagnose their world: goals, pressures, how they are judged"}
+      - {id: currencies, text: "Identify the currencies they value and the ones you hold"}
+      - {id: relationship, text: "Deal with the relationship"}
+      - {id: trade, text: "Influence through give and take"}
+    answer: [ally, goals, world, currencies, relationship, trade]
+    wrong_answers:
+      - answer: [ally, goals, currencies, world, relationship, trade]
+        feedback: "You learn what they value by diagnosing their world first."
+      - answer: [trade, ally, goals, world, currencies, relationship]
+        feedback: "Trading comes last, once you know what to offer."
+    hints:
+      - "Start with your mindset."
+      - "Understand them before choosing what to offer."
+      - "Trade last."
+    explanation: |
+      Ally mindset, your goals, their world, currencies, relationship, then the exchange.
+
+  - id: F2-L3-E4
+    type: mcq
+    difficulty: 3
+    prompt: |
+      The security lead has ignored your access request for two weeks. What is the best next move?
+    options:
+      - {id: a, text: "Find out what is pressing on the security team and offer help that eases it"}
+      - {id: b, text: "Escalate to their director"}
+      - {id: c, text: "Send the same request again, marked urgent"}
+      - {id: d, text: "Find a way round the access controls"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Diagnosing their world shows what you can offer in exchange."}
+      - {id: r2, text: "Security teams never respond to written requests."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Escalation is a negative currency. Use it last, and it costs you the relationship."
+      - answer: c
+        feedback: "Repeating the ask offers them nothing new."
+      - answer: d
+        feedback: "Never bypass controls. It is a security breach, not influence."
+      - answer: a|r2
+        feedback: "Right move, wrong reason. The point is to learn what they value, not that writing fails."
+    hints:
+      - "What do you know about their pressures?"
+      - "What could you offer?"
+      - "Diagnose, then offer."
+    explanation: |
+      Diagnose their world, then offer a currency they value.
+
+  - id: F2-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      You need finance to fund a larger Fabric capacity. You have no budget authority. Plan your approach.
+    slots:
+      - id: diagnose
+        label: "What you learn first"
+        options:
+          - {id: world, text: "How finance is judged this year and what is pressing on them"}
+          - {id: none, text: "Nothing, the business case speaks for itself"}
+        answer: world
+      - id: offer
+        label: "What you offer"
+        options:
+          - {id: currency, text: "A cost report by workspace that answers a question finance already asks"}
+          - {id: plea, text: "A reminder of how important the platform is to HR"}
+        answer: currency
+      - id: fallback
+        label: "If they still say no"
+        options:
+          - {id: ask, text: "Ask what would change their view, and keep the relationship"}
+          - {id: escalate, text: "Escalate at once to the CFO"}
+        answer: ask
+    model_answer: |
+      - Knowing how finance is judged tells you which currency matters to them.
+      - A cost report they need is a task currency, and it supports your case.
+      - Asking what would change their view keeps the door open. Escalation spends trust.
+    wrong_answers:
+      - answer: {diagnose: none}
+        feedback: "A case built on your goals alone offers them nothing."
+      - answer: {offer: plea}
+        feedback: "Importance to you is not a currency they value."
+      - answer: {fallback: escalate}
+        feedback: "Escalation is a last resort, and it costs the relationship."
+    hints:
+      - "What do you need to know about finance?"
+      - "What do they value that you hold?"
+      - "What keeps the relationship?"
+    explanation: |
+      Diagnose their world, offer a currency they value, and keep the relationship if they refuse.
+recap:
+  - front: "Influence without authority"
+    back: "Trade what the other person values for what you need. It rests on reciprocity."
+  - front: "Five kinds of currency"
+    back: "Inspiration, task, position, relationship and personal."
+  - front: "The exchange model steps"
+    back: "Assume an ally, clarify your goals, diagnose their world, identify currencies, deal with the relationship, give and take."
+  - front: "Escalation"
+    back: "A negative currency. Use it last, because it costs the relationship."
+claims:
+  - claim: "Cohen and Bradford's Influence Without Authority (1991, third edition 2017) is based on reciprocity; its steps are assume all are potential allies, clarify goals and priorities, diagnose the other's world, identify currencies, deal with relationships, influence through give and take; currencies are grouped as inspiration, task, position, relationship and personal; negative currencies are a last resort."
+    status: search-only
+    source: "Newswise on the third edition, Cohen and Bradford's article reprinted by the University of Washington, and secondary summaries, found by search on 13 November 2026; the book is in the course owner's NotebookLM notebook but was not queried from the build environment."

@@ -1,0 +1,223 @@
+id: F3-L2
+title: Your first 90 days in a new role
+concept: |
+  People form their view of a new hire within weeks. Michael Watkins' *The First 90 Days* (2003, updated 2013) gives a plan for that window.
+
+  **Diagnose the situation.** Watkins' **STARS** model names five situations, each needing a different approach:
+
+  - **Start-up**: building something new. Bring energy and set direction.
+  - **Turnaround**: rescuing something failing. Act fast on the few things that matter.
+  - **Accelerated growth**: scaling something that works. Add structure and process.
+  - **Realignment**: something drifting into trouble that people do not yet see. Make the case for change.
+  - **Sustaining success**: protecting what works. Learn before you change anything.
+
+  A talent data platform built from scattered HR extracts is usually a start-up, with parts that need realignment.
+
+  **Five conversations with your manager.** Hold them early, as separate topics:
+
+  - **Situation**: do you both read the STARS situation the same way?
+  - **Expectations**: what does success look like at 30, 60 and 90 days?
+  - **Resources**: what people, budget and access will you have?
+  - **Style**: how and how often do they want updates?
+  - **Personal development**: which skills should you build in this role?
+
+  **Learn before you change.** Talk to the people who own the data before redesigning their processes. Arriving "with the answer" is a common trap.
+
+  **Secure early wins.** Pick small, visible results that matter to your manager's priorities and build trust, such as one data source mapped and validated with its owner. Agree them in the expectations conversation.
+
+  **Record as you go.** Write down each win, decision and lesson the week it happens. The app's **Work log** keeps them, tagged to your role plan phase, ready for your first review.
+why_it_matters: |
+  A new data lead spent their first month redesigning the HR data model without talking to the payroll team. The payroll lead, whose reports depended on the old fields, objected at the first steering group, and the design stalled for six weeks. A listening tour in week one would have surfaced the dependency and turned the payroll lead into an early ally.
+worked_example:
+  language: text
+  weak:
+    code: |
+      Week 1: start redesigning the data model
+      Week 2: present the new architecture to leadership
+      Check in with manager: when something comes up
+      Wins: whatever happens
+    annotations:
+      - find: "Week 1: start redesigning the data model"
+        note: "Changing things before learning how they work, and who depends on them."
+      - find: "Check in with manager: when something comes up"
+        note: "No agreed expectations, so nobody knows what success looks like."
+      - find: "Wins: whatever happens"
+        note: "Wins left to chance may not be visible or matter to anyone."
+  strong:
+    code: |
+      Week 1: five conversations with my manager, as separate topics
+      Weeks 1 to 3: meet each data owner. Map sources, owners and access routes.
+      STARS read: start-up for the platform, realignment for headcount reporting
+      Early win (agreed for day 30): payroll source mapped and validated with its owner
+      Check-ins: day 30, 60 and 90 against the agreed expectations
+      Work log: one line per win, decision and lesson, each week
+    annotations:
+      - find: "Week 1: five conversations with my manager, as separate topics"
+        note: "Situation, expectations, resources, style and development, agreed early."
+      - find: "STARS read: start-up for the platform, realignment for headcount reporting"
+        note: "Different parts of the role can sit in different STARS situations."
+      - find: "Early win (agreed for day 30): payroll source mapped and validated with its owner"
+        note: "Small, visible, tied to the manager's priorities and agreed in advance."
+  takeaway: |
+    Diagnose your STARS situation, hold the five conversations with your manager early, learn before you change, secure small agreed wins, and log them as you go.
+exercises:
+  - id: F3-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Your team runs a reporting service that works well and is valued. Which STARS situation is it?
+    options:
+      - {id: a, text: "Sustaining success"}
+      - {id: b, text: "Turnaround"}
+      - {id: c, text: "Start-up"}
+      - {id: d, text: "Realignment"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "Turnaround is for something failing. This works well."
+      - answer: c
+        feedback: "Start-up is for building something new. This already exists."
+      - answer: d
+        feedback: "Realignment is for something drifting into trouble. This is valued and working."
+    hints:
+      - "Is it new, failing, scaling, drifting or working?"
+      - "It works well."
+      - "Sustaining success."
+    explanation: |
+      Something that works and is valued is sustaining success: learn before you change it.
+
+  - id: F3-L2-E2
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the five conversations with your manager.
+    template: |
+      Situation: do we read the STARS situation the same way?
+      [[g1]]: what does success look like at 30, 60 and 90 days?
+      [[g2]]: what people, budget and access will I have?
+      [[g3]]: how and how often do you want updates?
+      Personal development: which skills should I build?
+    gaps:
+      g1: {accepted: [expectations], case_sensitive: false}
+      g2: {accepted: [resources], case_sensitive: false}
+      g3: {accepted: [style], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: resources}
+        feedback: "Resources come next. What success looks like is the expectations conversation."
+    hints:
+      - "What success looks like."
+      - "What you will have to work with."
+      - "`expectations`, `resources`, `style`."
+    explanation: |
+      Situation, expectations, resources, style and personal development.
+
+  - id: F3-L2-E3
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Which is the best early win for your first 30 days on the talent data platform?
+    options:
+      - {id: a, text: "One HR source mapped and validated with its owner, agreed with your manager in advance"}
+      - {id: b, text: "A full redesign of the data model"}
+      - {id: c, text: "A new dashboard nobody asked for"}
+      - {id: d, text: "Reading every policy document before speaking to anyone"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Early wins are small, visible and tied to priorities your manager has agreed."}
+      - {id: r2, text: "Early wins should be as large as possible to impress leadership."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Too big for 30 days, and it changes things before you understand them."
+      - answer: c
+        feedback: "Visible but not tied to anyone's priority."
+      - answer: d
+        feedback: "Learning matters, but this produces no visible result and skips the people."
+      - answer: a|r2
+        feedback: "Right choice, wrong reason. Early wins are small and agreed, not large."
+    hints:
+      - "Small or large?"
+      - "Agreed with whom?"
+      - "One source, validated, agreed in advance."
+    explanation: |
+      A small, visible win that serves an agreed priority builds trust fastest.
+
+  - id: F3-L2-E4
+    type: order
+    difficulty: 3
+    prompt: |
+      Put your first month in order.
+    items:
+      - {id: talk, text: "Hold the five conversations with your manager"}
+      - {id: listen, text: "Meet each data owner and map sources, owners and access"}
+      - {id: win, text: "Deliver the agreed early win"}
+      - {id: check, text: "Review progress against expectations at day 30"}
+      - {id: plan, text: "Propose changes, based on what you learned"}
+    answer: [talk, listen, win, check, plan]
+    wrong_answers:
+      - answer: [plan, talk, listen, win, check]
+        feedback: "Proposing changes before you learn is the trap of arriving with the answer."
+      - answer: [listen, talk, win, check, plan]
+        feedback: "Agree expectations first, so you know what to listen for."
+    hints:
+      - "Agree first, then learn."
+      - "Deliver, then review."
+      - "Propose changes last."
+    explanation: |
+      Agree expectations, learn, deliver a win, review, then propose change.
+
+  - id: F3-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Plan your first 90 days in the talent data strategy role.
+    slots:
+      - id: manager
+        label: "With your manager"
+        options:
+          - {id: five, text: "The five conversations in week one, then check-ins at day 30, 60 and 90"}
+          - {id: adhoc, text: "Meet when something comes up"}
+        answer: five
+      - id: approach
+        label: "Your approach to the existing setup"
+        options:
+          - {id: learn, text: "Learn from the data owners before proposing changes"}
+          - {id: fix, text: "Fix what looks wrong from day one"}
+        answer: learn
+      - id: record
+        label: "Evidence for your first review"
+        options:
+          - {id: log, text: "A weekly line per win, decision and lesson in the work log"}
+          - {id: memory, text: "Recall it when the review comes"}
+        answer: log
+    model_answer: |
+      - Early, structured conversations set expectations you can be judged against.
+      - Learning first avoids redesigning something other people depend on.
+      - A weekly log captures wins you would otherwise forget by review time.
+    wrong_answers:
+      - answer: {manager: adhoc}
+        feedback: "Without agreed expectations, you cannot show you met them."
+      - answer: {approach: fix}
+        feedback: "Arriving with the answer loses allies before you understand the dependencies."
+      - answer: {record: memory}
+        feedback: "Memory keeps the last month and loses the first two."
+    hints:
+      - "What sets the standard you are judged on?"
+      - "Learn or change first?"
+      - "How will you remember month one in month six?"
+    explanation: |
+      Five conversations and check-ins, learn before change, and a weekly log.
+recap:
+  - front: "STARS situations"
+    back: "Start-up, turnaround, accelerated growth, realignment and sustaining success."
+  - front: "Five conversations with your manager"
+    back: "Situation, expectations, resources, style and personal development."
+  - front: "Early wins"
+    back: "Small, visible results tied to your manager's priorities, agreed in advance."
+  - front: "A common new-role trap"
+    back: "Arriving with the answer: changing things before you learn how they work and who depends on them."
+claims:
+  - claim: "Michael Watkins' The First 90 Days (2003, updated 2013): the STARS model (start-up, turnaround, accelerated growth, realignment, sustaining success), five conversations with the boss (situation, expectations, resources, style, personal development), securing early wins and the trap of coming in with the answer."
+    status: search-only
+    source: "Shortform, SuperSummary and Mind Tools summaries found by search on 13 November 2026; the book itself was not checked."

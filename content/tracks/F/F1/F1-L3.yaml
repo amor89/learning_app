@@ -1,0 +1,350 @@
+id: F1-L3
+title: Explain uncertainty to leaders
+concept: |
+  "Attrition will probably rise" means 55% to one reader and 90% to another. Words carry numbers, and every reader picks their own. Fix the words to ranges and say how sure you are of the evidence.
+
+  **A fixed scale.** The UK intelligence community uses the **Probability Yardstick**, published by the Professional Head of Intelligence Assessment (PHIA). Each term covers a range:
+
+  - remote chance: about 0% to 5%
+  - highly unlikely: about 10% to 20%
+  - unlikely: about 25% to 35%
+  - realistic possibility: about 40% to just under 50%
+  - likely or probable: about 55% to 75%
+  - highly likely: about 80% to 90%
+  - almost certain: about 95% to just under 100%
+
+  The gaps between bands are deliberate. They stop a judgement looking more precise than it is. An even chance, 50%, sits in a gap: decide which way the evidence leans.
+
+  **Probability and confidence are separate.** Probability is how likely the event is. Confidence is how good your evidence is: high, moderate or low. "Highly likely, moderate confidence: based on one year of data."
+
+  **Ranges, not points.** Say "attrition of 11% to 14% next year", not "12.4%". A point estimate invites false trust.
+
+  **Answer first, uncertainty second.** State the judgement, then the one limitation that matters most, then what would change your mind. A paragraph of caveats hides the answer.
+why_it_matters: |
+  A forecast said a retention scheme would "probably" cut leavers. The finance director read that as near certain and booked the savings. The model's own estimate was about 60%. The scheme missed, and the analytics team lost credibility. "Likely (about 55% to 75%), moderate confidence" would have set the right expectation.
+worked_example:
+  language: text
+  weak:
+    code: |
+      Attrition will probably be 12.4% next year.
+      There are many caveats: data quality, seasonality, the economy,
+      possible reorganisations, survey response rates and model choice.
+    annotations:
+      - find: "Attrition will probably be 12.4% next year."
+        note: "\"Probably\" carries no agreed number, and 12.4% looks more precise than any forecast is."
+      - find: "There are many caveats"
+        note: "A list of caveats with no ranking. The reader cannot tell which one matters."
+  strong:
+    code: |
+      Attrition next year: likely 11% to 14% (about a 70% chance it lands in that range).
+      Confidence: moderate. The model uses two years of leaver data.
+      Main risk: the planned reorganisation, which the model cannot see.
+      We will update the forecast if Q1 leavers exceed 4%.
+    annotations:
+      - find: "likely 11% to 14% (about a 70% chance it lands in that range)"
+        note: "A yardstick term, the probability behind it and a range, not a point."
+      - find: "Confidence: moderate. The model uses two years of leaver data."
+        note: "Confidence in the evidence, stated separately from the probability."
+      - find: "We will update the forecast if Q1 leavers exceed 4%."
+        note: "What would change the judgement, as a threshold someone can watch."
+  takeaway: |
+    Use fixed probability words with ranges behind them, keep confidence in the evidence separate, give ranges rather than points, and lead with the judgement before the one limitation that matters.
+exercises:
+  - id: F1-L3-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      On the PHIA Probability Yardstick, which range does "highly likely" cover?
+    options:
+      - {id: a, text: "About 80% to 90%"}
+      - {id: b, text: "About 55% to 75%"}
+      - {id: c, text: "Over 50%"}
+      - {id: d, text: "About 95% to just under 100%"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "That is \"likely\" or \"probable\"."
+      - answer: c
+        feedback: "No yardstick term covers everything over 50%. Each covers a band."
+      - answer: d
+        feedback: "That is \"almost certain\"."
+    hints:
+      - "It sits between likely and almost certain."
+      - "Likely tops out at about 75%."
+      - "About 80% to 90%."
+    explanation: |
+      Highly likely means about 80% to 90%.
+
+  - id: F1-L3-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Your analysis rests on one quarter of data, but it points strongly one way. How do you report it?
+    options:
+      - {id: a, text: "State the probability and, separately, low confidence in the evidence"}
+      - {id: b, text: "Lower the probability to reflect the thin data"}
+      - {id: c, text: "Say \"almost certain\", because the signal is strong"}
+      - {id: d, text: "Leave the judgement out until more data arrives"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Probability is how likely the event is. Confidence is how good the evidence is. Mixing them hides one."}
+      - {id: r2, text: "Confidence and probability are two words for the same thing."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "That mixes the two. The reader cannot tell a weak signal from thin data."
+      - answer: c
+        feedback: "Strong signal, thin evidence. Say both."
+      - answer: d
+        feedback: "Leaders still have to decide. Give the best judgement with its confidence."
+      - answer: a|r2
+        feedback: "Right action, wrong reason. They are different: likelihood of the event against quality of the evidence."
+    hints:
+      - "Two separate things to report."
+      - "How likely, and how sure of the evidence?"
+      - "Probability plus confidence."
+    explanation: |
+      Report probability and confidence separately, so the reader sees both.
+
+  - id: F1-L3-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the forecast line.
+    template: |
+      Attrition next year: [[g1]] 11% to 14%.
+      [[g2]]: moderate, based on two years of data.
+      We will update the forecast if Q1 leavers [[g3]] 4%.
+    gaps:
+      g1: {accepted: [likely, probable], case_sensitive: false}
+      g2: {accepted: [confidence], case_sensitive: false}
+      g3: {accepted: [exceed, "go above", "rise above"], case_sensitive: false}
+    wrong_answers:
+      - answer: {g2: probability}
+        feedback: "Moderate describes the evidence, so the word is confidence."
+    hints:
+      - "A yardstick term for about 55% to 75%."
+      - "How good the evidence is."
+      - "`likely`, `confidence`, `exceed`."
+    explanation: |
+      A yardstick term, a range, a confidence level and a trigger for review.
+
+  - id: F1-L3-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `yardstick(percent: int) -> str | None`. It turns a whole-number probability into its PHIA term:
+
+      - 1 to 5: `"remote chance"`
+      - 10 to 20: `"highly unlikely"`
+      - 25 to 35: `"unlikely"`
+      - 40 to 49: `"realistic possibility"`
+      - 55 to 75: `"likely"`
+      - 80 to 90: `"highly likely"`
+      - 95 to 99: `"almost certain"`
+
+      Ranges include both ends. Return `None` for a value in a gap, such as 50 or 78, and for 0 or 100, which are facts rather than judgements. Raise `ValueError` for anything that is not an `int` from 0 to 100.
+    primer: |
+      A list of tuples holds a small table, and a `for` loop unpacks each row:
+
+      ```python
+      SIZES = [(0, 9, "small"), (10, 99, "medium")]
+      for low, high, name in SIZES:
+          print(low, high, name)
+      ```
+
+      `isinstance(x, int)` is `True` when `x` is a whole number, so `isinstance(7, int)` is `True` and `isinstance(7.5, int)` is `False`. A function with no matching `return` returns `None`, and `return None` says so plainly.
+    starter: |
+      def yardstick(percent):
+          if percent > 50:
+              return "likely"
+          return "unlikely"
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: yardstick
+          typed: true
+          docstring: true
+          message: "Give `yardstick` type hints and a docstring."
+      tests:
+        - id: bands
+          code: |
+            cases = {1: "remote chance", 5: "remote chance", 10: "highly unlikely", 20: "highly unlikely",
+                     30: "unlikely", 40: "realistic possibility", 49: "realistic possibility",
+                     55: "likely", 75: "likely", 85: "highly likely", 95: "almost certain", 99: "almost certain"}
+            for value, term in cases.items():
+                assert yardstick(value) == term, (value, yardstick(value))
+          message: "Map each value inside a band to its term, including both ends."
+        - id: gaps
+          code: |
+            for value in (6, 9, 22, 37, 50, 52, 78, 92):
+                assert yardstick(value) is None, (value, yardstick(value))
+          message: "Return None for values in the gaps between bands, including 50."
+        - id: certain
+          code: |
+            assert yardstick(0) is None and yardstick(100) is None
+          message: "Return None for 0 and 100. They are facts, not judgements."
+        - id: invalid
+          code: |
+            for bad in (-1, 101, 12.5, "60"):
+                try:
+                    yardstick(bad)
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {bad!r}")
+          message: "Raise ValueError for anything that is not a whole number from 0 to 100."
+    solution: |
+      BANDS: list[tuple[int, int, str]] = [
+          (1, 5, "remote chance"),
+          (10, 20, "highly unlikely"),
+          (25, 35, "unlikely"),
+          (40, 49, "realistic possibility"),
+          (55, 75, "likely"),
+          (80, 90, "highly likely"),
+          (95, 99, "almost certain"),
+      ]
+
+
+      def yardstick(percent: int) -> str | None:
+          """The PHIA Probability Yardstick term for a whole-number probability.
+
+          Args:
+              percent: A probability from 0 to 100.
+
+          Returns:
+              The term, or None for a value in a gap between bands, or 0 or 100.
+
+          Raises:
+              ValueError: If percent is not an int from 0 to 100.
+          """
+          if not isinstance(percent, int) or not 0 <= percent <= 100:
+              raise ValueError(f"percent must be a whole number from 0 to 100, got {percent!r}")
+          for low, high, term in BANDS:
+              if low <= percent <= high:
+                  return term
+          return None
+    seeded_bugs:
+      - |
+        def yardstick(percent: int) -> str | None:
+            """Rounds values in a gap up to the next band."""
+            if not isinstance(percent, int) or not 0 <= percent <= 100:
+                raise ValueError("bad percent")
+            if percent in (0, 100):
+                return None
+            for high, term in [(5, "remote chance"), (20, "highly unlikely"), (35, "unlikely"), (49, "realistic possibility"),
+                               (75, "likely"), (90, "highly likely"), (99, "almost certain")]:
+                if percent <= high:
+                    return term
+            return None
+      - |
+        def yardstick(percent: int) -> str | None:
+            """Accepts anything."""
+            for low, high, term in [(1, 5, "remote chance"), (10, 20, "highly unlikely"), (25, 35, "unlikely"),
+                                    (40, 49, "realistic possibility"), (55, 75, "likely"), (80, 90, "highly likely"),
+                                    (95, 99, "almost certain")]:
+                if low <= percent <= high:
+                    return term
+            return None
+      - |
+        def yardstick(percent: int) -> str | None:
+            """Treats 0 and 100 as the end bands."""
+            if not isinstance(percent, int) or not 0 <= percent <= 100:
+                raise ValueError("bad percent")
+            for low, high, term in [(0, 5, "remote chance"), (10, 20, "highly unlikely"), (25, 35, "unlikely"),
+                                    (40, 49, "realistic possibility"), (55, 75, "likely"), (80, 90, "highly likely"),
+                                    (95, 100, "almost certain")]:
+                if low <= percent <= high:
+                    return term
+            return None
+    wrong_answers:
+      - answer: |
+          def yardstick(percent: int) -> str | None:
+              """Rounds values in a gap up to the next band."""
+              if not isinstance(percent, int) or not 0 <= percent <= 100:
+                  raise ValueError("bad percent")
+              if percent in (0, 100):
+                  return None
+              for high, term in [(5, "remote chance"), (20, "highly unlikely"), (35, "unlikely"), (49, "realistic possibility"),
+                                 (75, "likely"), (90, "highly likely"), (99, "almost certain")]:
+                  if percent <= high:
+                      return term
+              return None
+        triggers: gaps
+      - answer: |
+          def yardstick(percent: int) -> str | None:
+              """Accepts anything."""
+              for low, high, term in [(1, 5, "remote chance"), (10, 20, "highly unlikely"), (25, 35, "unlikely"),
+                                      (40, 49, "realistic possibility"), (55, 75, "likely"), (80, 90, "highly likely"),
+                                      (95, 99, "almost certain")]:
+                  if low <= percent <= high:
+                      return term
+              return None
+        triggers: invalid
+    hints:
+      - "Keep the bands in a list of (low, high, term) tuples."
+      - "Check the type and range first, and raise ValueError if either is wrong."
+      - "Loop over the bands. If none contains the value, return None."
+    explanation: |
+      The table of bands keeps the scale in one place, and returning None for gaps forces a deliberate choice instead of a silent rounding.
+
+  - id: F1-L3-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      You present a forecast of next year's attrition to the executive team. Design how you state it.
+    slots:
+      - id: number
+        label: "The estimate"
+        options:
+          - {id: range, text: "A range with a yardstick term, such as \"likely 11% to 14%\""}
+          - {id: point, text: "A precise point, such as 12.4%"}
+        answer: range
+      - id: confidence
+        label: "How sure you are"
+        options:
+          - {id: separate, text: "A separate confidence level with its reason"}
+          - {id: blend, text: "Fold it into the probability word"}
+        answer: separate
+      - id: caveats
+        label: "Limitations"
+        options:
+          - {id: one, text: "The one limitation that matters most, and what would change your view"}
+          - {id: all, text: "Every caveat you thought of"}
+        answer: one
+    model_answer: |
+      - A range with a fixed term sets the expectation without false precision.
+      - Confidence stated separately tells the reader how much to rely on it.
+      - One limitation and a review trigger are actionable. A list of caveats is not.
+    wrong_answers:
+      - answer: {number: point}
+        feedback: "A point estimate looks more precise than any forecast is."
+      - answer: {confidence: blend}
+        feedback: "Blended, the reader cannot tell a weak signal from thin evidence."
+      - answer: {caveats: all}
+        feedback: "A long list hides the one that matters and buries the answer."
+    hints:
+      - "Which option avoids false precision?"
+      - "Two separate things to report."
+      - "Which limitation helps the reader act?"
+    explanation: |
+      A range with a fixed term, separate confidence, and the one limitation that matters.
+recap:
+  - front: "Probability Yardstick bands"
+    back: "Remote chance 0 to 5%, highly unlikely 10 to 20%, unlikely 25 to 35%, realistic possibility 40 to under 50%, likely 55 to 75%, highly likely 80 to 90%, almost certain 95 to under 100%."
+  - front: "Why the yardstick has gaps"
+    back: "To avoid false precision. A value in a gap, such as 50%, forces you to decide which way the evidence leans."
+  - front: "Probability against confidence"
+    back: "Probability: how likely the event is. Confidence: how good the evidence is. Report both, separately."
+  - front: "Stating a forecast"
+    back: "The judgement first, as a range, then the one limitation that matters and what would change your mind."
+claims:
+  - claim: "The PHIA Probability Yardstick bands: remote chance about 0 to 5%, highly unlikely about 10 to 20%, unlikely about 25 to 35%, realistic possibility about 40 to under 50%, likely or probable about 55 to 75%, highly likely about 80 to 90%, almost certain about 95 to under 100%; the gaps avoid false precision."
+    status: search-only
+    source: "GOV.UK 'Explaining uncertainty in UK intelligence assessment', College of Policing 'Delivering effective analysis' and the 2023 National Risk Register, seen through search results on 13 November 2026; www.gov.uk was not reachable from the build environment."
+  - claim: "Separating probability from confidence in the evidence, and stating ranges rather than points, is common analytic practice."
+    status: unverified
+    source: "General practice in intelligence and forecasting guidance, not a quotation from one source."

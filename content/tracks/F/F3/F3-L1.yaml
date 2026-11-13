@@ -1,0 +1,208 @@
+id: F3-L1
+title: Give and receive feedback with situation, behaviour and impact
+concept: |
+  Vague feedback changes nothing. "Your presentation was a bit messy" leaves the other person guessing what to fix, and "great job" does not tell them what to repeat. The **Situation-Behaviour-Impact** model from the Center for Creative Leadership (CCL) makes feedback specific.
+
+  **The three parts.**
+
+  - **Situation**: when and where. "In Tuesday's steering group, when you presented the attrition model."
+  - **Behaviour**: what the person did, described so a camera could have recorded it. "You spent ten minutes on feature engineering before showing the result." Leave out judgements such as "messy" or "rude". They describe your reaction, not the act.
+  - **Impact**: the effect on you, the group or the outcome, as an "I" statement. "I saw the HR director check their phone, and we ran out of time for the decision."
+
+  **Add intent and listen.** CCL's extension adds a fourth step: ask what the person was trying to do. "What were you aiming for with the detail?" Their answer often changes your view, and it turns the feedback into a conversation.
+
+  **Use it for praise too.** "In the board pack, you put the recommendation in the subject line. The CFO approved it the same day." Specific praise shows what to repeat.
+
+  **Receiving feedback.** Listen to the end without defending yourself. Ask for a specific example. Thank the person. Then decide what you will act on, and tell them later what you changed.
+
+  **Ask well.** "Any feedback?" gets "all fine". Ask a narrow question instead: "What one thing should I change in how I present findings?"
+why_it_matters: |
+  A lead told an analyst that their reports "lacked polish". The analyst spent a month on fonts and colours. The lead had meant that the reports buried the answer. "In last week's report, the recommendation was on page four, and the director missed it" would have fixed it in one draft.
+worked_example:
+  language: text
+  weak:
+    code: |
+      Your presentation was a bit messy and too technical.
+      You need to be more executive.
+    annotations:
+      - find: "Your presentation was a bit messy and too technical."
+        note: "Judgements with no situation and no behaviour. The person cannot tell what to change."
+      - find: "You need to be more executive."
+        note: "A label, not an action."
+  strong:
+    code: |
+      Situation: in Tuesday's steering group, when you presented the attrition model.
+      Behaviour: you spent ten minutes on feature engineering before showing the result.
+      Impact: I saw the HR director check their phone, and we ran out of time for the decision.
+      Intent: what were you aiming for with the detail?
+    annotations:
+      - find: "Situation: in Tuesday's steering group, when you presented the attrition model."
+        note: "When and where, so the person knows exactly which moment you mean."
+      - find: "Behaviour: you spent ten minutes on feature engineering before showing the result."
+        note: "What a camera would have recorded. No judgement words."
+      - find: "Intent: what were you aiming for with the detail?"
+        note: "Asking about intent turns feedback into a conversation."
+  takeaway: |
+    Give feedback as situation, behaviour and impact. Describe what a camera would see, state the effect as an "I" statement, and ask about intent. Use it for praise as well as for change.
+exercises:
+  - id: F3-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which sentence describes behaviour rather than a judgement?
+    options:
+      - {id: a, text: "You interrupted the DPO twice before they finished their point"}
+      - {id: b, text: "You were rude to the DPO"}
+      - {id: c, text: "You seemed defensive"}
+      - {id: d, text: "You were not very collaborative"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "\"Rude\" is your judgement. What did the person do?"
+      - answer: c
+        feedback: "\"Defensive\" guesses at a state of mind. Describe the act."
+      - answer: d
+        feedback: "A label. A camera could not record \"not collaborative\"."
+    hints:
+      - "Could a camera record it?"
+      - "Avoid adjectives about the person."
+      - "The one that counts interruptions."
+    explanation: |
+      Behaviour is what a camera would record: an act, not an adjective.
+
+  - id: F3-L1-E2
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the model.
+    template: |
+      [[g1]]: when and where it happened
+      [[g2]]: what the person did, as a camera would record it
+      [[g3]]: the effect on you, the group or the outcome
+    gaps:
+      g1: {accepted: [situation], case_sensitive: false}
+      g2: {accepted: [behaviour, behavior], case_sensitive: false}
+      g3: {accepted: [impact], case_sensitive: false}
+    wrong_answers:
+      - answer: {g3: intent}
+        feedback: "Intent is the extension you ask about. The third part is impact."
+    hints:
+      - "When and where."
+      - "What they did."
+      - "`situation`, `behaviour`, `impact`."
+    explanation: |
+      Situation, behaviour, impact.
+
+  - id: F3-L1-E3
+    type: order
+    difficulty: 2
+    prompt: |
+      A colleague tells you your report buried the recommendation. Put your response in order.
+    items:
+      - {id: listen, text: "Listen to the end without defending the report"}
+      - {id: example, text: "Ask for a specific example"}
+      - {id: thank, text: "Thank them"}
+      - {id: decide, text: "Decide what you will change"}
+      - {id: close, text: "Tell them later what you changed"}
+    answer: [listen, example, thank, decide, close]
+    wrong_answers:
+      - answer: [example, listen, thank, decide, close]
+        feedback: "Hear them out before you ask questions."
+      - answer: [listen, example, decide, thank, close]
+        feedback: "Thank them in the conversation. Decide afterwards, with time to think."
+    hints:
+      - "Hear it all first."
+      - "Then make it specific."
+      - "Close the loop at the end."
+    explanation: |
+      Listen, ask for an example, thank them, decide, then tell them what changed.
+
+  - id: F3-L1-E4
+    type: mcq
+    difficulty: 3
+    prompt: |
+      You want feedback on your first month. Which request gets the most useful answer?
+    options:
+      - {id: a, text: "What one thing should I change in how I present findings to the leadership team?"}
+      - {id: b, text: "Any feedback for me?"}
+      - {id: c, text: "How am I doing?"}
+      - {id: d, text: "Was my first month OK?"}
+    answer: a
+    reasons:
+      - {id: r1, text: "A narrow question about one area is easier to answer honestly than a broad one."}
+      - {id: r2, text: "Asking about presentations is always the most important topic."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Broad questions get polite answers such as \"all fine\"."
+      - answer: c
+        feedback: "Too broad. People reach for a reassuring answer."
+      - answer: d
+        feedback: "A yes or no question invites \"yes\"."
+      - answer: a|r2
+        feedback: "Right request, wrong reason. Any narrow area works. Narrowness is what helps."
+    hints:
+      - "Broad or narrow?"
+      - "Which is easiest to answer with something specific?"
+      - "The one that names one area."
+    explanation: |
+      A narrow question about one area gets a specific, honest answer.
+
+  - id: F3-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A data engineer on your team shipped a pipeline without the agreed data quality checks. Plan the feedback.
+    slots:
+      - id: when
+        label: "When and where"
+        options:
+          - {id: soon, text: "Soon, in private"}
+          - {id: review, text: "At the end-of-year review"}
+        answer: soon
+      - id: content
+        label: "What you say"
+        options:
+          - {id: sbi, text: "The release, the checks that were missing, and the bad rows that reached the gold table"}
+          - {id: label, text: "That they are careless with quality"}
+        answer: sbi
+      - id: next
+        label: "Then"
+        options:
+          - {id: intent, text: "Ask what happened and agree the next step together"}
+          - {id: rule, text: "Announce a new rule to the whole team"}
+        answer: intent
+    model_answer: |
+      - Soon and in private keeps the feedback linked to the event and avoids embarrassment.
+      - Situation, behaviour and impact give them something specific to fix.
+      - Asking about intent finds the cause, which might be a deadline, not carelessness.
+    wrong_answers:
+      - answer: {when: review}
+        feedback: "Months later, the details are gone and nothing can change."
+      - answer: {content: label}
+        feedback: "A label attacks the person and gives nothing to fix."
+      - answer: {next: rule}
+        feedback: "A public rule punishes everyone and skips the cause."
+    hints:
+      - "How soon, and in front of whom?"
+      - "Act or label?"
+      - "What might explain it?"
+    explanation: |
+      Soon, private, specific, then ask about intent.
+recap:
+  - front: "Situation-Behaviour-Impact"
+    back: "Situation: when and where. Behaviour: what a camera would record. Impact: the effect, as an \"I\" statement."
+  - front: "The intent step"
+    back: "Ask what the person was trying to do. It turns feedback into a conversation and often changes your view."
+  - front: "Receiving feedback"
+    back: "Listen to the end, ask for an example, thank them, decide what to change, and tell them later."
+  - front: "Asking for feedback"
+    back: "Ask a narrow question about one area, not \"any feedback?\"."
+claims:
+  - claim: "The Situation-Behaviour-Impact (SBI) model was developed by the Center for Creative Leadership; its extension adds Intent; it suits positive and negative feedback."
+    status: search-only
+    source: "Mind Tools and several secondary sources found by search on 13 November 2026; ccl.org was not reachable from the build environment."
+  - claim: "The steps for receiving feedback and asking narrow questions are common practice."
+    status: unverified
+    source: "General practice, not a quotation from one source."

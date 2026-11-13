@@ -563,3 +563,21 @@ details.drills .plain-list { margin-top: 8px; }
   font: 600 1rem var(--mono); touch-action: manipulation;
 }
 .quick-keys button:active { background: var(--select); }
+
+/* Work log */
+.log-form { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
+.log-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+.log-fields .field-label { margin: 0; }
+.log-form textarea, .log-form input, .log-form select {
+  width: 100%; min-width: 0; box-sizing: border-box; min-height: 44px; padding: 8px;
+  font: 16px var(--sans); color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.log-form textarea { resize: vertical; }
+.log-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+.log-chip {
+  font: inherit; font-size: 0.9rem; min-height: 40px; padding: 4px 12px; border-radius: 99px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer;
+}
+.log-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--select); }
+.log-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }

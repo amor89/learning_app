@@ -1,0 +1,340 @@
+id: F1-L1
+title: Break a vague question into an issue tree
+concept: |
+  Requests arrive vague: "Why is attrition up?" If you start pulling data at once, you answer whatever the first chart suggests. An **issue tree** gives you a plan first.
+
+  **The tree.** Write the question at the top. Split it into two to five sub-questions, then split each again until every leaf is a question one piece of analysis answers. "Why is voluntary attrition up?" splits into "Which people are leaving?" and "Why are they leaving?". "Which people?" splits by grade, by function or by tenure.
+
+  **The MECE test.** At each split, check two things:
+
+  - **Mutually exclusive**: no item sits in two branches. "Graduates" and "London staff" overlap, so a London graduate is counted twice.
+  - **Collectively exhaustive**: the branches cover everything. "Engineering" and "Sales" miss Finance and HR.
+
+  Splits that follow a definition pass the test by design: leavers are voluntary or involuntary, and every employee has one grade.
+
+  **Hypotheses.** For each branch, write the answer you expect and the analysis that would prove or disprove it. "Leavers cluster in their first year, because onboarding changed in March. Test: attrition by tenure band, before and after March."
+
+  **Prune.** Drop branches whose answer would not change the decision. Rank the rest by likely size and by how quickly you can test them.
+
+  The MECE idea comes from Barbara Minto's work at McKinsey, set out in *The Pyramid Principle* (Minto, editions from 1987).
+why_it_matters: |
+  An analyst asked "why is attrition up?" spent two weeks on exit survey themes. The rise came from one site that closed, which a split by location would have shown on the first day. An issue tree with a location branch, tested first because it was quick, would have saved the two weeks.
+worked_example:
+  language: text
+  weak:
+    code: |
+      Why is attrition up?
+        - Graduates
+        - London staff
+        - Engineering and Sales
+        - Look at exit surveys
+    annotations:
+      - find: "- Graduates"
+        note: "Overlaps with London staff. A London graduate sits in both branches."
+      - find: "- Engineering and Sales"
+        note: "Not exhaustive. Finance, HR and every other function are missing."
+      - find: "- Look at exit surveys"
+        note: "A task, not a question. It has no hypothesis to test."
+  strong:
+    code: |
+      Why is voluntary attrition up this year?
+        Who is leaving?
+          By tenure band: under 1 year, 1 to 3 years, over 3 years
+            Hypothesis: first-year leavers rose after onboarding changed in March
+            Test: attrition by tenure band, before and after March
+          By location: one row per site
+            Hypothesis: one site drives the rise
+            Test: leavers per site against headcount per site
+        Why are they leaving?
+          Pay, manager, career, workload, other
+            Hypothesis: career reasons rose most
+            Test: exit reasons, coded on one list, this year against last
+    annotations:
+      - find: "By tenure band: under 1 year, 1 to 3 years, over 3 years"
+        note: "Every employee has one tenure, so the split is mutually exclusive and exhaustive."
+      - find: "Pay, manager, career, workload, other"
+        note: "An \"other\" branch keeps a list of reasons exhaustive."
+      - find: "Test: leavers per site against headcount per site"
+        note: "Each hypothesis names the analysis that proves or disproves it."
+  takeaway: |
+    Turn a vague question into a tree of sub-questions. Make each split mutually exclusive and collectively exhaustive, give each branch a hypothesis and a test, and drop branches that would not change the decision.
+exercises:
+  - id: F1-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      You split "Who is leaving?" into "Graduates" and "London staff". Which part of the MECE test fails?
+    options:
+      - {id: a, text: "Mutually exclusive: a London graduate sits in both branches"}
+      - {id: b, text: "Collectively exhaustive only"}
+      - {id: c, text: "Neither, the split is MECE"}
+      - {id: d, text: "The split has too few branches"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "It also misses people outside London who are not graduates, but the first failure is the overlap."
+      - answer: c
+        feedback: "A London graduate is counted twice, so the branches are not exclusive."
+      - answer: d
+        feedback: "Two branches are enough if they pass the test. These overlap."
+    hints:
+      - "Think of one person who fits both branches."
+      - "Can an item sit in two branches?"
+      - "Mutually exclusive fails."
+    explanation: |
+      Graduates and London staff overlap. Split on one dimension at a time, such as grade or location.
+
+  - id: F1-L1-E2
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the meaning of MECE.
+    template: |
+      Mutually [[g1]]: no item sits in two branches.
+      Collectively [[g2]]: the branches cover [[g3]].
+    gaps:
+      g1: {accepted: [exclusive], case_sensitive: false}
+      g2: {accepted: [exhaustive], case_sensitive: false}
+      g3: {accepted: [everything, "every item", all], case_sensitive: false}
+    wrong_answers:
+      - answer: {g2: exclusive}
+        feedback: "Exclusive is the first half. The second half is exhaustive: nothing left out."
+    hints:
+      - "No overlap."
+      - "No gaps."
+      - "`exclusive`, `exhaustive`, `everything`."
+    explanation: |
+      Mutually exclusive means no overlap. Collectively exhaustive means no gaps.
+
+  - id: F1-L1-E3
+    type: mcq
+    difficulty: 2
+    prompt: |
+      Your tree has eight branches and two weeks. Which branch do you test first?
+    options:
+      - {id: a, text: "The one likely to explain most of the rise that you can test in a day"}
+      - {id: b, text: "The most interesting one"}
+      - {id: c, text: "The one with the most data available"}
+      - {id: d, text: "All eight at once, in parallel"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Ranking by likely size and speed of testing gets the biggest answer soonest."}
+      - {id: r2, text: "A quick test is always the most important one."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "Interest does not tell you how much of the rise a branch explains."
+      - answer: c
+        feedback: "More data is not the same as more of the answer."
+      - answer: d
+        feedback: "Eight shallow analyses in two weeks give you no firm answer."
+      - answer: a|r2
+        feedback: "Right choice, wrong reason. Speed alone is not enough. Size and speed together decide."
+    hints:
+      - "Two things to rank by."
+      - "How much might it explain, and how fast can you check?"
+      - "Big and quick first."
+    explanation: |
+      Rank branches by likely size and by how quickly you can test them.
+
+  - id: F1-L1-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `mece_check(population: set[str], branches: dict[str, set[str]]) -> dict[str, list[str]]`. `population` holds the IDs of every item, such as every leaver. `branches` maps each branch name to the IDs it covers.
+
+      Return a dict with three keys, each holding a sorted list of IDs:
+
+      - `"overlap"`: IDs in more than one branch;
+      - `"gap"`: IDs in the population but in no branch;
+      - `"outside"`: IDs in a branch but not in the population.
+
+      A MECE split returns three empty lists.
+    primer: |
+      Sets support three operators you need here:
+
+      ```python
+      a = {"x", "y"}
+      b = {"y", "z"}
+      a & b   # {"y"}, in both
+      a | b   # {"x", "y", "z"}, in either
+      a - b   # {"x"}, in a but not in b
+      ```
+
+      `set()` makes an empty set, and `sorted(some_set)` returns its items as a sorted list.
+    starter: |
+      def mece_check(population, branches):
+          return {"overlap": [], "gap": [], "outside": []}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: mece_check
+          typed: true
+          docstring: true
+          message: "Give `mece_check` type hints and a docstring."
+      tests:
+        - id: clean
+          code: |
+            population = {"e1", "e2", "e3", "e4"}
+            branches = {"voluntary": {"e1", "e2"}, "involuntary": {"e3", "e4"}}
+            assert mece_check(population, branches) == {"overlap": [], "gap": [], "outside": []}
+          message: "A MECE split returns three empty lists."
+        - id: overlap
+          code: |
+            population = {"e1", "e2", "e3", "e4"}
+            branches = {"graduates": {"e1", "e2", "e3"}, "london": {"e2", "e3", "e4"}}
+            got = mece_check(population, branches)
+            assert got["overlap"] == ["e2", "e3"], got
+            assert got["gap"] == [] and got["outside"] == [], got
+          message: "List the IDs that sit in more than one branch, sorted."
+        - id: gap
+          code: |
+            population = {"e1", "e2", "e3", "e4", "e5"}
+            branches = {"engineering": {"e1"}, "sales": {"e2", "e3"}}
+            got = mece_check(population, branches)
+            assert got["gap"] == ["e4", "e5"], got
+            assert got["overlap"] == [] and got["outside"] == [], got
+          message: "List the population IDs that no branch covers, sorted."
+        - id: outside
+          code: |
+            population = {"e1", "e2"}
+            branches = {"a": {"e1", "x9"}, "b": {"e2"}}
+            got = mece_check(population, branches)
+            assert got["outside"] == ["x9"], got
+            assert got["overlap"] == [] and got["gap"] == [], got
+          message: "List the branch IDs that are not in the population, sorted."
+    solution: |
+      def mece_check(population: set[str], branches: dict[str, set[str]]) -> dict[str, list[str]]:
+          """Check that branches split a population with no overlap and no gaps.
+
+          Args:
+              population: Every item ID the question covers.
+              branches: Branch name to the item IDs it covers.
+
+          Returns:
+              Sorted IDs under "overlap" (in two or more branches), "gap" (in no branch)
+              and "outside" (in a branch but not the population).
+          """
+          seen: set[str] = set()
+          repeated: set[str] = set()
+          for members in branches.values():
+              repeated |= seen & members
+              seen |= members
+          return {
+              "overlap": sorted(repeated),
+              "gap": sorted(population - seen),
+              "outside": sorted(seen - population),
+          }
+    seeded_bugs:
+      - |
+        def mece_check(population: set[str], branches: dict[str, set[str]]) -> dict[str, list[str]]:
+            """Never looks for overlaps."""
+            seen = set()
+            for members in branches.values():
+                seen |= members
+            return {"overlap": [], "gap": sorted(population - seen), "outside": sorted(seen - population)}
+      - |
+        def mece_check(population: set[str], branches: dict[str, set[str]]) -> dict[str, list[str]]:
+            """Never looks for gaps."""
+            seen = set()
+            repeated = set()
+            for members in branches.values():
+                repeated |= seen & members
+                seen |= members
+            return {"overlap": sorted(repeated), "gap": [], "outside": sorted(seen - population)}
+      - |
+        def mece_check(population: set[str], branches: dict[str, set[str]]) -> dict[str, list[str]]:
+            """Ignores IDs outside the population."""
+            seen = set()
+            repeated = set()
+            for members in branches.values():
+                repeated |= seen & members
+                seen |= members
+            return {"overlap": sorted(repeated), "gap": sorted(population - seen), "outside": []}
+    wrong_answers:
+      - answer: |
+          def mece_check(population: set[str], branches: dict[str, set[str]]) -> dict[str, list[str]]:
+              """Never looks for overlaps."""
+              seen = set()
+              for members in branches.values():
+                  seen |= members
+              return {"overlap": [], "gap": sorted(population - seen), "outside": sorted(seen - population)}
+        triggers: overlap
+      - answer: |
+          def mece_check(population: set[str], branches: dict[str, set[str]]) -> dict[str, list[str]]:
+              """Never looks for gaps."""
+              seen = set()
+              repeated = set()
+              for members in branches.values():
+                  repeated |= seen & members
+                  seen |= members
+              return {"overlap": sorted(repeated), "gap": [], "outside": sorted(seen - population)}
+        triggers: gap
+    hints:
+      - "Keep a set of the IDs seen so far as you walk the branches."
+      - "An ID already in that set when a branch adds it again is an overlap."
+      - "Gaps are `population - seen`. Outside is `seen - population`."
+    explanation: |
+      Walking the branches once with a "seen" set finds overlaps, and two set differences find the gaps and the strays.
+
+  - id: F1-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      The HR director asks: "Why did engagement scores fall in the autumn survey?" Plan the first level of your tree and how you work it.
+    slots:
+      - id: split
+        label: "First split"
+        options:
+          - {id: who, text: "Who fell (by business unit, grade and tenure) and what fell (by survey question)"}
+          - {id: mixed, text: "Managers, London, new joiners and the pay question"}
+        answer: who
+      - id: branch
+        label: "Each branch holds"
+        options:
+          - {id: hyp, text: "A hypothesis and the analysis that would prove or disprove it"}
+          - {id: data, text: "A list of the data to pull"}
+        answer: hyp
+      - id: order
+        label: "Which branches first"
+        options:
+          - {id: rank, text: "Those likely to explain most of the fall that you can test quickly"}
+          - {id: all, text: "Every branch to the same depth before reporting"}
+        answer: rank
+    model_answer: |
+      - Split on one dimension at a time so the branches are MECE.
+      - A hypothesis per branch makes each piece of analysis a test.
+      - Test the big, quick branches first and report as soon as one explains the fall.
+    wrong_answers:
+      - answer: {split: mixed}
+        feedback: "Managers, London and new joiners overlap, and the list leaves most people out."
+      - answer: {branch: data}
+        feedback: "A data list has no question to answer. You will not know when you are done."
+      - answer: {order: all}
+        feedback: "Equal depth everywhere spends most of the time on branches that explain little."
+    hints:
+      - "Which split avoids overlap?"
+      - "What turns analysis into a test?"
+      - "Big and quick first."
+    explanation: |
+      MECE splits, a hypothesis per branch, and big, quick branches first.
+recap:
+  - front: "Issue tree"
+    back: "The question at the top, split into sub-questions until each leaf is answerable with one piece of analysis."
+  - front: "MECE"
+    back: "Mutually exclusive: no item in two branches. Collectively exhaustive: the branches cover everything."
+  - front: "What each branch holds"
+    back: "A hypothesis and the analysis that would prove or disprove it."
+  - front: "Which branches to test first"
+    back: "Those likely to explain most, which you can test quickly. Drop branches that would not change the decision."
+claims:
+  - claim: "The MECE principle is credited to Barbara Minto, a former McKinsey consultant, and set out in The Pyramid Principle (editions from 1987)."
+    status: search-only
+    source: "Secondary summaries (BetterUp, ModelThinkers, thinkinsights.net) found by search on 13 November 2026; the book itself was not checked."
+  - claim: "Issue trees with a hypothesis and a test per branch, ranked by size and speed, are common consulting practice."
+    status: unverified
+    source: "General practice, not a quotation from one source."

@@ -298,3 +298,17 @@ ico.org.uk, www.legislation.gov.uk and www.dama.org were blocked in the build en
 | Small-cell suppression thresholds such as fewer than 10 people are an organisational choice (E1-L5) | Unverified | Statistical disclosure control practice |
 | Business glossary sits within metadata management, DMBOK2 chapter 12 (E2-L5) | Search only | Secondary summaries; not in the extracts checked in the book |
 | RACI conventions: one accountable, at least one responsible (E2-L5) | Unverified | General governance practice |
+
+## Track F: consulting and communication sources (checked 13 November 2026)
+
+Track F teaches published methods, not APIs. The original books were not available in the build environment, and www.gov.uk, www.ccl.org and www.cia.gov were not reachable, so every row is search-only: consistent across several secondary sources, not read at source.
+
+| Item | Status | Source |
+|---|---|---|
+| MECE and the Pyramid Principle: answer first, three or four supporting points answering why or how, situation, complication and question (F1-L1, F1-L2) | Search only | Barbara Minto, The Pyramid Principle; BetterUp, ModelThinkers and thinkinsights.net summaries |
+| PHIA Probability Yardstick: seven bands with deliberate gaps (F1-L3) | Search only | GOV.UK "Explaining uncertainty in UK intelligence assessment", College of Policing and the 2023 National Risk Register, seen through search results |
+| The Mom Test: three rules and three kinds of misleading data (F2-L1) | Search only | Rob Fitzpatrick, The Mom Test (2013); Shortform and Unusual Ventures summaries |
+| Power and interest grid, attributed to Aubrey Mendelow (1991) (F2-L2) | Search only | Nielsen Norman Group, OpenLearn and the Professional Academy |
+| Influence Without Authority: reciprocity, six steps, five kinds of currency (F2-L3) | Search only | Allan Cohen and David Bradford (1991, third edition 2017); Newswise and secondary summaries. The book is in the course owner's NotebookLM notebook |
+| Situation-Behaviour-Impact and the intent extension, Center for Creative Leadership (F3-L1) | Search only | Mind Tools and secondary sources |
+| The First 90 Days: STARS, five conversations with the boss, early wins (F3-L2) | Search only | Michael Watkins (2003, updated 2013); Shortform, SuperSummary and Mind Tools summaries |

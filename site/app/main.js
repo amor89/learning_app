@@ -9,6 +9,7 @@ import { tabFor } from "./pathways.js";
 import { roleView } from "./role-view.js";
 import { prepare } from "./search.js";
 import { searchView } from "./search-view.js";
+import { worklogView } from "./worklog-view.js";
 import { clear, h, toast } from "./ui.js";
 import {
   dashboard,
@@ -156,6 +157,7 @@ const ROUTES = [
   [/^#\/interview\/drill$/, () => drillView(app), "interview"],
   [/^#\/interview\/task\/([\w-]+)$/, (m) => taskView(app, m[1]), "interview"],
   [/^#\/search(?:\?q=([^&]*))?$/, (m) => searchView(app, safeDecode(m[1] ?? "")), null],
+  [/^#\/log$/, () => worklogView(app), null],
   [/^#\/review$/, () => reviewView(app), "review"],
   [/^#\/settings$/, () => settingsView(app), "settings"],
 ];

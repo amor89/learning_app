@@ -1,12 +1,12 @@
 # Learning app
 
-A personal, offline-capable course with five tracks: Databricks pipeline engineering, Python for data science, Microsoft Fabric, finding errors in code, and data protection and governance. It runs as a static site on GitHub Pages and installs on an iPhone home screen.
+A personal, offline-capable course with six tracks: Databricks pipeline engineering, Python for data science, Microsoft Fabric, finding errors in code, data protection and governance, and consulting and communication. It runs as a static site on GitHub Pages and installs on an iPhone home screen.
 
-Status: Phase 6 complete. All four tracks and three capstones are written: Track A (Databricks pipeline engineering) 33 lessons, Track B (Python for data science) 104, including PyTorch foundations for roadmap months 1 to 3, convolutional networks for months 4 to 6, attention and transformers from scratch for months 7 to 9, fine-tuning for months 10 to 12, prompting, RAG and LLM evaluation for months 13 to 15, and serving and monitoring for months 16 to 18, Track C (Microsoft Fabric) 33, checked against Microsoft Learn, Track D (Finding errors in code) 26, Track E (Data protection and governance) 6, covering UK GDPR in HR and DAMA-DMBOK for the EY role plan, and the Capstones track with 3 projects.
+Status: Phase 6 complete. All six tracks and three capstones are written: Track A (Databricks pipeline engineering) 33 lessons, Track B (Python for data science) 104, including PyTorch foundations for roadmap months 1 to 3, convolutional networks for months 4 to 6, attention and transformers from scratch for months 7 to 9, fine-tuning for months 10 to 12, prompting, RAG and LLM evaluation for months 13 to 15, and serving and monitoring for months 16 to 18, Track C (Microsoft Fabric) 36, checked against Microsoft Learn, Track D (Finding errors in code) 26, Track E (Data protection and governance) 13, covering UK GDPR in HR, DAMA-DMBOK, transfers and works councils for the EY role plan, Track F (Consulting and communication) 8, covering issue trees, answer-first writing, uncertainty, stakeholders, influence, feedback and your first 90 days, and the Capstones track with 3 projects.
 
 ## Pathways
 
-The **Paths** tab lists four routes through the modules: the Senior Data Scientist roadmap, Databricks pipeline engineer, Microsoft Fabric, and Finding errors in code. Each pathway splits into stages, and each stage lists its modules and lessons with your progress, so you reach any lesson in two taps. Choose one with **Make this my pathway**: the dashboard's **Continue** button, its stage list and the **Next in your pathway** card at the end of each lesson then follow it. Tracks, module mastery and the handbook downloads sit under **All tracks, mastery and handbook downloads** on the dashboard.
+The **Paths** tab lists six routes through the modules: the Senior Data Scientist roadmap, Databricks pipeline engineer, Microsoft Fabric, Finding errors in code, EY: Talent Data Strategy, and Consulting and communication. Each pathway splits into stages, and each stage lists its modules and lessons with your progress, so you reach any lesson in two taps. Choose one with **Make this my pathway**: the dashboard's **Continue** button, its stage list and the **Next in your pathway** card at the end of each lesson then follow it. Tracks, module mastery and the handbook downloads sit under **All tracks, mastery and handbook downloads** on the dashboard.
 
 `content/pathways.yaml` defines the pathways. The build rejects a pathway that names a missing module, lists a module twice, or leaves any module out of every pathway.
 
@@ -36,6 +36,10 @@ The **EY: Talent Data Strategy** pathway has one stage per phase, listing the mo
 
 The plan lives in `content/roles/ey-talent.yaml`. The loader checks that every lesson exists, that prerequisites never sit in a later phase, and that the pathway exists. `tests/content/test_roles.py` checks that the pathway's stages match the phases exactly. Your levels and ticks live with your progress.
 
+## Work log
+
+**Work log**, linked from Home and the role page (`#/log`), keeps a line or two for each win, decision, lesson learned or piece of feedback, the week it happens. Each entry has a date, a kind, the text and an optional impact, ideally with a number. When a role plan exists, the entry is tagged with the phase that holds its date, using your own start date from the countdown, and you can change the tag. Filter by kind, delete an entry, or **Save as Markdown** for a review or a one-to-one: the export groups entries by month, newest first, with a count of each kind. Entries live with the rest of your progress in this browser, so export your progress from Settings to back them up. `site/app/worklog.js` holds the logic and `tests/app/worklog.test.mjs` tests it.
+
 ## Monthly notes
 
 `reference/roadmap.md` asks for a quick reference and a deep dive each month. The **Monthly notes** page (from the dashboard of the Senior Data Scientist roadmap, each roadmap stage in the pathway, or the library) has one page per roadmap stage, Months 1 to 3 through Months 16 to 18:
@@ -64,7 +68,7 @@ The magnifier in the header opens **Search**. Type a word or two and results app
 
 Every word you type must start a word in the result. Title matches rank first, and words found side by side rank above the same words scattered. Matched words are marked. The query sits in the address, so Back from a result returns to the same results.
 
-`scripts/build_content.py` writes the index to `site/content/search.json` through `learnkit/search.py`. The app loads it the first time you search, and the service worker keeps it for offline use. `tests/content/test_search.py` checks that every lesson and recap card is in the index, and `tests/app/search.test.mjs tests/app/quickkeys.test.mjs` tests matching, ranking, highlights and extracts.
+`scripts/build_content.py` writes the index to `site/content/search.json` through `learnkit/search.py`. The app loads it the first time you search, and the service worker keeps it for offline use. `tests/content/test_search.py` checks that every lesson and recap card is in the index, and `tests/app/search.test.mjs` tests matching, ranking, highlights and extracts.
 
 ## Interview practice
 
@@ -142,7 +146,7 @@ pip install -e . --group dev
 python scripts/build_all.py
 ruff check . && ruff format --check . && mypy
 pytest                                   # Python checkers: solutions pass, seeded bugs fail
-node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs tests/app/notes.test.mjs tests/app/role.test.mjs tests/app/nav.test.mjs tests/app/search.test.mjs tests/app/quickkeys.test.mjs
+node --test tests/app/checkers.test.mjs tests/app/store.test.mjs tests/app/pathways.test.mjs tests/app/interview.test.mjs tests/app/placement.test.mjs tests/app/notes.test.mjs tests/app/role.test.mjs tests/app/nav.test.mjs tests/app/search.test.mjs tests/app/quickkeys.test.mjs tests/app/worklog.test.mjs
 ```
 
 WeasyPrint needs Pango. On macOS: `brew install pango`. On Ubuntu: `apt install libpango-1.0-0 libpangoft2-1.0-0`.

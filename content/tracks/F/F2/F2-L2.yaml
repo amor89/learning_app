@@ -1,0 +1,369 @@
+id: F2-L2
+title: Map your stakeholders by power and interest
+concept: |
+  A talent data platform touches many people: the HR director, the data protection officer, works councils, IT security, finance, HR business partners and the managers who read the reports. You cannot give everyone the same attention. A stakeholder map tells you where to spend it.
+
+  **The power and interest grid.** Score each stakeholder on two things. **Power**: how far they can help or block the work. **Interest**: how much the work affects them, and how much they care. The grid is often called **Mendelow's matrix**, after Aubrey Mendelow's 1991 work. Each quadrant has its own approach:
+
+  - **High power, high interest: manage closely.** Involve them in decisions and meet them regularly. The HR director sits here.
+  - **High power, low interest: keep satisfied.** Give short updates, and ask for little of their time. The chief information officer often sits here.
+  - **Low power, high interest: keep informed.** Share progress and listen. HR business partners often sit here.
+  - **Low power, low interest: monitor.** Check now and then that nothing has changed.
+
+  **Add stance.** Note whether each person supports the work, is neutral or opposes it. A powerful opponent needs a conversation early, not a surprise late.
+
+  **Positions move.** Announce an audit, and the data protection officer's interest jumps. Propose monitoring tools, and a works council gains power. Review the map at each phase of the work.
+
+  **Turn the map into a plan.** For each person, write what they care about, what you need from them, the channel and how often.
+why_it_matters: |
+  A people analytics team briefed the HR director weekly but sent the data protection officer one email at the start. Three weeks before launch, the DPO asked for a DPIA that nobody had started. The launch slipped two months. The DPO's power to stop the launch was always high. Their interest rose the moment personal data reached production.
+worked_example:
+  language: yaml
+  weak:
+    code: |
+      stakeholders: [HR director, DPO, CIO, HR business partners, works council]
+      plan: monthly update email to everyone
+    annotations:
+      - find: "stakeholders: [HR director, DPO, CIO, HR business partners, works council]"
+        note: "A list with no scores. Nothing says who can block the work."
+      - find: "plan: monthly update email to everyone"
+        note: "The same treatment for everyone. The HR director gets too little, the CIO too much."
+  strong:
+    code: |
+      HR director:   {power: 5, interest: 5, stance: supporter, approach: manage closely,
+                      needs: approve scope, channel: fortnightly meeting}
+      DPO:           {power: 5, interest: 3, stance: neutral, approach: manage closely,
+                      needs: DPIA sign-off, channel: early workshop, then monthly}
+      CIO:           {power: 4, interest: 2, stance: neutral, approach: keep satisfied,
+                      needs: capacity budget, channel: quarterly one-page note}
+      HR business partners: {power: 2, interest: 4, approach: keep informed, channel: demo each phase}
+      review: at the start of each phase
+    annotations:
+      - find: "DPO:           {power: 5, interest: 3, stance: neutral, approach: manage closely,"
+        note: "Power to block the launch makes the DPO someone to manage closely, from the start."
+      - find: "approach: keep satisfied"
+        note: "High power, low interest: short updates that ask little of their time."
+      - find: "review: at the start of each phase"
+        note: "Positions move, so the map is reviewed, not drawn once."
+  takeaway: |
+    Score each stakeholder on power and interest, note their stance, and choose an approach per quadrant: manage closely, keep satisfied, keep informed or monitor. Review the map at each phase.
+exercises:
+  - id: F2-L2-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      The CIO controls the capacity budget but has little interest in talent data. Which approach fits?
+    options:
+      - {id: a, text: "Keep satisfied"}
+      - {id: b, text: "Manage closely"}
+      - {id: c, text: "Keep informed"}
+      - {id: d, text: "Monitor"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "Close management suits high power and high interest. The CIO's interest is low."
+      - answer: c
+        feedback: "Keep informed suits low power and high interest. The CIO has high power."
+      - answer: d
+        feedback: "Monitoring suits low power and low interest. The CIO controls your budget."
+    hints:
+      - "Power is high. Interest is low."
+      - "Which quadrant is high power, low interest?"
+      - "Keep satisfied."
+    explanation: |
+      High power, low interest: keep satisfied with short updates.
+
+  - id: F2-L2-E2
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the four approaches.
+    template: |
+      High power, high interest: manage [[g1]]
+      High power, low interest:  keep [[g2]]
+      Low power, high interest:  keep [[g3]]
+      Low power, low interest:   monitor
+    gaps:
+      g1: {accepted: [closely], case_sensitive: false}
+      g2: {accepted: [satisfied], case_sensitive: false}
+      g3: {accepted: [informed], case_sensitive: false}
+    wrong_answers:
+      - answer: {g2: informed}
+        feedback: "Informed is for low power, high interest. High power, low interest is kept satisfied."
+    hints:
+      - "The top-right quadrant gets the most attention."
+      - "Powerful but uninterested: keep them content."
+      - "`closely`, `satisfied`, `informed`."
+    explanation: |
+      Manage closely, keep satisfied, keep informed, monitor.
+
+  - id: F2-L2-E3
+    type: mcq
+    difficulty: 2
+    prompt: |
+      The company announces an external data protection audit. What happens to your map?
+    options:
+      - {id: a, text: "Move the DPO up on interest and review their approach"}
+      - {id: b, text: "Nothing, the map was agreed at the start"}
+      - {id: c, text: "Remove the DPO, because the auditors take over"}
+      - {id: d, text: "Lower everyone else's power"}
+    answer: a
+    reasons:
+      - {id: r1, text: "Power and interest change with events, so the map must be reviewed."}
+      - {id: r2, text: "The DPO always has the most power in any project."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "A map drawn once goes stale. Events move people."
+      - answer: c
+        feedback: "The audit raises the DPO's stake. They stay, and matter more."
+      - answer: d
+        feedback: "The audit changes the DPO's position, not everyone else's."
+      - answer: a|r2
+        feedback: "Right action, wrong reason. Power depends on the work and the moment, not the job title alone."
+    hints:
+      - "Does the map stay fixed?"
+      - "Whose interest rises with an audit?"
+      - "Review and move the DPO."
+    explanation: |
+      Events move stakeholders. Review the map when they happen.
+
+  - id: F2-L2-E4
+    type: write_function
+    difficulty: 3
+    language: python
+    prompt: |
+      Write `stakeholder_plan(stakeholders: dict[str, tuple[int, int]]) -> dict[str, list[str]]`. Each name maps to `(power, interest)`, each a whole number from 1 to 5. A score of 3 or more counts as high.
+
+      Return a dict with exactly four keys, `"manage closely"`, `"keep satisfied"`, `"keep informed"` and `"monitor"`, each holding the sorted names in that quadrant. Include every key, even when its list is empty. Raise `ValueError` for any score that is not an `int` from 1 to 5.
+    primer: |
+      A `for` loop over `dict.items()` unpacks each key and value, and a tuple value unpacks too:
+
+      ```python
+      scores = {"Ann": (4, 2), "Raj": (1, 5)}
+      for name, (maths, art) in scores.items():
+          print(name, maths, art)
+      ```
+
+      `isinstance(x, int)` checks for a whole number. `list.append(x)` adds an item to a list, and `sorted(a_list)` returns a sorted copy.
+    starter: |
+      def stakeholder_plan(stakeholders):
+          return {name: "manage closely" for name in stakeholders}
+    checker:
+      kind: python
+      ast_rules:
+        - id: typed_documented
+          kind: requires_function
+          name: stakeholder_plan
+          typed: true
+          docstring: true
+          message: "Give `stakeholder_plan` type hints and a docstring."
+      tests:
+        - id: grouping
+          code: |
+            got = stakeholder_plan({
+                "HR director": (5, 5), "DPO": (5, 4), "CIO": (4, 1),
+                "HR business partners": (2, 4), "Facilities": (1, 1),
+            })
+            assert got == {
+                "manage closely": ["DPO", "HR director"],
+                "keep satisfied": ["CIO"],
+                "keep informed": ["HR business partners"],
+                "monitor": ["Facilities"],
+            }, got
+          message: "Put each name in its quadrant, with sorted names."
+        - id: empty
+          code: |
+            got = stakeholder_plan({"HR director": (5, 5)})
+            assert got == {"manage closely": ["HR director"], "keep satisfied": [], "keep informed": [], "monitor": []}, got
+          message: "Include all four keys, even when a quadrant is empty."
+        - id: threshold
+          code: |
+            got = stakeholder_plan({"Edge": (3, 3), "Below": (2, 3)})
+            assert got["manage closely"] == ["Edge"], got
+            assert got["keep informed"] == ["Below"], got
+          message: "A score of 3 counts as high, and 2 counts as low."
+        - id: invalid
+          code: |
+            for bad in [(0, 3), (3, 6), (3.5, 2)]:
+                try:
+                    stakeholder_plan({"X": bad})
+                except ValueError:
+                    continue
+                raise AssertionError(f"no ValueError for {bad}")
+          message: "Raise ValueError for a score that is not a whole number from 1 to 5."
+    solution: |
+      HIGH = 3
+      APPROACHES = ("manage closely", "keep satisfied", "keep informed", "monitor")
+
+
+      def stakeholder_plan(stakeholders: dict[str, tuple[int, int]]) -> dict[str, list[str]]:
+          """Group stakeholders into the four power and interest approaches.
+
+          Args:
+              stakeholders: Name to (power, interest), each a whole number from 1 to 5.
+
+          Returns:
+              Each approach to the sorted names in it. All four approaches are present.
+
+          Raises:
+              ValueError: If a score is not an int from 1 to 5.
+          """
+          plan: dict[str, list[str]] = {approach: [] for approach in APPROACHES}
+          for name, (power, interest) in stakeholders.items():
+              for score in (power, interest):
+                  if not isinstance(score, int) or not 1 <= score <= 5:
+                      raise ValueError(f"{name}: scores must be whole numbers from 1 to 5, got {score!r}")
+              if power >= HIGH:
+                  approach = "manage closely" if interest >= HIGH else "keep satisfied"
+              else:
+                  approach = "keep informed" if interest >= HIGH else "monitor"
+              plan[approach].append(name)
+          return {approach: sorted(names) for approach, names in plan.items()}
+    seeded_bugs:
+      - |
+        def stakeholder_plan(stakeholders: dict[str, tuple[int, int]]) -> dict[str, list[str]]:
+            """Swaps keep satisfied and keep informed."""
+            plan = {a: [] for a in ("manage closely", "keep satisfied", "keep informed", "monitor")}
+            for name, (power, interest) in stakeholders.items():
+                for score in (power, interest):
+                    if not isinstance(score, int) or not 1 <= score <= 5:
+                        raise ValueError("bad score")
+                if power >= 3:
+                    approach = "manage closely" if interest >= 3 else "keep informed"
+                else:
+                    approach = "keep satisfied" if interest >= 3 else "monitor"
+                plan[approach].append(name)
+            return {a: sorted(n) for a, n in plan.items()}
+      - |
+        def stakeholder_plan(stakeholders: dict[str, tuple[int, int]]) -> dict[str, list[str]]:
+            """Only returns quadrants that have someone in them."""
+            plan = {}
+            for name, (power, interest) in stakeholders.items():
+                for score in (power, interest):
+                    if not isinstance(score, int) or not 1 <= score <= 5:
+                        raise ValueError("bad score")
+                if power >= 3:
+                    approach = "manage closely" if interest >= 3 else "keep satisfied"
+                else:
+                    approach = "keep informed" if interest >= 3 else "monitor"
+                plan.setdefault(approach, []).append(name)
+            return {a: sorted(n) for a, n in plan.items()}
+      - |
+        def stakeholder_plan(stakeholders: dict[str, tuple[int, int]]) -> dict[str, list[str]]:
+            """Counts only 4 or more as high."""
+            plan = {a: [] for a in ("manage closely", "keep satisfied", "keep informed", "monitor")}
+            for name, (power, interest) in stakeholders.items():
+                for score in (power, interest):
+                    if not isinstance(score, int) or not 1 <= score <= 5:
+                        raise ValueError("bad score")
+                if power > 3:
+                    approach = "manage closely" if interest > 3 else "keep satisfied"
+                else:
+                    approach = "keep informed" if interest > 3 else "monitor"
+                plan[approach].append(name)
+            return {a: sorted(n) for a, n in plan.items()}
+      - |
+        def stakeholder_plan(stakeholders: dict[str, tuple[int, int]]) -> dict[str, list[str]]:
+            """Never checks the scores."""
+            plan = {a: [] for a in ("manage closely", "keep satisfied", "keep informed", "monitor")}
+            for name, (power, interest) in stakeholders.items():
+                if power >= 3:
+                    approach = "manage closely" if interest >= 3 else "keep satisfied"
+                else:
+                    approach = "keep informed" if interest >= 3 else "monitor"
+                plan[approach].append(name)
+            return {a: sorted(n) for a, n in plan.items()}
+    wrong_answers:
+      - answer: |
+          def stakeholder_plan(stakeholders: dict[str, tuple[int, int]]) -> dict[str, list[str]]:
+              """Swaps keep satisfied and keep informed."""
+              plan = {a: [] for a in ("manage closely", "keep satisfied", "keep informed", "monitor")}
+              for name, (power, interest) in stakeholders.items():
+                  for score in (power, interest):
+                      if not isinstance(score, int) or not 1 <= score <= 5:
+                          raise ValueError("bad score")
+                  if power >= 3:
+                      approach = "manage closely" if interest >= 3 else "keep informed"
+                  else:
+                      approach = "keep satisfied" if interest >= 3 else "monitor"
+                  plan[approach].append(name)
+              return {a: sorted(n) for a, n in plan.items()}
+        triggers: grouping
+      - answer: |
+          def stakeholder_plan(stakeholders: dict[str, tuple[int, int]]) -> dict[str, list[str]]:
+              """Counts only 4 or more as high."""
+              plan = {a: [] for a in ("manage closely", "keep satisfied", "keep informed", "monitor")}
+              for name, (power, interest) in stakeholders.items():
+                  for score in (power, interest):
+                      if not isinstance(score, int) or not 1 <= score <= 5:
+                          raise ValueError("bad score")
+                  if power > 3:
+                      approach = "manage closely" if interest > 3 else "keep satisfied"
+                  else:
+                      approach = "keep informed" if interest > 3 else "monitor"
+                  plan[approach].append(name)
+              return {a: sorted(n) for a, n in plan.items()}
+        triggers: threshold
+    hints:
+      - "Start with a dict that holds all four approaches, each with an empty list."
+      - "Check both scores before you place anyone."
+      - "Power decides the top or bottom row, interest the column. Sort each list at the end."
+    explanation: |
+      Starting with all four keys keeps the plan's shape fixed, and validating scores first stops a typo placing someone in the wrong quadrant.
+
+  - id: F2-L2-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      Plan stakeholder engagement for the first month of the talent data platform.
+    slots:
+      - id: dpo
+        label: "The data protection officer"
+        options:
+          - {id: early, text: "An early workshop on the DPIA, then monthly check-ins"}
+          - {id: late, text: "A review request once the design is finished"}
+        answer: early
+      - id: council
+        label: "Works councils in countries with co-determination rights"
+        options:
+          - {id: map, text: "On the map with high power, and consulted before any monitoring feature"}
+          - {id: skip, text: "Left off the map, because they are not in the project"}
+        answer: map
+      - id: review
+        label: "When you review the map"
+        options:
+          - {id: phase, text: "At the start of each phase and after any major event"}
+          - {id: once, text: "Never, once it is agreed"}
+        answer: phase
+    model_answer: |
+      - The DPO holds the power to stop a launch, so involve them before design decisions harden.
+      - Works councils gain power the moment monitoring is proposed. Lesson E3-L3 covers why.
+      - Events move people on the map, so review it each phase.
+    wrong_answers:
+      - answer: {dpo: late}
+        feedback: "A late review leaves no time to act on what the DPO finds."
+      - answer: {council: skip}
+        feedback: "Not being in the project does not remove their power to block it."
+      - answer: {review: once}
+        feedback: "A map drawn once misses the moment someone's interest jumps."
+    hints:
+      - "Who can stop the launch?"
+      - "Who gains power when monitoring is proposed?"
+      - "Do positions stay fixed?"
+    explanation: |
+      Involve the powerful early, map everyone who can block the work, and review the map each phase.
+recap:
+  - front: "Power and interest grid"
+    back: "High power and interest: manage closely. High power, low interest: keep satisfied. Low power, high interest: keep informed. Low both: monitor."
+  - front: "What to add to the grid"
+    back: "Each person's stance (supporter, neutral or opponent), what they care about, what you need from them, the channel and how often."
+  - front: "When to review a stakeholder map"
+    back: "At the start of each phase and after any event that changes someone's power or interest, such as an audit."
+  - front: "The usual name for the grid"
+    back: "Mendelow's matrix, after Aubrey Mendelow's 1991 work."
+claims:
+  - claim: "The power and interest grid is attributed to Aubrey Mendelow (1991); its quadrants are commonly labelled manage closely, keep satisfied, keep informed and monitor."
+    status: search-only
+    source: "Nielsen Norman Group 'Stakeholder Analysis', the Open University's OpenLearn and the Professional Academy, found by search on 13 November 2026; the 1991 paper itself was not checked."
