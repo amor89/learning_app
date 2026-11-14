@@ -1,0 +1,216 @@
+id: F2-L1
+title: Find the decision behind the request
+concept: |
+  Requests arrive as solutions: "Build me an attrition dashboard." If you build what was asked, you often build the wrong thing. Before you start, run a short requirements interview.
+
+  **Find the decision.** Ask what decision the work will inform, who makes it and when. Then ask: "If the answer were A, what would you do? And if it were B?" If both answers lead to the same action, the analysis changes nothing. Say so, and save the effort.
+
+  **Ask about the past, not the future.** Rob Fitzpatrick's *The Mom Test* (2013) gives three rules for interviews that people answer politely but unhelpfully:
+
+  - Talk about their work, not your idea.
+  - Ask about specific events in the past, not opinions about the future. "The last time you reviewed attrition, what did you look at, and what did you do next?" beats "Would you use a dashboard?"
+  - Talk less and listen more.
+
+  **Filter bad data.** Three kinds of answer mislead you. **Compliments** ("that sounds great") tell you nothing. **Fluff** is generic or hypothetical ("we always", "we would"): ask for the last real example. **Feature requests** ("add a filter by grade") hide a motive: ask what the filter would let them do.
+
+  **Close with a written brief.** Record the decision, the decision-maker, the date it is needed, how often, the data sources and their owners, and how you will know the work succeeded. Send it back and ask for corrections. A brief the requester has confirmed protects you both when scope grows.
+why_it_matters: |
+  A team spent six weeks building an attrition dashboard with 14 filters. The HR director opened it twice. The real need was a quarterly answer to one question: which teams need a retention review. A one-page list, refreshed each quarter, would have taken three days.
+worked_example:
+  language: text
+  weak:
+    code: |
+      Q: Would you use an attrition dashboard?
+      A: Yes, that would be great.
+      Q: What filters do you want?
+      A: Grade, site, tenure, manager, gender, everything really.
+      Brief: attrition dashboard with all filters.
+    annotations:
+      - find: "Q: Would you use an attrition dashboard?"
+        note: "A question about the future and about your idea. People say yes to be polite."
+      - find: "A: Yes, that would be great."
+        note: "A compliment. It tells you nothing about what they will do."
+      - find: "Brief: attrition dashboard with all filters."
+        note: "No decision, no owner, no date and no measure of success."
+  strong:
+    code: |
+      Q: The last time you reviewed attrition, what did you look at?
+      A: The quarterly board pack. I picked three teams for a retention review.
+      Q: How did you pick them?
+      A: Highest leaver counts. Small teams always looked fine.
+      Q: If a small team lost half its people, would you review it?
+      A: Yes. I never saw them.
+      Brief: decision = which teams get a retention review, owner = HR director,
+             needed = each quarter, two weeks before the board, data = HR system
+             (owner: HRIS lead), success = no team over 20% loss is missed.
+    annotations:
+      - find: "Q: The last time you reviewed attrition, what did you look at?"
+        note: "A specific past event, not an opinion about the future."
+      - find: "Small teams always looked fine."
+        note: "The real problem: counts hide small teams. Rates would show them."
+      - find: "decision = which teams get a retention review"
+        note: "The brief starts from the decision, with an owner, a date and a success measure."
+  takeaway: |
+    Ask what decision a request serves, who makes it and when. Interview about specific past events, filter out compliments, fluff and feature requests, and confirm a written brief.
+exercises:
+  - id: F2-L1-E1
+    type: mcq
+    difficulty: 1
+    prompt: |
+      Which question follows the Mom Test rules?
+    options:
+      - {id: a, text: "The last time a manager resigned in your area, what did you do in the first week?"}
+      - {id: b, text: "Would a resignation alert be useful to you?"}
+      - {id: c, text: "Do you think attrition is a problem?"}
+      - {id: d, text: "How much would you value a retention model?"}
+    answer: a
+    wrong_answers:
+      - answer: b
+        feedback: "A question about your idea and the future. People say yes to be kind."
+      - answer: c
+        feedback: "An opinion question. Ask what happened instead."
+      - answer: d
+        feedback: "A hypothetical about your solution."
+    hints:
+      - "Past or future?"
+      - "Their work or your idea?"
+      - "The specific past event."
+    explanation: |
+      Ask about a specific past event in their work.
+
+  - id: F2-L1-E2
+    type: mcq
+    difficulty: 2
+    prompt: |
+      A director says, "Add a filter by manager to the dashboard." What do you do?
+    options:
+      - {id: a, text: "Ask what the filter would let them decide or do"}
+      - {id: b, text: "Add the filter, since they asked for it"}
+      - {id: c, text: "Refuse, because filters slow the dashboard"}
+      - {id: d, text: "Add filters for every column at once"}
+    answer: a
+    reasons:
+      - {id: r1, text: "A feature request hides a motive, and the motive tells you what to build."}
+      - {id: r2, text: "Directors rarely know what they want, so ignore the request."}
+    reason_answer: r1
+    wrong_answers:
+      - answer: b
+        feedback: "You may build it, but first learn why. The need might be met better another way."
+      - answer: c
+        feedback: "Refusing ends the conversation before you learn the need."
+      - answer: d
+        feedback: "More filters is more of the same guess."
+      - answer: a|r2
+        feedback: "Right action, wrong reason. The request matters. It points to a motive you need to find."
+    hints:
+      - "What sits behind a feature request?"
+      - "Dig for the motive."
+      - "Ask what it would let them do."
+    explanation: |
+      Treat a feature request as a clue to the real need, and ask about it.
+
+  - id: F2-L1-E3
+    type: fill_gap
+    difficulty: 2
+    language: text
+    prompt: |
+      Complete the three kinds of bad interview data.
+    template: |
+      [[g1]]: "that sounds great"
+      Fluff: generic or [[g2]] answers, such as "we would"
+      Feature [[g3]]: "add a filter by grade"
+    gaps:
+      g1: {accepted: [compliments, compliment], case_sensitive: false}
+      g2: {accepted: [hypothetical], case_sensitive: false}
+      g3: {accepted: [requests, request, ideas], case_sensitive: false}
+    wrong_answers:
+      - answer: {g1: fluff}
+        feedback: "Fluff is the second kind. Praise such as \"sounds great\" is a compliment."
+    hints:
+      - "Praise."
+      - "Answers about what might happen."
+      - "`compliments`, `hypothetical`, `requests`."
+    explanation: |
+      Compliments, fluff and feature requests all mislead unless you dig behind them.
+
+  - id: F2-L1-E4
+    type: order
+    difficulty: 3
+    prompt: |
+      Put the steps of a requirements interview in order.
+    items:
+      - {id: decision, text: "Ask what decision the work informs, who makes it and when"}
+      - {id: ab, text: "Ask what they would do if the answer were A, and if it were B"}
+      - {id: past, text: "Ask about the last real time they faced the decision"}
+      - {id: brief, text: "Write the brief: decision, owner, date, data and success measure"}
+      - {id: confirm, text: "Send the brief back and ask for corrections"}
+    answer: [decision, ab, past, brief, confirm]
+    wrong_answers:
+      - answer: [brief, decision, ab, past, confirm]
+        feedback: "Write the brief after the interview, from what you learned."
+      - answer: [decision, ab, past, confirm, brief]
+        feedback: "Confirm the brief once it exists, not before."
+    hints:
+      - "Start with the decision."
+      - "Then test whether the answer changes the action."
+      - "Write the brief last, then confirm it."
+    explanation: |
+      Decision, the A or B test, the last real example, then a brief the requester confirms.
+
+  - id: F2-L1-E5
+    type: design
+    difficulty: 4
+    prompt: |
+      A business partner asks for "a predictive attrition model". Plan your first meeting.
+    slots:
+      - id: open
+        label: "Your first question"
+        options:
+          - {id: decision, text: "What decision would the predictions inform, and who makes it?"}
+          - {id: model, text: "Which algorithm would you like us to use?"}
+        answer: decision
+      - id: evidence
+        label: "How you test the need"
+        options:
+          - {id: last, text: "Ask what happened the last time someone they wanted to keep resigned"}
+          - {id: would, text: "Ask whether they would act on a risk score"}
+        answer: last
+      - id: close
+        label: "How you close"
+        options:
+          - {id: brief, text: "A written brief with the decision, owner, date and success measure, sent for corrections"}
+          - {id: start, text: "Start building and show them a prototype in a month"}
+        answer: brief
+    model_answer: |
+      - The decision tells you whether a model, a rule or a list will do.
+      - The last real resignation shows what they actually do, not what they say they would.
+      - A confirmed brief prevents a month of work on the wrong thing.
+    wrong_answers:
+      - answer: {open: model}
+        feedback: "The algorithm is your choice, and it comes after the need."
+      - answer: {evidence: would}
+        feedback: "\"Would you\" invites a polite yes."
+      - answer: {close: start}
+        feedback: "Without a confirmed brief, the prototype tests your guess."
+    hints:
+      - "What does the work serve?"
+      - "Past events or future opinions?"
+      - "What protects you both when scope grows?"
+    explanation: |
+      Start from the decision, test with a past event, close with a confirmed brief.
+recap:
+  - front: "The first requirements question"
+    back: "What decision will this inform, who makes it, and when?"
+  - front: "The A or B test"
+    back: "If the answer were A, what would you do? And if B? If both lead to the same action, the analysis changes nothing."
+  - front: "The Mom Test rules"
+    back: "Talk about their work, not your idea. Ask about specific past events, not future opinions. Talk less, listen more."
+  - front: "Three kinds of bad interview data"
+    back: "Compliments, fluff (generic or hypothetical answers) and feature requests that hide a motive."
+claims:
+  - claim: "Rob Fitzpatrick's The Mom Test (2013): talk about their life instead of your idea, ask about specifics in the past instead of opinions about the future, talk less and listen more; compliments, fluff and ideas are the three kinds of misleading data."
+    status: search-only
+    source: "Secondary summaries (Shortform, Unusual Ventures, Koji) found by search on 13 November 2026; the book itself was not checked."
+  - claim: "Starting a requirements interview from the decision, and the A or B test, are common analytics practice."
+    status: unverified
+    source: "General practice, not a quotation from one source."

@@ -89,6 +89,7 @@ function quickLinks(app, pathway) {
     app.index.months ? ["#/months", "Monthly notes"] : null,
     ["#/interview/drill", "Interview drill"],
     role ? [`#/role/${role.id}`, "Role plan"] : null,
+    ["#/log", "Work log"],
   ].filter(Boolean);
   return h("nav", { class: "quick-links", "aria-label": "Quick links" },
     links.map(([href, text]) => h("a", { href }, text)));

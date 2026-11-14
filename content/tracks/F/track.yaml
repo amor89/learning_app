@@ -1,0 +1,18 @@
+id: F
+title: Consulting and communication
+summary: How to structure problems, write for leaders, work with stakeholders and grow in a new role, for the data professional whose work has to land with people.
+checklist:
+  - Break a vague question into an issue tree. Keep every split mutually exclusive and collectively exhaustive.
+  - Lead with the answer. Put the conclusion first, then three or four points that support it.
+  - Write headings as full-sentence takeaways, never "Findings" or "Analysis".
+  - Give a probability in fixed words with a range behind them. Keep confidence in the evidence separate.
+  - Ask what decision a request serves before you build anything.
+  - In interviews, ask about specific past events, not opinions about the future.
+  - Map stakeholders by power and interest, and review the map when either changes.
+  - To influence without authority, find what the other person values and trade for it.
+  - Give feedback as situation, behaviour and impact. Describe what you saw, not what you think of the person.
+  - In a new role, agree expectations with your manager early and secure small, visible wins.
+modules:
+  - {id: F1, title: "Structure your thinking and writing", tags: [role-ey, current-work], summary: "Issue trees, answer-first writing in a pyramid, and explaining uncertainty to leaders."}
+  - {id: F2, title: "Work with stakeholders", tags: [role-ey, current-work], summary: "Finding the decision behind a request, mapping stakeholders by power and interest, and influencing without authority."}
+  - {id: F3, title: "Grow in the role", tags: [role-ey, current-work], summary: "Giving and receiving feedback with situation, behaviour and impact, and your first 90 days."}

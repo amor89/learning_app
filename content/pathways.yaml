@@ -142,3 +142,20 @@ pathways:
         title: "Phase 4, days 91 to 180: Enable"
         summary: "Success: one AI-ready data product passes a data protection impact assessment and a bias review."
         modules: [C8, A7, B22]
+
+  - id: professional
+    title: "Consulting and communication"
+    summary: "The professional skills that make data work land with people: structure, writing, stakeholders and your first months in a role."
+    stages:
+      - id: structure
+        title: "Structure and write"
+        summary: "Break vague questions into issue trees, lead with the answer and explain uncertainty."
+        modules: [F1]
+      - id: stakeholders
+        title: "Work with stakeholders"
+        summary: "Find the decision behind a request, map stakeholders and influence without authority."
+        modules: [F2]
+      - id: grow
+        title: "Grow in the role"
+        summary: "Give and receive feedback, and plan your first 90 days."
+        modules: [F3]

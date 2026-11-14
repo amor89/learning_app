@@ -486,6 +486,46 @@ await page.goto(`${base}${query}#/`);
 await page.getByRole("heading", { name: "Home" }).waitFor();
 await page.waitForTimeout(300);
 check(await page.locator(".home-countdown .countdown").count() === 0, "you can hide the countdown on Home");
+
+// Work log: add entries from the Home link, filter, save as Markdown, survive a reload, delete
+await page.locator('.quick-links a[href="#/log"]').click();
+await page.getByRole("heading", { name: "Work log" }).waitFor();
+check((await page.locator(".log-list").textContent()).includes("Nothing logged yet"), "an empty work log says so");
+const logDay = localDay(0);
+await page.locator("#log-day").fill(logDay);
+await page.locator("#log-kind").selectOption("win");
+await page.locator("#log-text").fill("Payroll source mapped and validated with its owner");
+await page.locator("#log-impact").fill("3 reports now fed from one source");
+await page.getByRole("button", { name: "Add to log" }).click();
+await page.locator(".log-entry").first().waitFor();
+check(await page.locator("#log-phase").inputValue() === "", "an entry before your start date has no phase by default");
+await page.locator("#log-kind").selectOption("lesson");
+await page.locator("#log-text").fill("Ask data owners before changing their fields");
+await page.getByRole("button", { name: "Add to log" }).click();
+await page.waitForFunction(() => document.querySelectorAll(".log-entry").length === 2);
+check(true, "two entries appear in the work log");
+check(await page.locator("#log-text").inputValue() === "", "the form clears after adding");
+await page.getByRole("button", { name: "Win 1" }).click();
+check(await page.locator(".log-entry").count() === 1 && (await page.locator(".log-entry").textContent()).includes("3 reports now fed"), "the filter shows one kind");
+await noHorizontalScroll("work log");
+await page.screenshot({ path: `${shots}/08f-worklog.png`, fullPage: false });
+const [logFile] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Save as Markdown" }).click()]);
+const logMd = readFileSync(await logFile.path(), "utf8");
+check(logFile.suggestedFilename().startsWith("work-log-") && logMd.includes("**: Payroll source mapped and validated with its owner\n  - Impact: 3 reports now fed from one source"), "the work log saves as Markdown");
+await page.reload();
+await page.getByRole("heading", { name: "Work log" }).waitFor();
+check(await page.locator(".log-entry").count() === 2, "work log entries survive a reload");
+page.once("dialog", (dialog) => dialog.accept());
+await page.locator(".log-entry").first().getByRole("button", { name: "Delete" }).click();
+await page.waitForFunction(() => document.querySelectorAll(".log-entry").length === 1);
+check(true, "you can delete a work log entry");
+
+// Track F: a professional skills lesson renders with its exercises
+await page.goto(`${base}${query}#/lesson/F1-L2`);
+await page.getByRole("heading", { name: "Lead with the answer, write in a pyramid" }).waitFor();
+check((await page.locator("main").textContent()).includes("Jump to practice · 5 exercises") && await page.locator(".exercise").count() === 1, "a Track F lesson offers its five exercises");
+await noHorizontalScroll("Track F lesson");
+
 await page.goto(`${base}${query}#/role/${plan.id}`);
 await page.getByRole("heading", { name: plan.title }).waitFor();
 

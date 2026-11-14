@@ -32,6 +32,7 @@ export function emptyState() {
     placement: {},
     notes: {},
     roles: {},
+    worklog: { entries: [], seq: 0 },
     settings: { theme: "auto" },
   };
 }

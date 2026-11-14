@@ -250,6 +250,7 @@ export async function roleView(app, roleId) {
       h("span", { class: "muted small" }, `Version ${plan.version} · ${plan.phases.length} phases · ${plan.modules.length} competencies`),
       h("div", { class: "actions" },
         h("a", { class: "btn secondary", href: `#/path/${plan.pathway}` }, "Open the pathway"),
+        h("a", { class: "btn secondary", href: "#/log" }, "Work log"),
         chosen.id === plan.pathway ? null : h("button", { type: "button", class: "btn ghost", onclick: () => {
           paths.choosePathway(app.state, plan.pathway);
           app.replaceState(app.state);
