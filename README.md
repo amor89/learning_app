@@ -109,6 +109,16 @@ A deploy reaches the app on its next launch. The service worker asks the network
 | 2. Unified Fabric solution | Lesson X2-L1 and its lab sheet | Your verification log, checked by the exercise 4 function, and the design note |
 | 3. Review an AI-generated pull request | `practice/capstone/pr_review/PR.md` and lesson X3-L1 | A hidden answer key in the app |
 
+## Design
+
+The app uses the **Almanac** system from the Hallmark design skill: cool slate paper, blue-black ink, Hanken Grotesk headings over Newsreader text, IBM Plex Mono for code and figures, two rule weights, square corners and one deep magenta kept for the main action and the current state. Lists are ruled rows, not boxed cards. The next lesson, each exercise, the countdown and the work log form sit on a paler printed sheet.
+
+- **Tokens** live in `site/app/tokens.css`, with a light and a dark set on the same hues. `site/app/base.css` holds the shared base rules. `site/app/styles.css` uses tokens only: no colour or font literal past the token block.
+- **Fonts** are self-hosted in `site/fonts/` under the SIL Open Font License, so the app keeps its type offline. The service worker caches them with the shell.
+- **Code colours** come from the `--color-code-*` tokens. `scripts/build_content.py` writes `site/app/highlight.css` from the Pygments token groups in `HIGHLIGHT_ROLES`.
+- **Layout by width.** A phone gets the bottom tab bar. From 48rem (a tablet) lists run in two columns and the tab bar shows icon and label side by side. From 56rem Home splits into two columns. From 64rem (a computer) the tab bar becomes a left rail and each lesson gets a sticky section rail beside the text, which keeps a 68-character measure.
+- **Checks.** `.hallmark/` holds the redesign record and log. Run Hallmark's linter with `--scope app` against the running site to check a change against the system.
+
 ## Layout
 
 | Path | What it holds |
@@ -116,7 +126,7 @@ A deploy reaches the app on its next launch. The service worker asks the network
 | `content/` | Lesson YAML, the only place lesson text lives, plus pathways and the interview practice bank |
 | `learnkit/` | Content schema, loader, renderers for the app bundle and the handbook |
 | `checkers/` | Python exercise checkers. The browser runs them in Pyodide, the tests in CPython. |
-| `site/` | The static app served by GitHub Pages, plus generated content and downloads |
+| `site/` | The static app served by GitHub Pages, plus generated content and downloads. `site/fonts/` holds the self-hosted fonts |
 | `scripts/` | Build scripts: content bundle, handbook (PDF and Word), practicals |
 | `practice/` | Local pytest harness with a SparkSession and Delta Lake |
 | `labs/testing/` | The B19 testing lab: a small package to test, and a reference suite with 100% branch coverage |

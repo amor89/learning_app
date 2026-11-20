@@ -8,11 +8,12 @@ import * as store from "./store.js";
 import {
   codeBlock,
   downloadButtons,
+  fileName,
   fill,
   h,
+  meta,
   notesList,
   pct,
-  fileName,
   progressBar,
   saveFile,
   sheetLink,
@@ -43,15 +44,15 @@ function notFound(what) {
 
 // Home ---------------------------------------------------------------------
 
-// The card links to the lesson. Home adds a button-styled label as its one main action.
-function nextUpCard(step, label = "Next up", action = null) {
+// The card links to the lesson: the lesson title leads, its module and stage follow.
+// Home adds a button-styled label as its one main action.
+function nextUpCard(step, caption = null, action = null) {
   if (!step) return h("p", { class: "card" }, "Every published lesson in this pathway is complete.");
   return h("a", { class: "card continue", href: `#/lesson/${step.lesson.id}` },
-    h("span", { class: "muted small" }, label),
     h("strong", { class: "continue-title" }, step.lesson.title),
     h("span", { class: "small" }, `${step.module.id} ${step.module.title}`),
-    h("span", { class: "muted small" }, step.stage.title),
-    action ? h("span", { class: "btn continue-btn", "aria-hidden": "true" }, action) : null,
+    meta({ class: "muted small" }, step.stage.title, caption),
+    action ? h("span", { class: "btn primary continue-btn", "aria-hidden": "true" }, action) : null,
   );
 }
 
@@ -60,7 +61,7 @@ function stageLink(app, pathway, stage, modules, current) {
   return h("li", {}, h("a", { class: "card stage-link", href: `#/path/${pathway.id}/${stage.id}` },
     h("span", { class: "module-head" }, h("strong", {}, stage.title), stage.id === current ? h("span", { class: "pill ok" }, "Now") : null),
     progressBar(p.share, `${stage.title} progress`),
-    h("span", { class: "muted small" }, `${p.done} of ${p.total} exercises · ${stage.modules.join(", ")}`),
+    meta({ class: "muted small" }, `${p.done} of ${p.total} exercises`, stage.modules.join(", ")),
   ));
 }
 
@@ -79,7 +80,7 @@ function reviewAction(due) {
 function statsLine(state, streak) {
   const badges = Object.keys(state.badges).length;
   return h("p", { class: "muted small stats-line" },
-    `${state.xp} XP · ${streak}-day streak (best ${state.streak.best}) · ${badges} badge${badges === 1 ? "" : "s"}`);
+    meta({}, `${state.xp} XP`, `${streak}-day streak (best ${state.streak.best})`, `${badges} badge${badges === 1 ? "" : "s"}`));
 }
 
 function quickLinks(app, pathway) {
@@ -108,32 +109,37 @@ export function dashboard(app) {
 
   return h(
     "section",
-    { class: "page" },
+    { class: "page dashboard" },
     h("h1", {}, "Home"),
-    h("div", { class: "today" },
-      nextUpCard(next, "Continue where you left off", "Continue"),
-      reviewAction(due),
-      statsLine(state, streak),
-    ),
-    placementPrompt(app, next),
-    homeCountdown(app, pathway.id),
-    h("div", { class: "card pathway-card" },
-      h("span", { class: "track-id" }, "Your pathway"),
-      h("strong", {}, pathway.title),
-      progressBar(progress.share, `${pathway.title} progress`),
-      h("span", { class: "muted small" }, `${progress.done} of ${progress.total} exercises done`),
-      h("div", { class: "actions" },
-        h("a", { class: "btn secondary", href: `#/path/${pathway.id}` }, "Open pathway"),
-        h("a", { class: "btn ghost", href: "#/paths" }, "Change pathway"),
+    h("div", { class: "dash-main" },
+      h("div", { class: "today" },
+        h("h2", {}, "Continue where you left off"),
+        nextUpCard(next, null, "Continue"),
+        reviewAction(due),
+        statsLine(state, streak),
       ),
+      placementPrompt(app, next),
+      h("h2", {}, near.length > 1 ? "This stage and the next" : "This stage"),
+      h("ol", { class: "stage-list" }, near.map((stage) => stageLink(app, pathway, stage, modules, current))),
+      pathway.stages.length > near.length
+        ? h("p", { class: "small" }, h("a", { href: `#/path/${pathway.id}` }, `All ${pathway.stages.length} stages`))
+        : null,
     ),
-    h("h2", {}, near.length > 1 ? "This stage and the next" : "This stage"),
-    h("ol", { class: "stage-list" }, near.map((stage) => stageLink(app, pathway, stage, modules, current))),
-    pathway.stages.length > near.length
-      ? h("p", { class: "small" }, h("a", { href: `#/path/${pathway.id}` }, `All ${pathway.stages.length} stages`))
-      : null,
-    h("h2", {}, "Quick links"),
-    quickLinks(app, pathway),
+    h("div", { class: "dash-side" },
+      homeCountdown(app, pathway.id),
+      h("h2", {}, "Your pathway"),
+      h("div", { class: "card pathway-card" },
+        h("strong", {}, pathway.title),
+        progressBar(progress.share, `${pathway.title} progress`),
+        h("span", { class: "muted small" }, `${progress.done} of ${progress.total} exercises done`),
+        h("div", { class: "actions" },
+          h("a", { class: "btn secondary", href: `#/path/${pathway.id}` }, "Open pathway"),
+          h("a", { class: "btn ghost", href: "#/paths" }, "Change pathway"),
+        ),
+      ),
+      h("h2", {}, "Quick links"),
+      quickLinks(app, pathway),
+    ),
   );
 }
 
@@ -155,7 +161,7 @@ export function pathwaysView(app) {
         h("span", { class: "module-head" }, h("strong", {}, pathway.title), pathway.id === chosen.id ? h("span", { class: "pill ok" }, "Your pathway") : null),
         h("span", { class: "muted small" }, pathway.summary),
         progressBar(p.share, `${pathway.title} progress`),
-        h("span", { class: "small" }, `${pathway.stages.length} stages · ${count} modules · ${p.done} of ${p.total} exercises done`),
+        meta({ class: "small" }, `${pathway.stages.length} stages`, `${count} modules`, `${p.done} of ${p.total} exercises done`),
       ));
     })),
   );
@@ -222,6 +228,7 @@ export function pathwayView(app, pathwayId, stageId) {
             app.replaceState(app.state);
           },
         }, "Make this my pathway")),
+    h("h2", {}, "Next up"),
     nextUpCard(paths.nextStep(app.state, pathway, modules)),
     (app.index.roles ?? []).filter((r) => r.pathway === pathway.id).map((r) => roleCard(app, r)),
     stageJump(pathway, open),
@@ -293,7 +300,7 @@ export async function sheetView(app, first, second) {
     { class: "page sheet" },
     h("nav", { class: "crumbs" }, h("a", { href: back.href }, back.label)),
     h("h1", {}, title),
-    h("p", { class: "muted small" }, `Cheat sheet · ${subtitle}`),
+    h("p", { class: "muted small" }, meta({}, "Cheat sheet", subtitle)),
     h("div", { class: "actions" },
       h("button", { type: "button", class: "btn", onclick: () => saveFile(blob, name) }, "Save PDF"),
     ),
@@ -314,10 +321,9 @@ function libraryTracks(app) {
     const p = store.trackProgress(state, track);
     const published = track.modules.filter((m) => m.lessons.length).length;
     return h("a", { class: "card track", href: `#/track/${track.id}` },
-      h("span", { class: "track-id" }, `Track ${track.id}`),
-      h("strong", {}, track.title),
+      h("strong", {}, h("span", { class: "track-id" }, track.id), " ", track.title),
       progressBar(p.share, `${track.title} progress`),
-      h("span", { class: "muted small" }, `${p.done} of ${p.total} exercises · ${published} of ${track.modules.length} modules published`),
+      meta({ class: "muted small" }, `${p.done} of ${p.total} exercises`, `${published} of ${track.modules.length} modules published`),
     );
   }));
 }
@@ -403,7 +409,7 @@ export function trackView(app, trackId) {
           h("span", { class: "module-head" }, h("strong", {}, `${m.id} ${m.title}`), app.state.badges[m.id] ? h("span", { class: "pill ok" }, "Badge") : null),
           h("span", { class: "muted small" }, m.summary),
           tagChips(m.tags, app.index.bands),
-          h("span", { class: "small" }, m.lessons.length ? `${m.lessons.length} lesson${m.lessons.length > 1 ? "s" : ""} · mastery ${pct(mastery)}` : "Coming in a later phase"),
+          h("span", { class: "small" }, m.lessons.length ? meta({}, `${m.lessons.length} lesson${m.lessons.length > 1 ? "s" : ""}`, `mastery ${pct(mastery)}`) : "Coming in a later phase"),
         ];
         return h("li", {}, m.lessons.length ? h("a", { class: "card", href: `#/module/${m.id}` }, body) : h("div", { class: "card empty" }, body));
       }),
@@ -434,7 +440,7 @@ export function moduleView(app, moduleId) {
     h("h2", {}, "Lessons"),
     module.lessons.length
       ? h("ol", { class: "lesson-list" }, module.lessons.map((l) =>
-          h("li", {}, h("a", { class: "card", href: `#/lesson/${l.id}` }, h("strong", {}, l.title), h("span", { class: "muted small" }, `${lessonStatus(app.state, l)} · ${l.exercises.length} exercises · ${l.xp} XP`))),
+          h("li", {}, h("a", { class: "card", href: `#/lesson/${l.id}` }, h("strong", {}, l.title), meta({ class: "muted small" }, lessonStatus(app.state, l), `${l.exercises.length} exercises`, `${l.xp} XP`))),
         ))
       : h("p", {}, "Lessons for this module arrive in a later phase."),
   );
@@ -591,12 +597,12 @@ export async function reviewView(app) {
           app.save();
           i += 1;
           paint();
-        } }, `${g[0].toUpperCase()}${g.slice(1)} · ${preview.interval}d`);
+        } }, h("span", {}, `${g[0].toUpperCase()}${g.slice(1)}`), h("span", { class: "btn-note" }, `${preview.interval}d`));
       }),
     );
     const reveal = h("button", { type: "button", class: "btn", onclick: () => { back.hidden = false; grades.hidden = false; reveal.hidden = true; grades.querySelector("button")?.focus(); } }, "Show answer");
     fill(box, 
-      h("p", { class: "muted small" }, `Card ${i + 1} of ${cards.length} · ${lesson.title}`),
+      h("p", { class: "muted small" }, meta({}, `Card ${i + 1} of ${cards.length}`, lesson.title)),
       h("div", { class: "flashcard" }, h("p", { class: "front", html: card.front }), back),
       h("div", { class: "actions" }, reveal),
       grades,

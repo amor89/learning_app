@@ -1,0 +1,76 @@
+@font-face { font-family: "Hanken Grotesk"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("../fonts/hanken-grotesk-latin-wght-normal.woff2") format("woff2-variations"); }
+@font-face { font-family: "Newsreader"; font-style: normal; font-weight: 200 800; font-display: swap; src: url("../fonts/newsreader-latin-opsz-normal.woff2") format("woff2-variations"); }
+@font-face { font-family: "Newsreader"; font-style: italic; font-weight: 200 800; font-display: swap; src: url("../fonts/newsreader-latin-opsz-italic.woff2") format("woff2-variations"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("../fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url("../fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2"); }
+
+:root {
+  color-scheme: light;
+  --space-3xs: 2px; --space-2xs: 4px; --space-xs: 8px; --space-sm: 12px; --space-md: 16px; --space-lg: 24px; --space-xl: 40px; --space-2xl: 64px; --space-3xl: 96px; --space-4xl: 144px;
+  --text-xs: 0.75rem; --text-sm: 0.875rem; --text-md: 1rem; --text-lg: 1.2rem; --text-xl: 1.44rem; --text-2xl: 1.728rem; --text-3xl: 2.074rem;
+  --text-display-s: 1.44rem; --text-display: 1.728rem; --text-section: 1.2rem; --text-title: 1rem; --text-lead: 1rem;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); --ease-in: cubic-bezier(0.7, 0, 0.84, 0); --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms; --dur-short: 220ms; --dur-long: 420ms;
+  --container: 1440px; --gutter: 64px; --gap-columns: 32px; --section-gap-s: 120px; --section-gap: 144px; --section-gap-l: 176px;
+  --z-base: 1; --z-raised: 10; --z-dropdown: 100; --z-sticky: 200; --z-sticky-nav: 300; --z-modal: 400; --z-toast: 500; --z-tooltip: 600;
+
+  /* Almanac */
+  --color-paper: oklch(84% 0.012 245); --color-paper-2: oklch(81% 0.012 245); --color-paper-3: oklch(77% 0.012 245);
+  --color-ink: oklch(16% 0.020 245); --color-ink-2: oklch(24% 0.018 245); --color-muted: oklch(38% 0.016 245);
+  --color-rule: oklch(73% 0.013 240); --color-rule-2: oklch(32% 0.018 240);
+  --color-accent: oklch(45% 0.180 350); --color-accent-2: oklch(37% 0.160 350); --color-accent-ink: oklch(97% 0.006 245); --color-focus: oklch(46% 0.190 350);
+  --color-sheet: oklch(93.5% 0.008 245);
+  --font-display: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Newsreader", ui-serif, Georgia, serif;
+  --font-outlier: "IBM Plex Mono", ui-monospace, monospace;
+  --radius-card: 0; --radius-pill: 2px; --rule-hair: 1px; --rule-bar: 2px; --shadow-card: none;
+  --tracking-display: -0.02em; --display-weight: 600;
+
+  /* App states, all on the slate hue or the status hues */
+  --color-error: oklch(46% 0.170 27); --color-error-bg: oklch(90% 0.035 27);
+  --color-success: oklch(40% 0.110 150); --color-success-bg: oklch(90% 0.040 150);
+  --color-select: oklch(90% 0.030 350); --color-mark: oklch(89% 0.050 95);
+  --color-toast: oklch(16% 0.020 245); --color-toast-ink: oklch(93.5% 0.008 245);
+
+  /* Code, on the sheet */
+  --color-code-comment: oklch(42% 0.015 245); --color-code-keyword: oklch(40% 0.170 350);
+  --color-code-string: oklch(38% 0.090 170); --color-code-number: oklch(40% 0.130 255);
+  --color-code-function: oklch(20% 0.020 245); --color-code-builtin: oklch(38% 0.100 215);
+
+  /* Shell */
+  --topbar-h: 48px; --tabbar-h: 60px; --rail-w: 15rem; --control-h: 40px; --measure: 68ch; --page-max: 72rem;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-paper: oklch(17% 0.014 245); --color-paper-2: oklch(20% 0.014 245); --color-paper-3: oklch(23% 0.014 245);
+  --color-ink: oklch(94% 0.010 245); --color-ink-2: oklch(87% 0.012 245); --color-muted: oklch(73% 0.014 245);
+  --color-rule: oklch(33% 0.014 240); --color-rule-2: oklch(70% 0.016 240);
+  --color-accent: oklch(72% 0.140 350); --color-accent-2: oklch(79% 0.110 350); --color-accent-ink: oklch(17% 0.014 245); --color-focus: oklch(74% 0.150 350);
+  --color-sheet: oklch(21.5% 0.014 245);
+  --color-error: oklch(74% 0.130 27); --color-error-bg: oklch(27% 0.050 27);
+  --color-success: oklch(76% 0.120 150); --color-success-bg: oklch(26% 0.045 150);
+  --color-select: oklch(29% 0.050 350); --color-mark: oklch(31% 0.050 95);
+  --color-toast: oklch(94% 0.010 245); --color-toast-ink: oklch(17% 0.014 245);
+  --color-code-comment: oklch(70% 0.015 245); --color-code-keyword: oklch(78% 0.120 350);
+  --color-code-string: oklch(80% 0.090 170); --color-code-number: oklch(80% 0.100 255);
+  --color-code-function: oklch(95% 0.010 245); --color-code-builtin: oklch(80% 0.080 215);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-paper: oklch(17% 0.014 245); --color-paper-2: oklch(20% 0.014 245); --color-paper-3: oklch(23% 0.014 245);
+    --color-ink: oklch(94% 0.010 245); --color-ink-2: oklch(87% 0.012 245); --color-muted: oklch(73% 0.014 245);
+    --color-rule: oklch(33% 0.014 240); --color-rule-2: oklch(70% 0.016 240);
+    --color-accent: oklch(72% 0.140 350); --color-accent-2: oklch(79% 0.110 350); --color-accent-ink: oklch(17% 0.014 245); --color-focus: oklch(74% 0.150 350);
+    --color-sheet: oklch(21.5% 0.014 245);
+    --color-error: oklch(74% 0.130 27); --color-error-bg: oklch(27% 0.050 27);
+    --color-success: oklch(76% 0.120 150); --color-success-bg: oklch(26% 0.045 150);
+    --color-select: oklch(29% 0.050 350); --color-mark: oklch(31% 0.050 95);
+    --color-toast: oklch(94% 0.010 245); --color-toast-ink: oklch(17% 0.014 245);
+    --color-code-comment: oklch(70% 0.015 245); --color-code-keyword: oklch(78% 0.120 350);
+    --color-code-string: oklch(80% 0.090 170); --color-code-number: oklch(80% 0.100 255);
+    --color-code-function: oklch(95% 0.010 245); --color-code-builtin: oklch(80% 0.080 215);
+  }
+}
