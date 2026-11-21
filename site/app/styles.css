@@ -5,6 +5,8 @@
 /* Hallmark · waive 49b · lesson links wrap to two lines at most at 320px · each link is a lesson's full title, a real phrase the role plan and pathways list cannot shorten */
 /* Hallmark · answered F4 · the danger button is the one destructive action and the quick keys are keyboard keys, so the page keeps one filled primary */
 /* Hallmark · answered F7 · every text field shares one input recipe on purpose, so the exercise, log and countdown forms read as one system */
+/* Hallmark · waive 72 · the countdown sheet measures its closed Personalise details panel · the form renders only when opened, inside the padded sheet */
+/* Hallmark · dismissed kept · the figure "20 days" is the live countdown to the start date and changes every day */
 /* Hallmark · dismissed F25 · on a phone the strong pane of a worked example sits behind the Weak and Strong tabs, one tap away */
 @import url("./tokens.css");
 @import url("./base.css");
