@@ -2,7 +2,7 @@
 // filter by kind, delete, and save the whole log as Markdown for a review.
 import * as role from "./role.js";
 import * as store from "./store.js";
-import { fill, h, saveFile, toast } from "./ui.js";
+import { fill, h, meta, saveFile, toast } from "./ui.js";
 import * as log from "./worklog.js";
 
 function longDate(day) {
@@ -33,7 +33,7 @@ function entryCard(entry, onDelete) {
   return h("li", { class: "card log-entry", id: `log-${entry.id}` },
     h("div", { class: "module-head" },
       h("strong", {}, log.kindLabel(entry.kind)),
-      h("span", { class: "muted small" }, [longDate(entry.day), entry.phase ? ` · ${entry.phase}` : ""].join("")),
+      meta({ class: "muted small" }, longDate(entry.day), entry.phase),
     ),
     h("p", { class: "log-text" }, entry.text),
     entry.impact ? h("p", { class: "small log-text" }, h("strong", {}, "Impact: "), entry.impact) : null,

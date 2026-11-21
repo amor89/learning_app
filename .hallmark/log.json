@@ -1,0 +1,30 @@
+[
+ {
+  "mode": "redesign",
+  "depth": "full",
+  "scope": "app",
+  "shape": "app screen",
+  "theme": "almanac",
+  "axes": "mid/grotesk-sans/chromatic-magenta",
+  "hero": "none (app scope)",
+  "nav": "tab bar on phone and tablet, left rail from 64rem",
+  "footer": "none",
+  "imagery": "none",
+  "photos": [],
+  "entry": "Home: the next lesson as the printed sheet",
+  "fingerprint": "sheet-led app, ruled rows, rail nav",
+  "sections": [
+   "Home two columns",
+   "Lesson with section rail",
+   "Role plan",
+   "Work log",
+   "Paths"
+  ],
+  "signature": "the next lesson and each exercise set as the printed sheet",
+  "waived": [
+   "49b"
+  ],
+  "prompt": "a personal study app for a data scientist, used daily on phone, tablet and laptop",
+  "date": "2026-11-20"
+ }
+]

@@ -12,7 +12,7 @@ import {
 } from "./checkers.js";
 import { checkPython, isWarm } from "./pyrunner.js";
 import * as store from "./store.js";
-import { codeBlock, editor, fill, h, plainCode } from "./ui.js";
+import { codeBlock, editor, fill, h, meta, plainCode } from "./ui.js";
 
 const TYPE_LABELS = {
   mcq: "Multiple choice",
@@ -402,7 +402,7 @@ export function renderExercise(app, ex, position, total, onChange, context = {})
     { class: "exercise", "aria-labelledby": `ex-${ex.id}` },
     h("header", { class: "exercise-head" },
       h("h3", { id: `ex-${ex.id}` }, `Exercise ${position} of ${total}`),
-      h("p", { class: "muted small" }, `${TYPE_LABELS[ex.type]} · Level ${ex.difficulty} · ${ex.xp} XP`, " ", badge),
+      h("p", { class: "muted small" }, meta({}, TYPE_LABELS[ex.type], `Level ${ex.difficulty}`, `${ex.xp} XP`), " ", badge),
     ),
     h("div", { class: "prompt", html: ex.prompt_html }),
     ex.primer_html

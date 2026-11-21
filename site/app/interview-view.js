@@ -4,7 +4,7 @@ import { briefPanel, gradeCode } from "./exercises.js";
 import * as iv from "./interview.js";
 import { isWarm } from "./pyrunner.js";
 import * as store from "./store.js";
-import { codeBlock, editor, fill, h, pct, plainCode, progressBar } from "./ui.js";
+import { codeBlock, editor, fill, h, meta, pct, plainCode, progressBar } from "./ui.js";
 
 const TICK_MS = 250;
 const LOW_SECONDS = 10;
@@ -57,7 +57,7 @@ export async function interviewView(app) {
     h("h1", {}, "Interview practice"),
     h("p", {}, "Theory questions against the clock, and models you build from scratch."),
     app.drill && !app.drill.done
-      ? h("a", { class: "card continue", href: "#/interview/drill" }, h("span", { class: "muted small" }, "Drill in progress"), h("strong", {}, `Question ${app.drill.i + 1} of ${app.drill.questions.length}`))
+      ? h("a", { class: "card continue", href: "#/interview/drill" }, h("strong", {}, `Question ${app.drill.i + 1} of ${app.drill.questions.length}`), h("span", { class: "muted small" }, "Drill in progress. Tap to carry on."))
       : null,
     h("h2", {}, "Theory drill"),
     h("details", { class: "how" },
@@ -73,7 +73,7 @@ export async function interviewView(app) {
     recent.length
       ? h("details", { class: "path-stage drills" },
           h("summary", {}, h("strong", {}, "Recent drills")),
-          h("ul", { class: "plain-list" }, recent.map((d) => h("li", {}, h("span", {}, `${d.day} · ${d.topic === "all" ? "All topics" : bank.topics.find((t) => t.id === d.topic)?.title ?? d.topic}`), h("span", { class: "small" }, `${round(d.total)} of ${d.count} · ${pct(d.total / d.count)}`)))),
+          h("ul", { class: "plain-list" }, recent.map((d) => h("li", {}, meta({}, d.day, d.topic === "all" ? "All topics" : bank.topics.find((t) => t.id === d.topic)?.title ?? d.topic), meta({ class: "small" }, `${round(d.total)} of ${d.count}`, pct(d.total / d.count))))),
         )
       : null,
     h("h2", {}, "Build it from scratch"),
@@ -82,7 +82,7 @@ export async function interviewView(app) {
       const status = iv.taskStatus(state.tasks[task.id], task.minutes * 60_000);
       return h("li", {}, h("a", { class: "card", href: `#/interview/task/${task.id}` },
         h("span", { class: "module-head" }, h("strong", {}, task.title), h("span", { class: `pill${status.ok ? " ok" : ""}` }, status.text)),
-        h("span", { class: "muted small" }, `${task.minutes} minutes · ${task.lessons.map((l) => l.id).join(", ")}`),
+        meta({ class: "muted small" }, `${task.minutes} minutes`, task.lessons.map((l) => l.id).join(", ")),
       ));
     })),
   );
@@ -98,7 +98,7 @@ function topicScores(bank, state) {
   return [
     h("h3", {}, "Your scores by topic"),
     h("ul", { class: "mastery" }, rows.map(({ t, p }) => h("li", {},
-      h("span", { class: "mastery-label" }, `${t.title} · ${p.answered} of ${p.total} answered`),
+      meta({ class: "mastery-label" }, t.title, `${p.answered} of ${p.total} answered`),
       progressBar(p.mean ?? 0, `${t.title} average score`),
       h("span", { class: "mastery-value" }, pct(p.mean)),
     ))),
@@ -140,11 +140,11 @@ export async function drillView(app) {
     }
     fill(box,
       h("h2", {}, "Drill complete"),
-      h("p", { class: "drill-score" }, `${round(score.total)} of ${score.count} · ${pct(score.share)}`),
+      h("p", { class: "drill-score" }, meta({}, `${round(score.total)} of ${score.count}`, pct(score.share))),
       h("ol", { class: "drill-results" }, drill.results.map((r) => {
         const q = drill.questions.find((x) => x.id === r.id);
         return h("li", { class: r.score === 1 ? "ok" : "" },
-          h("div", { class: "result-head" }, h("span", { class: `pill${r.score === 1 ? " ok" : ""}` }, pct(r.score)), h("span", { class: "muted small" }, `${formatSeconds(r.ms)}${r.timedOut ? " · time ran out" : ""}`)),
+          h("div", { class: "result-head" }, h("span", { class: `pill${r.score === 1 ? " ok" : ""}` }, pct(r.score)), h("span", { class: "muted small" }, `${formatSeconds(r.ms)}${r.timedOut ? ", time ran out" : ""}`)),
           h("div", { class: "result-question", html: q.question_html }),
           r.score < 1 ? lessonLinks(q.lessons, "Review") : null,
         );
@@ -244,7 +244,7 @@ export async function drillView(app) {
 
     fill(box,
       h("div", { class: "drill-head" },
-        h("span", { class: "muted small" }, `Question ${drill.i + 1} of ${drill.questions.length} · ${topicTitle(q.topic)}`),
+        meta({ class: "muted small" }, `Question ${drill.i + 1} of ${drill.questions.length}`, topicTitle(q.topic)),
         clock,
       ),
       bar,
@@ -283,7 +283,7 @@ export async function taskView(app, taskId) {
   const status = h("p", { class: "muted small" });
   const paintStatus = () => {
     const s = iv.taskStatus(record, limit);
-    fill(status, `${task.minutes}-minute limit · NumPy only · `, h("span", { class: `pill${s.ok ? " ok" : ""}` }, s.text));
+    fill(status, meta({}, `${task.minutes}-minute limit`, "NumPy only"), " ", h("span", { class: `pill${s.ok ? " ok" : ""}` }, s.text));
   };
   paintStatus();
 

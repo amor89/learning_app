@@ -4,7 +4,7 @@
 import * as paths from "./pathways.js";
 import * as role from "./role.js";
 import * as store from "./store.js";
-import { fill, h, pct, progressBar } from "./ui.js";
+import { fill, h, meta, pct, progressBar } from "./ui.js";
 
 const COVERAGE = {
   full: { text: "Covered", cls: "ok" },
@@ -70,7 +70,7 @@ export function countdownText(plan, c) {
     : c.status === "passed"
       ? `${longDate(c.deadline)} has passed.`
       : `${c.daysLeft} day${c.daysLeft === 1 ? "" : "s"} to ${deadlineName(c)}`;
-  const work = `${c.lessonsLeft} of ${c.lessonsTotal} lessons left for ${range} · about ${c.hoursLeft} hours`;
+  const work = `${c.lessonsLeft} of ${c.lessonsTotal} lessons left for ${range}, about ${c.hoursLeft} hours`;
   const days = c.status === "running" ? `${c.studyDays} study days before ${longDate(c.deadline)}, at ${c.settings.per_week} a week` : null;
   const extra = c.lessonsLeft === 0 && c.hoursLeft > 0 ? "Lessons done. Tick the assessments of competencies with no lessons." : null;
   return { headline, work, days, pace: c.status === "running" ? paceText(c) : null, extra };
@@ -115,7 +115,7 @@ function countdownCard(app, plan, onStartChange) {
   paint();
   const field = (id, label, control) => [h("label", { class: "field-label small", for: id }, label), control];
   return h("div", { class: "card countdown", id: "countdown" },
-    h("span", { class: "track-id" }, "Countdown"),
+    h("h2", { class: "card-title" }, "Countdown"),
     body,
     h("details", { class: "countdown-settings" },
       h("summary", {}, "Personalise"),
@@ -155,7 +155,7 @@ export function homeCountdown(app, pathwayId) {
       const plan = bank.roles.find((r) => r.id === ref.id);
       if (!plan) return null;
       const c = role.countdown(plan, app.state.roles?.[plan.id], store.today(), isDone);
-      return h("a", { class: "card countdown", href: `#/role/${plan.id}` }, h("span", { class: "track-id" }, "Countdown"), countdownLines(plan, c));
+      return [h("h2", {}, "Countdown"), h("a", { class: "card countdown", href: `#/role/${plan.id}` }, countdownLines(plan, c))];
     }));
   }).catch(() => {});
   return slot;
@@ -189,12 +189,13 @@ function moduleCard(app, plan, module, record, lessonMeta, onChange) {
       h("strong", {}, `${module.id} ${module.title}`),
       h("span", { class: `pill ${cover.cls}` }, cover.text),
     ),
-    h("p", { class: "muted small" }, [
-      `${module.stream} · target Level ${module.target} ${levelName(plan, module.target)}`,
-      assumedText(module) ? ` · ${assumedText(module)}` : "",
-      ` · about ${module.hours} hours`,
-      module.prerequisites.length ? ` · after ${module.prerequisites.join(", ")}` : "",
-    ].join("")),
+    h("p", { class: "muted small" }, meta({},
+      module.stream,
+      `target Level ${module.target} ${levelName(plan, module.target)}`,
+      assumedText(module),
+      `about ${module.hours} hours`,
+      module.prerequisites.length ? `after ${module.prerequisites.join(", ")}` : null,
+    )),
     h("p", { class: "field-label small" }, "Your level now"),
     picker,
     gapLine,
@@ -232,7 +233,7 @@ export async function roleView(app, roleId) {
   const chosen = paths.chosenPathway(app.index, app.state);
   const summary = h("ul", { class: "mastery stream-summary" });
   const paintSummary = () => fill(summary, role.streamSummary(plan, record).map((s) => h("li", {},
-    h("span", { class: "mastery-label" }, `${s.stream} · ${s.rated} of ${s.modules} rated${s.below.length ? ` · below target: ${s.below.join(", ")}` : ""}`),
+    meta({ class: "mastery-label" }, s.stream, `${s.rated} of ${s.modules} rated`, s.below.length ? `below target: ${s.below.join(", ")}` : null),
     progressBar(s.level === null ? 0 : Math.min(1, s.level / s.target), `${s.stream} level against target`),
     h("span", { class: "mastery-value" }, s.level === null ? "–" : `${s.level.toFixed(1)}/${s.target.toFixed(1)}`),
   )));
@@ -247,7 +248,7 @@ export async function roleView(app, roleId) {
     h("p", { class: "muted small", html: plan.status_html }),
     h("div", { class: "card pathway-card" },
       h("strong", {}, statusLine(dated, today)),
-      h("span", { class: "muted small" }, `Version ${plan.version} · ${plan.phases.length} phases · ${plan.modules.length} competencies`),
+      meta({ class: "muted small" }, `Version ${plan.version}`, `${plan.phases.length} phases`, `${plan.modules.length} competencies`),
       h("div", { class: "actions" },
         h("a", { class: "btn secondary", href: `#/path/${plan.pathway}` }, "Open the pathway"),
         h("a", { class: "btn secondary", href: "#/log" }, "Work log"),
@@ -268,7 +269,7 @@ export async function roleView(app, roleId) {
       return h("li", {}, h("details", { class: "path-stage", id: `phase-${phase.id}`, open: phase === current },
         h("summary", {},
           h("span", { class: "module-head" }, h("strong", {}, `${phase.id} ${phase.name}`), phase === current ? h("span", { class: "pill ok" }, "Now") : null),
-          h("span", { class: "muted small" }, `Days ${phase.days[0]} to ${phase.days[1]} · ${longDate(dates.from)} to ${longDate(dates.to)}`),
+          meta({ class: "muted small" }, `Days ${phase.days[0]} to ${phase.days[1]}`, `${longDate(dates.from)} to ${longDate(dates.to)}`),
         ),
         h("p", { class: "small" }, h("strong", {}, "Success: "), h("span", { html: phase.success_html })),
         checkbox("Success criterion met", Boolean(record.phases[phase.id]), (on) => {
@@ -292,8 +293,7 @@ export async function roleView(app, roleId) {
 // A link card for the pathway page.
 export function roleCard(app, roleRef) {
   return h("a", { class: "card continue", href: `#/role/${roleRef.id}` },
-    h("span", { class: "muted small" }, "Role plan"),
     h("strong", {}, roleRef.title),
-    h("span", { class: "small" }, "Phases, self-assessment and the gaps the app does not cover yet"),
+    h("span", { class: "small" }, "Role plan: phases, self-assessment and the gaps the app does not cover yet"),
   );
 }

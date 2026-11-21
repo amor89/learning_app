@@ -38,6 +38,13 @@ export function pct(value) {
   return value === null || value === undefined ? "–" : `${Math.round(value * 100)}%`;
 }
 
+// Meta facts as separate spans, parted by a hairline in CSS, never joined by middle dots.
+export function meta(attrs, ...parts) {
+  const items = parts.flat().filter((p) => p !== null && p !== undefined && p !== false && p !== "");
+  const cls = ["meta", attrs?.class].filter(Boolean).join(" ");
+  return h("span", { ...attrs, class: cls }, items.map((p) => h("span", {}, p)));
+}
+
 export function progressBar(share, label) {
   const value = Math.round((share ?? 0) * 100);
   return h(

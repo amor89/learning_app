@@ -3,7 +3,7 @@
 import { shuffle } from "./interview.js";
 import * as pl from "./placement.js";
 import * as store from "./store.js";
-import { fill, h } from "./ui.js";
+import { fill, h, meta } from "./ui.js";
 
 function notFound(trackId) {
   return h("section", { class: "page" }, h("h1", {}, "Not found"), h("p", {}, `Track ${trackId} has no placement quiz.`), h("a", { href: "#/" }, "Back to home"));
@@ -29,7 +29,7 @@ export function placementCard(app, track, quiz) {
     : record.passed ? `You passed and can skip ${start}.` : `Start with ${start}.`;
   return h("div", { class: "card placement-card" },
     h("strong", {}, `Placement quiz: ${record.score} of ${record.total}`),
-    h("span", { class: "muted small" }, `${record.day} · ${verdict}`),
+    meta({ class: "muted small" }, record.day, verdict),
     h("div", { class: "actions" },
       record.passed
         ? h("button", { type: "button", class: "btn secondary", onclick: () => {
