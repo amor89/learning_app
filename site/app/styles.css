@@ -10,7 +10,8 @@
 @import url("./base.css");
 
 /* Page ---------------------------------------------------------------------- */
-html { -webkit-text-size-adjust: 100%; }
+/* One offset for anchor scrolling: the sticky top bar plus the lesson section bar */
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: calc(env(safe-area-inset-top) + var(--topbar-h) + 52px); }
 body {
   color: var(--color-ink-2);
   padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--space-md));
@@ -228,7 +229,6 @@ a.module-chip:hover { border-color: var(--color-ink); }
 .path-lesson:active { background: var(--color-paper-3); }
 .path-lesson.done .path-lesson-title::after { content: " done"; color: var(--color-success); font-size: var(--text-sm); }
 .path-lesson-title { font-size: var(--text-md); color: var(--color-ink); }
-.path-stage, .stage-link { scroll-margin-top: calc(var(--topbar-h) + var(--space-md)); }
 a.small.sheet-link { display: inline-flex; align-items: center; padding: var(--space-2xs) 0; min-height: 32px; }
 details.sheets { margin-bottom: var(--space-xs); }
 details.sheets .plain-list { margin-top: var(--space-xs); }
@@ -242,7 +242,6 @@ details.sheets .plain-list { margin-top: var(--space-xs); }
 .recap-list dd { margin: 0; }
 
 /* Lesson -------------------------------------------------------------------- */
-.lesson section { scroll-margin-top: calc(var(--topbar-h) + 56px); }
 .lesson section > div > p, .lesson section > div > ul, .lesson section > div > ol, .lesson .takeaway, .explanation { max-width: var(--measure); }
 .lesson-meta { margin: var(--space-xs) 0; }
 .section-nav {
@@ -627,7 +626,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
     border-bottom: 0; border-top: var(--rule-bar) solid var(--color-rule-2); overflow: visible;
   }
   .section-nav a { border-bottom: var(--rule-hair) solid var(--color-rule); }
-  .lesson section { scroll-margin-top: calc(var(--topbar-h) + var(--space-lg)); }
+  html { scroll-padding-top: calc(var(--topbar-h) + var(--space-lg)); }
 }
 
 /* Wide screens: the measure and the grids hold, the gutters grow */
